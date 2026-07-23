@@ -20,7 +20,7 @@ file issues rather than pull requests against `src/`.
 ## Install
 
 ```sh
-npm install replayviewer
+npm install replayviewer-js
 ```
 
 The package ships `dist/index.js` (a single self-contained ES-module bundle),
@@ -61,7 +61,7 @@ Everything is a `devDependency` — the three runtime libraries are bundled into
 ```js
 import {
   configureWorkers, parseReplay, loadSkinFromDir, buildSkin, createReplaySession,
-} from 'replayviewer';   // or './dist/index.js' when unbundled
+} from 'replayviewer-js';   // or './dist/index.js' when unbundled
 
 // Optional: off-thread DT/HT time-stretching (falls back to a synchronous
 // in-thread path when omitted).
