@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>replay engine — embed example</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 24px;
+            background: #14141a;
+            color: #ddd;
+            font-family: system-ui, sans-serif;
+        }
+        h1 { font-size: 18px; font-weight: 600; }
+        iframe {
+            display: block;
+            width: 100%;
+            max-width: 1280px;
+            /* Slightly taller than the 16:9 canvas: the viewer fills the frame
+               and its options + scrub rows take ~100px above/below the canvas. */
+            aspect-ratio: 16 / 10;
+            background: #000;
+            border: none;
+            border-radius: 6px;
+        }
+        #controls { margin: 12px 0; display: flex; gap: 12px; align-items: center; }
+        #status { color: #999; font-size: 14px; }
+        button { padding: 6px 18px; font-size: 15px; cursor: pointer; }
+    </style>
+</head>
+<body>
+    <h1>replay engine — embed example (iframe, no library)</h1>
+    <div id="controls">
+        <button id="load" disabled>Load replay</button>
+        <span id="status">waiting for viewer…</span>
+    </div>
+    <iframe id="viewer" src="https://www.replayviewer.com/?embed=1" allow="autoplay"></iframe>
+    <script type="module" src="./main.js"></script>
+</body>
+</html>

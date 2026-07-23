@@ -1,0 +1,5 @@
+# Dependencies
+node_modules/
+
+# Build output — run `npm run build` to regenerate
+dist/

@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>replay engine — dual-canvas example</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 24px;
+            background: #14141a;
+            color: #ddd;
+            font-family: system-ui, sans-serif;
+        }
+        h1 { font-size: 18px; font-weight: 600; }
+        #stack { display: flex; gap: 12px; }
+        .side { flex: 1; min-width: 0; }
+        .side canvas {
+            display: block;
+            width: 100%;
+            background: #000;
+            border-radius: 6px;
+        }
+        .side .label {
+            margin-top: 6px;
+            text-align: center;
+            font-size: 14px;
+            font-style: italic;
+            color: #aac;
+        }
+        #controls { margin: 12px 0; display: flex; gap: 12px; align-items: center; }
+        #status { color: #999; font-size: 14px; }
+        button { padding: 6px 18px; font-size: 15px; cursor: pointer; }
+    </style>
+</head>
+<body>
+    <h1>replay engine — dual-canvas example (two replays, one map)</h1>
+    <div id="controls">
+        <button id="start">Play</button>
+        <span id="status">assets not loaded — press Play</span>
+    </div>
+    <div id="stack">
+        <div class="side">
+            <canvas id="playfield-a" width="1280" height="720"></canvas>
+            <div class="label" id="label-a"></div>
+        </div>
+        <div class="side">
+            <canvas id="playfield-b" width="1280" height="720"></canvas>
+            <div class="label" id="label-b"></div>
+        </div>
+    </div>
+    <script type="module" src="./main.js"></script>
+</body>
+</html>

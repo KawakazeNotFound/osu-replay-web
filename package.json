@@ -1,0 +1,30 @@
+{
+  "name": "replayviewer",
+  "version": "0.1.0",
+  "description": "Render osu! replays in the browser — parsers, judgement engine, and canvas renderer for all four rulesets",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./stretch-worker.js": "./dist/stretch-worker.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "check": "node scripts/check-imports.mjs"
+  },
+  "devDependencies": {
+    "@soundtouchjs/core": "^2.0.4",
+    "esbuild": "^0.20.2",
+    "fflate": "^0.8.2",
+    "lzma": "^2.3.2",
+    "typescript": "^5.4.5"
+  }
+}

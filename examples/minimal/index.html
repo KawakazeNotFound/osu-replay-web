@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>replay engine — minimal example</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 24px;
+            background: #14141a;
+            color: #ddd;
+            font-family: system-ui, sans-serif;
+        }
+        h1 { font-size: 18px; font-weight: 600; }
+        #playfield {
+            display: block;
+            width: 100%;
+            max-width: 1280px;
+            background: #000;
+            border-radius: 6px;
+        }
+        #controls { margin: 12px 0; display: flex; gap: 12px; align-items: center; }
+        #status { color: #999; font-size: 14px; }
+        button { padding: 6px 18px; font-size: 15px; cursor: pointer; }
+    </style>
+</head>
+<body>
+    <h1>replay engine — minimal example (dist only)</h1>
+    <div id="controls">
+        <button id="start">Play</button>
+        <span id="status">assets not loaded — press Play</span>
+    </div>
+    <canvas id="playfield" width="1280" height="720"></canvas>
+    <script type="module" src="./main.js"></script>
+</body>
+</html>
