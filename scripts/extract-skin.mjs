@@ -2,6 +2,9 @@
 // static directory consumable by `loadSkinFromDir(url)`, emitting the
 // index.json manifest ({ "files": [...] }) the loader expects.
 //
+// Requires `fflate` (a devDependency of this repo — `npm install` covers it;
+// if you copied this script elsewhere, `npm install fflate` alongside it).
+//
 // Usage:
 //   node scripts/extract-skin.mjs <skin.osk> <out-dir>
 //   node scripts/extract-skin.mjs "My Skin.osk" examples/minimal/assets/skin

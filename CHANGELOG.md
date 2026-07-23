@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- README: import-map example for bundlerless usage; note that
+  `scripts/extract-skin.mjs` needs `fflate` when run outside a repo clone.
+
 ## 0.1.1 — 2026-07-23
 
 - README title updated to the published package name (`replayviewer-js`).

@@ -58,10 +58,19 @@ Everything is a `devDependency` — the three runtime libraries are bundled into
 
 ## Usage
 
+Using a bundler, import the package directly. Without one, map the bare
+specifier to the installed file with an import map:
+
+```html
+<script type="importmap">
+{ "imports": { "replayviewer-js": "./node_modules/replayviewer-js/dist/index.js" } }
+</script>
+```
+
 ```js
 import {
   configureWorkers, parseReplay, loadSkinFromDir, buildSkin, createReplaySession,
-} from 'replayviewer-js';   // or './dist/index.js' when unbundled
+} from 'replayviewer-js';
 
 // Optional: off-thread DT/HT time-stretching (falls back to a synchronous
 // in-thread path when omitted).
@@ -153,6 +162,10 @@ files with an `index.json` manifest:
 ```sh
 node scripts/extract-skin.mjs "My Skin.osk" path/to/skin-dir
 ```
+
+The script needs `fflate` — running `npm install` in a clone of this repo
+covers it (it's a devDependency); if you copied the script next to an
+npm-installed package instead, `npm install fflate` alongside it.
 
 ## Credits
 
