@@ -1,4 +1,4 @@
-# replayviewer
+# replayviewer-js
 
 Render osu! replays in the browser. A TypeScript engine that parses `.osr`
 replays, `.osu`/`.osz` beatmaps, and skins; re-judges the play from raw input

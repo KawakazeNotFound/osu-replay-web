@@ -1,8 +1,15 @@
 {
   "name": "replayviewer-js",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Render osu! replays in the browser — parsers, judgement engine, and canvas renderer for all four rulesets",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/daladal/replayviewer-js.git"
+  },
+  "homepage": "https://github.com/daladal/replayviewer-js#readme",
+  "bugs": "https://github.com/daladal/replayviewer-js/issues",
+  "keywords": ["osu", "replay", "osr", "beatmap", "taiko", "mania", "catch", "canvas", "renderer"],
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",

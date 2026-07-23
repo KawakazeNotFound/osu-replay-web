@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.1 — 2026-07-23
+
+- README title updated to the published package name (`replayviewer-js`).
+- `package.json`: added `repository`, `homepage`, `bugs`, and `keywords` so the
+  npm page links back to GitHub. No code changes.
+
 ## 0.1.0 — 2026-07-23
 
 Initial public release.
