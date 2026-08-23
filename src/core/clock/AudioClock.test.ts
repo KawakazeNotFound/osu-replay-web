@@ -3,6 +3,54 @@ import { describe, expect, it } from 'vitest';
 import { AudioClock } from './AudioClock';
 
 /**
+ * 假的 `AudioParam`。
+ *
+ * 刻意**记录每次调度事件**,而不只是存一个值 —— 因为音量的关键质量点是
+ * "有没有走斜坡"。若只存值,把 `linearRampToValueAtTime` 写成 `value = x`
+ * 也照样通过测试,而那正是会爆音的写法。
+ */
+class FakeAudioParam {
+  value = 1;
+
+  readonly events: {
+    readonly kind: 'cancel' | 'setValueAtTime' | 'linearRamp';
+    readonly value?: number;
+    readonly time: number;
+  }[] = [];
+
+  cancelScheduledValues(time: number): void {
+    this.events.push({ kind: 'cancel', time });
+  }
+
+  setValueAtTime(value: number, time: number): void {
+    this.events.push({ kind: 'setValueAtTime', value, time });
+    this.value = value;
+  }
+
+  linearRampToValueAtTime(value: number, time: number): void {
+    this.events.push({ kind: 'linearRamp', value, time });
+    // 真实实现是逐采样过渡;测试里直接落到终值,便于断言最终结果
+    this.value = value;
+  }
+
+  /** 最近一次斜坡的目标值与时长。没有斜坡则返回 null。 */
+  lastRamp(): { readonly target: number; readonly duration: number } | null {
+    const ramp = [...this.events].reverse().find((e) => e.kind === 'linearRamp');
+    if (!ramp) return null;
+
+    const start = [...this.events]
+      .reverse()
+      .find((e) => e.kind === 'setValueAtTime' && e.time <= ramp.time);
+
+    return { target: ramp.value ?? 0, duration: ramp.time - (start?.time ?? ramp.time) };
+  }
+
+  reset(): void {
+    this.events.length = 0;
+  }
+}
+
+/**
  * 假 AudioContext。
  *
  * `AudioClock` 的时间**完全**从 `ctx.currentTime` 推导,所以只要能手动推进它,
@@ -14,7 +62,12 @@ class FakeAudioContext {
 
   /** 记录每次 createBufferSource 的调用,用来断言 lead-in 的调度方式 */
   readonly sources: FakeSource[] = [];
-  readonly gainNode = { gain: { value: 1 }, connect: () => {}, disconnect: () => {} };
+  readonly gainParam = new FakeAudioParam();
+  readonly gainNode = {
+    gain: this.gainParam,
+    connect: () => {},
+    disconnect: () => {},
+  };
 
   createGain(): GainNode {
     return this.gainNode as unknown as GainNode;
@@ -58,12 +111,11 @@ function fakeBuffer(durationSec: number): AudioBuffer {
   return { duration: durationSec } as AudioBuffer;
 }
 
-function makeClock(options?: { muteBelowRate?: number }) {
+function makeClock(options?: { muteBelowRate?: number; initialVolume?: number }) {
   const ctx = new FakeAudioContext();
-  const clock = new AudioClock(
-    ctx as unknown as AudioContext,
-    options ?? {},
-  );
+  const clock = new AudioClock(ctx as unknown as AudioContext, options ?? {});
+  // 构造时的赋值不算用户操作,清掉便于后续断言
+  ctx.gainParam.reset();
   return { ctx, clock };
 }
 
@@ -149,17 +201,182 @@ describe('AudioClock 倍速', () => {
   });
 
   it('低于阈值时静音(TECH-NOTES D3)', () => {
-    const { ctx, clock } = makeClock({ muteBelowRate: 0.25 });
+    const { clock } = makeClock({ muteBelowRate: 0.25 });
     clock.setBuffer(fakeBuffer(60));
 
     clock.setRate(0.1);
     clock.play();
-    expect(ctx.gainNode.gain.value).toBe(0);
+    expect(clock.effectiveVolume).toBe(0);
 
     clock.pause();
     clock.setRate(1);
     clock.play();
-    expect(ctx.gainNode.gain.value).toBe(1);
+    expect(clock.effectiveVolume).toBe(1);
+  });
+
+  it('低倍速静音在**暂停时**也立即生效 —— 不必等下次 play', () => {
+    // 这条防的是"只在 startSource 里设增益"那种写法:暂停时改倍速,
+    // effectiveVolume 会是过期值
+    const { clock } = makeClock({ muteBelowRate: 0.25 });
+    clock.setBuffer(fakeBuffer(60));
+
+    expect(clock.effectiveVolume).toBe(1);
+    clock.setRate(0.1);
+    expect(clock.effectiveVolume).toBe(0);
+  });
+});
+
+describe('AudioClock 音量', () => {
+  it('默认满音量', () => {
+    const { clock } = makeClock();
+    expect(clock.volume).toBe(1);
+    expect(clock.muted).toBe(false);
+    expect(clock.effectiveVolume).toBe(1);
+  });
+
+  it('initialVolume 生效', () => {
+    const { clock } = makeClock({ initialVolume: 0.5 });
+    expect(clock.volume).toBe(0.5);
+    // 感知 0.5 → 线性 0.25
+    expect(clock.effectiveVolume).toBeCloseTo(0.25, 10);
+  });
+
+  it('感知音量平方后作为线性增益', () => {
+    // 人耳对声压近似对数,滑块位置直接当增益会觉得"前半段几乎没变化"。
+    // 这条把平方这个约定钉住 —— 改成线性会让这条红。
+    const { clock } = makeClock();
+    for (const [perceptual, linear] of [
+      [0, 0],
+      [0.25, 0.0625],
+      [0.5, 0.25],
+      [0.75, 0.5625],
+      [1, 1],
+    ] as const) {
+      clock.setVolume(perceptual);
+      expect(clock.effectiveVolume, `感知 ${perceptual}`).toBeCloseTo(linear, 10);
+    }
+  });
+
+  it('钳制到 0..1', () => {
+    const { clock } = makeClock();
+    clock.setVolume(-5);
+    expect(clock.volume).toBe(0);
+    clock.setVolume(99);
+    expect(clock.volume).toBe(1);
+  });
+
+  it('非有限值一律归 0 —— 静音比突然满音量安全', () => {
+    // NaN / ±Infinity 都归 0。若某处算出了 Infinity,炸耳朵是最坏的失败方式
+    const { clock } = makeClock();
+    for (const bad of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY]) {
+      clock.setVolume(1);
+      clock.setVolume(bad);
+      expect(clock.volume, String(bad)).toBe(0);
+    }
+  });
+
+  it('静音不改 volume —— 取消静音后回到原音量', () => {
+    const { clock } = makeClock();
+    clock.setVolume(0.6);
+
+    clock.setMuted(true);
+    expect(clock.volume).toBe(0.6);
+    expect(clock.effectiveVolume).toBe(0);
+
+    clock.setMuted(false);
+    expect(clock.effectiveVolume).toBeCloseTo(0.36, 10);
+  });
+
+  it('toggleMuted 来回切换', () => {
+    const { clock } = makeClock();
+    clock.toggleMuted();
+    expect(clock.muted).toBe(true);
+    clock.toggleMuted();
+    expect(clock.muted).toBe(false);
+  });
+
+  it('静音时改音量,取消静音后用的是新音量', () => {
+    const { clock } = makeClock();
+    clock.setMuted(true);
+    clock.setVolume(0.5);
+    expect(clock.effectiveVolume).toBe(0);
+
+    clock.setMuted(false);
+    expect(clock.effectiveVolume).toBeCloseTo(0.25, 10);
+  });
+
+  /* ---- 下面几条是"不爆音"的质量保证 ---- */
+
+  it('**走斜坡而不是硬跳** —— 直接赋值 gain.value 会爆音', () => {
+    const { ctx, clock } = makeClock();
+    ctx.gainParam.reset();
+
+    clock.setVolume(0.5);
+
+    const kinds = ctx.gainParam.events.map((e) => e.kind);
+    // 三步缺一不可,见 rampGain 的注释
+    expect(kinds).toEqual(['cancel', 'setValueAtTime', 'linearRamp']);
+  });
+
+  it('斜坡时长约 15ms', () => {
+    const { ctx, clock } = makeClock();
+    ctx.gainParam.reset();
+
+    clock.setVolume(0.3);
+
+    const ramp = ctx.gainParam.lastRamp();
+    expect(ramp).not.toBeNull();
+    expect(ramp!.duration).toBeCloseTo(0.015, 6);
+    expect(ramp!.target).toBeCloseTo(0.09, 10);
+  });
+
+  it('连续快速调节不会叠加出乱曲线 —— 每次都先 cancel', () => {
+    const { ctx, clock } = makeClock();
+    ctx.gainParam.reset();
+
+    for (const v of [0.1, 0.4, 0.7, 0.2]) clock.setVolume(v);
+
+    const cancels = ctx.gainParam.events.filter((e) => e.kind === 'cancel').length;
+    const ramps = ctx.gainParam.events.filter((e) => e.kind === 'linearRamp').length;
+    expect(cancels).toBe(4);
+    expect(ramps).toBe(4);
+  });
+
+  it('斜坡起点是当前值 —— 省掉这步快速拖动会"追不上"', () => {
+    const { ctx, clock } = makeClock();
+    clock.setVolume(0.8); // 线性 0.64
+    ctx.gainParam.reset();
+
+    clock.setVolume(0.2);
+
+    const setStart = ctx.gainParam.events.find((e) => e.kind === 'setValueAtTime');
+    expect(setStart?.value).toBeCloseTo(0.64, 10);
+  });
+
+  it('播放中改音量不会被下一次 restartAt 冲掉', () => {
+    // 这条防的是"在 startSource 里赋值增益"那种写法:seek / 改倍速都会
+    // 触发 restartAt,用户刚调的音量就没了
+    const { ctx, clock } = makeClock();
+    clock.setBuffer(fakeBuffer(60));
+    clock.play();
+
+    clock.setVolume(0.5);
+    expect(clock.effectiveVolume).toBeCloseTo(0.25, 10);
+
+    clock.seek(3000); // 内部会 restartAt
+    expect(clock.effectiveVolume).toBeCloseTo(0.25, 10);
+    expect(ctx.gainParam.value).toBeCloseTo(0.25, 10);
+  });
+
+  it('音量与倍速静音同时生效时取 0', () => {
+    const { clock } = makeClock({ muteBelowRate: 0.25 });
+    clock.setVolume(0.9);
+    clock.setRate(0.1);
+    expect(clock.effectiveVolume).toBe(0);
+
+    // 倍速回来后音量恢复
+    clock.setRate(1);
+    expect(clock.effectiveVolume).toBeCloseTo(0.81, 10);
   });
 });
 

@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>osu! replay web — M0 spike</title>
+    <title>osu! replay web</title>
     <style>
       :root {
         --bg: #1c1719;
@@ -232,6 +232,19 @@
         margin-left: auto;
       }
 
+      /* 音量条不要 margin-left:auto —— 它要紧跟静音按钮 */
+      .volume {
+        width: 110px;
+        accent-color: var(--pink);
+        margin: 0;
+      }
+
+      .mono {
+        font-variant-numeric: tabular-nums;
+        margin-left: 0;
+        min-width: 3.2em;
+      }
+
       select {
         padding: 6px 8px;
         background: var(--panel-2);
@@ -330,7 +343,19 @@
           <option value="2">2×</option>
           <option value="4">4×</option>
         </select>
-        <span class="hint">空格 播放/暂停 · ←→ 跳 1s · , . 逐帧 · ; ' 逐输入帧</span>
+        <div class="sep"></div>
+        <button id="mute" title="静音 / 取消静音(M)">🔊</button>
+        <input
+          type="range"
+          id="volume"
+          class="volume"
+          min="0"
+          max="100"
+          value="70"
+          title="音量(- 与 = 微调)"
+        />
+        <span id="v-volume" class="hint mono">70%</span>
+        <span class="hint">空格 播放/暂停 · ←→ 跳 1s · ↑↓ 跳 5s · , . 逐帧 · ; ' 逐输入帧 · - = 音量 · M 静音</span>
       </div>
     </footer>
 

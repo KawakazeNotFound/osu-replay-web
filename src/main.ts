@@ -46,9 +46,38 @@ const scrubber = el<HTMLInputElement>('scrubber');
 const playButton = el<HTMLButtonElement>('play');
 const rateSelect = el<HTMLSelectElement>('rate');
 const autoFetchEnabled = el<HTMLInputElement>('auto-fetch');
+const volumeSlider = el<HTMLInputElement>('volume');
+const muteButton = el<HTMLButtonElement>('mute');
+
+/**
+ * 音量设置持久化。
+ *
+ * 每次打开都从满音量开始很烦人 —— 尤其是本项目常在深夜调试。
+ * 存的是**感知**音量(0..1),与 `AudioClock.setVolume` 的参数同义。
+ */
+const VOLUME_STORAGE_KEY = 'osu-replay-web:volume';
+const MUTED_STORAGE_KEY = 'osu-replay-web:muted';
+
+function loadStoredVolume(): { readonly volume: number; readonly muted: boolean } {
+  // localStorage 在隐私模式 / 被禁用时会抛,所以整段包起来
+  try {
+    const raw = localStorage.getItem(VOLUME_STORAGE_KEY);
+    const parsed = raw === null ? Number.NaN : Number(raw);
+
+    return {
+      volume: Number.isFinite(parsed) && parsed >= 0 && parsed <= 1 ? parsed : 0.7,
+      muted: localStorage.getItem(MUTED_STORAGE_KEY) === '1',
+    };
+  } catch {
+    return { volume: 0.7, muted: false };
+  }
+}
+
+const stored = loadStoredVolume();
 
 const audioContext = new AudioContext();
-const clock = new AudioClock(audioContext);
+const clock = new AudioClock(audioContext, { initialVolume: stored.volume });
+clock.setMuted(stored.muted);
 const controller = new PlaybackController(clock, emptyTimeline());
 const renderer = new DebugRenderer(canvas);
 
@@ -419,6 +448,52 @@ function modRateNotice(rawMods: number): string {
   );
 }
 
+/* ---------------- 音量 ---------------- */
+
+/**
+ * 设定音量。
+ *
+ * `unmute` 用于"拖滑块时自动解除静音" —— 用户拖音量条显然是想听到声音,
+ * 还得再点一次静音按钮就很别扭。但拖到 0 时不解除(那等价于静音)。
+ */
+function setVolume(volume: number, options: { readonly unmute?: boolean } = {}): void {
+  clock.setVolume(volume);
+  if (options.unmute && volume > 0 && clock.muted) clock.setMuted(false);
+
+  persistVolume();
+  syncVolumeUi();
+}
+
+/** 键盘微调音量。按下即解除静音(除非调到 0)。 */
+function nudgeVolume(delta: number): void {
+  setVolume(clock.volume + delta, { unmute: true });
+}
+
+function persistVolume(): void {
+  try {
+    localStorage.setItem(VOLUME_STORAGE_KEY, String(clock.volume));
+    localStorage.setItem(MUTED_STORAGE_KEY, clock.muted ? '1' : '0');
+  } catch {
+    /* 隐私模式 / 被禁用时静默跳过 —— 不值得为此报错 */
+  }
+}
+
+function syncVolumeUi(): void {
+  const percent = Math.round(clock.volume * 100);
+  volumeSlider.value = String(percent);
+
+  // 图标要反映**实际**是否出声:低倍速静音时也该显示静音
+  const silent = clock.effectiveVolume === 0;
+  muteButton.textContent = silent ? '🔇' : percent > 50 ? '🔊' : '🔉';
+  muteButton.setAttribute('aria-pressed', String(clock.muted));
+
+  el('v-volume').textContent = clock.muted
+    ? `${percent}%(静音)`
+    : silent
+      ? `${percent}%(低速静音)`
+      : `${percent}%`;
+}
+
 /* ---------------- 控件 ---------------- */
 
 const STEP_BUTTONS: readonly (readonly [string, () => void])[] = [
@@ -468,6 +543,19 @@ function wireControls(): void {
 
   rateSelect.addEventListener('change', () => {
     controller.setRate(Number(rateSelect.value));
+    // 倍速会触发"低速静音",图标要跟着变
+    syncVolumeUi();
+  });
+
+  volumeSlider.addEventListener('input', () => {
+    // 滑块是 0..100 的整数,除以 100 得到感知音量
+    setVolume(Number(volumeSlider.value) / 100, { unmute: true });
+  });
+
+  muteButton.addEventListener('click', () => {
+    clock.toggleMuted();
+    persistVolume();
+    syncVolumeUi();
   });
 
   scrubber.addEventListener('pointerdown', () => {
@@ -503,6 +591,21 @@ const KEY_ACTIONS: Record<string, (() => void) | undefined> = {
   '.': () => controller.stepDisplayFrame(1),
   ';': () => controller.stepReplayFrame(-1),
   "'": () => controller.stepReplayFrame(1),
+
+  // 音量用 - / = 而不是 ↑↓ —— 后者已被"跳 5 秒"占了
+  '-': () => nudgeVolume(-0.05),
+  '=': () => nudgeVolume(0.05),
+  '+': () => nudgeVolume(0.05), // 有些键盘要按 shift 才出 +
+  m: () => {
+    clock.toggleMuted();
+    persistVolume();
+    syncVolumeUi();
+  },
+  M: () => {
+    clock.toggleMuted();
+    persistVolume();
+    syncVolumeUi();
+  },
 };
 
 /* ---------------- 渲染循环 ---------------- */
@@ -581,6 +684,7 @@ function formatTime(ms: number): string {
 /* ---------------- 启动 ---------------- */
 
 wireControls();
+syncVolumeUi(); // 把持久化下来的音量反映到 UI
 renderer.resize();
 requestAnimationFrame(tick);
 void autoLoadFromQuery();
