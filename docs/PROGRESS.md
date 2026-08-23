@@ -9,9 +9,11 @@
 
 ## 一句话现状
 
-**M0 完成,M1 已经能"只丢一个 `.osr` 进来就播"** —— 自动按谱面 MD5 从镜像站取回 `.osz`,解包挑出正确难度,连音乐一起装好(真实浏览器实测 **6 秒**),然后跑完整链路:堆叠 → 判定 → combo 累积。477 个单测全绿 + 24 个 `todo` 占位。
+**M0 完成,M1 已经能"只丢一个 `.osr` 进来就播"** —— 自动按谱面 MD5 从镜像站取回 `.osz`,解包挑出正确难度,连音乐一起装好(真实浏览器实测 **6 秒**),然后跑完整链路:堆叠 → 判定 → combo 累积。492 个单测全绿 + 24 个 `todo` 占位。
 
 **距"可交付"还有多远:** 分数公式、HP、滑条刻度判定、正式渲染(combo 数字/颜色/命中动画)、皮肤 —— 见下方待完成与里程碑表。M2(滑条体渲染)仍是最硬的一块。
+
+下一步(滑条刻度/尾判定)的**规则已全部核完并记在 [TECH-NOTES B15](./TECH-NOTES.md)** —— 照那份实现即可,不必重新推导源码。
 
 > ⚠️ **本仓库出现过多会话并行编辑**(2026-08-23):`timeline.test.ts` 由另一次会话写入。
 > 现已纳入 git 并推到私有远端 `KawakazeNotFound/osu-replay-web`,多会话并行编辑有了退回点。
@@ -117,10 +119,18 @@ circle miss 都是铁证。
 - [x] 新增 dev-only 的验证结果回传通道(`verifySink`),解决"headless 拿不到浏览器结果",见 [TECH-NOTES D12](./TECH-NOTES.md)
 - [x] 34 条测试;真实 app 端到端验收:**6 秒内只凭一个 `.osr` 装好谱面 + 音乐**
 
+**音量调节**(`core/clock/AudioClock.ts`)
+
+- [x] 滑块 + 静音按钮 + `-` `=` 微调 + `M` 静音,设置存 localStorage
+- [x] **走 15ms 斜坡而非直接赋值** —— 直接给 `gain.value` 赋值会爆音。测试里的假 `AudioParam` 刻意记录调度事件,所以"写成 `value = x`"这种会爆音的实现会被测出来
+- [x] **感知音量平方后当线性增益** —— 人耳近似对数,滑块直接当增益会觉得"前半段没变化"
+- [x] **增益不在 `startSource` 里赋值** —— 否则 seek / 改倍速触发 `restartAt` 会把用户刚调的音量冲掉(真实浏览器实测确认前后一致)
+- [x] 非有限值归 **0** 而非钳到 1 —— 算出 Infinity 时静音比炸耳朵安全
+- [x] 42 条测试(音量 15 条)+ 真实浏览器实测
+
 ### 待完成
 
-- [ ] **滑条刻度/尾的判定** —— 需要跟踪光标是否在 follow circle 内(M2)。这是
-      maxCombo 与滑条整体 300/100/50 精确对上的前提
+- [ ] **滑条刻度/尾的判定** —— **规则已全部核完并记在 [TECH-NOTES B15](./TECH-NOTES.md)**,照那份实现即可。要点:follow area 有滞回(`radius` vs `radius × 2.4`)、"有效键"规则比想象复杂(防"预按住 + 补点"滥用)、滑条头命中时会**追认**已到时刻的部件。这是 maxCombo 与滑条整体 300/100/50 精确对上的前提
 - [ ] **stable 分数公式** —— **刻意排在滑条判定之后**:每个刻度都加分,在刻度判定
       实现前算出的分数无法与 `.osr` 比对。难度系数公式已核过(见 TECH-NOTES B14)
 - [ ] **HP drain** —— `drainPerMs` 仍是占位值(D1)
@@ -260,7 +270,7 @@ circle miss 都是铁证。
 
 ## 下一步(按优先级)
 
-1. **滑条刻度 / repeat / 尾的判定** —— 需要跟踪光标是否落在 follow circle 内、按键是否保持按住。这是 maxCombo 与滑条整体 300/100/50 精确对上的**唯一前提**,也是 M2 的一半工作量。
+1. **滑条刻度 / repeat / 尾的判定** —— **规则已全部核完,见 [TECH-NOTES B15](./TECH-NOTES.md)**,照那份实现即可,不必重新推导。这是 maxCombo 与滑条整体 300/100/50 精确对上的**唯一前提**,也是 M2 的一半工作量。
 2. **stable 分数公式** —— **刻意排在滑条判定之后**:每个刻度都加分,所以在刻度判定实现前,算出的分数无法与 `.osr` 比对。写一个验不了的公式等于埋雷。难度系数公式已核过(`CalculateDifficultyPeppyStars`,见 TECH-NOTES B14)。
 3. **circle 的正式渲染** —— combo 数字、combo 颜色、命中/miss 动画。目前是 `DebugRenderer` 的占位圈。
 4. **HP drain(D1)** —— `drainPerMs` 的真实推导。stable 回放自带 `replay.lifeBar` 可作 ground truth。
@@ -270,7 +280,7 @@ circle miss 都是铁证。
 ## 复现验收的方法
 
 ```bash
-npm test          # 477 通过 + 24 todo,~13s
+npm test          # 492 通过 + 24 todo,~13s
 npm run build     # tsc --noEmit + vite build
 npm run dev       # 然后开(只需要一个 .osr,谱面与音乐自动获取):
                   #   http://localhost:5173/?osr=/fixtures/stable.osr

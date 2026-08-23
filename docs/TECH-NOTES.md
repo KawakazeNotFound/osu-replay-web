@@ -318,6 +318,103 @@ JS 里没有 `decimal`,只有 float64 —— 这是一处**已知的潜在偏差
 而**每个滑条刻度都加分**。刻度判定还没做,所以算出的分数无法与 `.osr` 的 `totalScore`
 比对 —— 写一个验不了的公式等于埋雷。故刻意排在滑条刻度判定之后。
 
+### B15. 滑条跟踪(tracking)的确切规则 —— `已核源码,待实现`(2026-08-23)
+
+下一步要做的滑条刻度/尾判定,规则全部核完了。记在这里是因为**研究是最贵也最容易出错的部分** —— 实现时照这份抄,不要重新推导。
+
+来源:`osu.Game.Rulesets.Osu/Objects/Drawables/SliderInputManager.cs` 与
+`DrawableSliderBall.cs`(2026-08-23 核对 master)。
+
+#### 跟踪状态
+
+```
+Tracking = (!slider.AllJudged || t <= slider.endTime)
+        && 光标在 follow area 内
+        && 按的是"有效的键"
+```
+
+#### follow area:有滞回(hysteresis)
+
+```
+followRadius(expanded) = expanded ? radius * 2.4 : radius
+```
+
+`FOLLOW_AREA = 2.4f`(`DrawableSliderBall` 的常量),**乘的是物件半径**,不是绘制尺寸。
+
+⚠️ **每帧传入的 `expanded` 是"当前是否正在跟踪"** —— 于是:
+- 已在跟踪 → 用**大**圈判定(不容易掉)
+- 未在跟踪 → 必须进**小**圈才能(重新)开始跟踪
+
+这个滞回不能省,否则在边缘会疯狂抖动。
+
+#### 位置比较
+
+```
+followProgress = clamp((t - startTime) / duration, 0, 1)
+ballPosition   = slider.curvePositionAt(followProgress)   // 理论曲线位置,不是绘制变换
+判据           = 距离平方 <= radius²                       // 平方比较,且**含等号**
+```
+
+注意 `followProgress` 被钳到 `[0, 1]`,所以滑条开始前/结束后用的是头/尾的曲线位置。
+
+#### "有效的键" —— 这条最容易漏
+
+不是简单的"任意键按住"。lazer 的注释说明它防的是一种滥用:**滑条开始前就按住一个键,再点一下第二个键**。
+
+```
+hitAction = 命中滑条头的那个键
+
+若 hitAction 存在 且 (timeToAcceptAnyKeyAfter 未设置 或 t <= timeToAcceptAnyKeyAfter):
+    只有 action == hitAction 算有效
+否则:
+    左右键任一都算
+```
+
+`timeToAcceptAnyKeyAfter` 的维护:
+- 滑条头未命中 → 置 `null`
+- 滑条头已命中 且 该值当前为 `null` → 若**上一帧**另一个键没被按住,则置为 `t`
+
+即:**命中滑条头的那个键是唯一的跟踪键,直到观察到某一帧另一个键处于松开状态**,之后两个键都可以跟踪。lazer 特意存**时刻**而不是布尔值,为的是正确处理回退。
+
+#### 嵌套物件何时判定(`TryJudgeNestedObject`)
+
+| 部件 | 条件 |
+|---|---|
+| tick / repeat | `timeOffset >= 0` |
+| tail | `timeOffset >= TAIL_LENIENCY` |
+
+另外两个前提,**顺序守卫**:
+- 必须 `slider.HeadCircle.Judged`
+- tail 还要求最后一个 tick / repeat 已判定(否则记分与 combo 顺序会乱)
+
+满足后:`Tracking ? HitForcefully() : (timeOffset >= 0 ? MissForcefully() : 不动)`。
+
+#### 滑条头命中时的"追认"(`PostProcessHeadJudgement`)
+
+这一步很容易漏,但影响判定结果:滑条头**被命中之后**,若光标此刻在**放大**的
+follow area 内,会回头检查所有"已到时刻但未判定"的嵌套物件 ——
+若它们**全部**都在放大圈内,就一次性全部判为命中;否则全部判为 miss。
+
+之后 `updateTracking(allTicksInRange || 光标在未放大圈内)`。
+
+#### 实现时还需要的东西
+
+1. **嵌套物件的时刻**,不只是数量。现在 `sliderParts.ts` 只算 `tickCount`,
+   要扩成生成 `{ kind, time, progress }` 列表(osu-classes 的 `EventGenerator`
+   已经给全了,但要先补 `tickDistance`,这一步已经做了)
+2. **`TAIL_LENIENCY` 的值** —— 在 `SliderEventGenerator` 里,尚未核
+3. **每帧的按键状态**,而不只是"按下边沿"。现在 `extractPresses` 只取边沿,
+   跟踪需要"某时刻哪些键处于按住状态" —— `cursorAt(frames, t).keys` 已经能给
+4. **整条滑条的最终 300/100/50** —— 按命中的部件比例决定,这才是与 `.osr` 的
+   计数口径对齐的关键(见 `judgement.ts` 里"滑条头不计 300/100/50"那段注释)
+
+#### 一处必然的近似
+
+lazer 是**逐渲染帧**跟踪(高频鼠标位置 + `IsRewinding` 历史),我们是**逐回放帧**。
+回放帧率约 60~1000Hz,而 lazer 跑在显示帧率上并有 `IRequireHighFrequencyMousePosition`。
+所以边缘擦过 follow circle 的瞬间可能判得不同 —— 这会是 A2 剩余偏差的嫌疑点之一,
+实现后要用真实回放的 maxCombo 检验。
+
 ### B10. 真实谱面上的 `stateAt` 性能 —— `已确认`(2026-08-23)
 
 核心架构主张(`stateAt` 是 O(log n + k),所以 seek 免费)在真实数据上成立。已固化为 `performance.test.ts`,每次 `npm test` 都跑:
