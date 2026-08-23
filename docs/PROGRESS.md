@@ -1,7 +1,7 @@
 # 工作进度
 
 > 最后更新:2026-08-23
-> 当前阶段:**M1 —— 解析/堆叠/判定链路已打通,分数与渲染未做**
+> 当前阶段:**M1 —— 只传 .osr 即可播放;分数与正式渲染未做**
 
 关联文档:[架构设计](./ARCHITECTURE.md) · [技术问题记录](./TECH-NOTES.md)
 
@@ -9,12 +9,12 @@
 
 ## 一句话现状
 
-**M0 完成,M1 的核心链路已打通:谱面解析 → 堆叠 → 判定 → 累积状态。** 真实回放能算出 combo 与判定计数,四个样本的 circle miss 数全部通过 `.osr` 全图 miss 的上界判据,`lazer.osu` 的理论最大 combo 精确等于实测值。437 个单测全绿 + 24 个 `todo` 占位。
+**M0 完成,M1 已经能"只丢一个 `.osr` 进来就播"** —— 自动按谱面 MD5 从镜像站取回 `.osz`,解包挑出正确难度,连音乐一起装好(真实浏览器实测 **6 秒**),然后跑完整链路:堆叠 → 判定 → combo 累积。477 个单测全绿 + 24 个 `todo` 占位。
 
-**距"可交付"还有多远:** 分数公式、HP、滑条刻度判定、正式渲染、皮肤 —— 见下方待完成与里程碑表。M2(滑条渲染)仍是最硬的一块。
+**距"可交付"还有多远:** 分数公式、HP、滑条刻度判定、正式渲染(combo 数字/颜色/命中动画)、皮肤 —— 见下方待完成与里程碑表。M2(滑条体渲染)仍是最硬的一块。
 
 > ⚠️ **本仓库出现过多会话并行编辑**(2026-08-23):`timeline.test.ts` 由另一次会话写入。
-> 现已纳入 git(见下方「版本控制约定」),多会话并行编辑至少有了退回点。
+> 现已纳入 git 并推到私有远端 `KawakazeNotFound/osu-replay-web`,多会话并行编辑有了退回点。
 > 但 git 不解决**同时**写同一文件互相覆盖的问题 —— 并行开多个 agent 时仍需分工避开同一文件。
 
 ---
@@ -24,7 +24,7 @@
 | | 内容 | 状态 |
 |---|---|---|
 | **M0** | 地基:解析 + 时钟 + timeline + `stateAt` + 调试渲染器 | ✅ **完成** |
-| **M1** | circle 渲染 + approach circle + combo 数字 + circle 判定 | 🟡 解析/堆叠/判定已完成;分数、HP、正式渲染未做 |
+| **M1** | circle 渲染 + approach circle + combo 数字 + circle 判定 | 🟡 只传 `.osr` 即可播放;分数、HP、正式渲染未做 |
 | M2 | 滑条(路径生成 + WebGL slider body)← 最难 | ⬜ 未开始 |
 | M3 | spinner + 记分/HP/连击 HUD | ⬜ 未开始 |
 | M4 | stable 皮肤系统(.osk,预设 + 用户上传) | ⬜ 未开始 |
@@ -63,7 +63,7 @@
 
 - [x] `.osu` 文件输入 + `?osu=` 自动载入;谱面与回放**独立槽位**,任一变化重建时间线(谱面缺失时退回 placeholder,只播光标)
 - [x] 侧栏显示谱面信息(曲目/难度/作者/物件构成/难度值)
-- [x] 同时载入谱面与回放时提示"匹配未校验"(见 [TECH-NOTES D10](./TECH-NOTES.md))
+- [x] 同时载入谱面与回放时校验 MD5 是否匹配(见 [TECH-NOTES D10](./TECH-NOTES.md))
 
 **物件堆叠**(`core/sim/stacking.ts`)—— [TECH-NOTES D9](./TECH-NOTES.md)
 
@@ -107,12 +107,22 @@ circle miss 都是铁证。
    (155932)的按下又漏出去了。真实 osu 里滑条要到 `endTime` 才算 `AllJudged`。
    → 引入 `resolveTime`:circle 解析于自己的判定时刻,slider/spinner 解析于 `endTime`。
 
+**自动获取谱面与音乐**(`core/load/{mirror,oszLoader,beatmapHash,autoFetch}.ts`)
+
+- [x] **只传 `.osr` 即可播放** —— 按谱面 MD5 从镜像站取回 `.osz`,解包挑出正确难度,连音乐一起装好
+- [x] 先验证成败点 **CORS**:`osu.direct` 两个端点都可跨域,`content-length` 可读(能做进度);另两个镜像当时 502/530(服务端故障,非 CORS)。见 [TECH-NOTES D11](./TECH-NOTES.md)
+- [x] **MD5 先证明可信再用**:RFC 1321 的 7 个标准向量 7/7 通过 + 与 Node crypto 对分块边界逐位比对
+- [x] **D10 解决**:谱面与回放匹配校验落地,状态栏明确显示 ✅/❌ 并列出两个哈希
+- [x] **必须按 MD5 挑难度**,谱面被更新过时报错而不是硬凑(否则物件与判定错位却无提示)
+- [x] 新增 dev-only 的验证结果回传通道(`verifySink`),解决"headless 拿不到浏览器结果",见 [TECH-NOTES D12](./TECH-NOTES.md)
+- [x] 34 条测试;真实 app 端到端验收:**6 秒内只凭一个 `.osr` 装好谱面 + 音乐**
+
 ### 待完成
 
 - [ ] **滑条刻度/尾的判定** —— 需要跟踪光标是否在 follow circle 内(M2)。这是
       maxCombo 与滑条整体 300/100/50 精确对上的前提
-- [ ] **stable 分数公式** —— 现在 `score` 是占位(基础分之和)。真实公式是
-      `基础分 + 基础分 × (combo-1) × 难度系数 / 25`,难度系数由 HP+CS+OD 推出,需另核源码
+- [ ] **stable 分数公式** —— **刻意排在滑条判定之后**:每个刻度都加分,在刻度判定
+      实现前算出的分数无法与 `.osr` 比对。难度系数公式已核过(见 TECH-NOTES B14)
 - [ ] **HP drain** —— `drainPerMs` 仍是占位值(D1)
 - [ ] circle 的正式渲染(combo 数字、combo 颜色、命中/miss 动画)
 - [x] ~~接线 D7:DT/HT 的播放倍率补偿~~ ✅
@@ -235,7 +245,8 @@ circle miss 都是铁证。
 | ~~A1~~ | ~~osu-parsers 能否在浏览器里解 `.osr` 的 LZMA 帧数据~~ | ✅ **已解除**(2026-08-23) |
 | **A2** | 自己模拟的判定能否复现 `.osr` 头部的原始成绩 | 🟡 **骨架已建,L1 实测 4/4 通过**;L3(判定器)未开始 —— 仍是最高风险 |
 | ~~D9~~ | ~~物件堆叠未实现~~ | ✅ **已解决**(2026-08-23)。实测 61/302 物件堆叠,层数 `[-2, 11]` |
-| D10 | 谱面与回放是否匹配未校验 | 🟡 UI 有提醒;浏览器 `crypto.subtle` 不支持 MD5,需自带实现 |
+| ~~D10~~ | ~~谱面与回放是否匹配未校验~~ | ✅ **已解决**(2026-08-23)。引 spark-md5,已用 RFC 1321 向量 + Node crypto 双重验证 |
+| D11 | 自动获取谱面依赖外部镜像站 | 🟡 **已确认的权衡**:osu.direct 可用,另两个当时故障。手动上传路径必须保留 |
 | D1 | HP drain 的分段计算 | 🟡 结构与 `hpAt` 已实现且有单测;`drainPerMs` 仍是占位值。stable 的 `replay.lifeBar` 可作 ground truth |
 | D2 | 倍速的音高保持 | 🟡 M0 接受变调,待确认用户预期 |
 | ~~D6~~ | ~~osu-parsers 格式版本时效性~~ | ✅ **已完全解除**:`.osr` 10/10、`.osu` 4/4(fileFormat 14) |
@@ -254,28 +265,44 @@ circle miss 都是铁证。
 3. **circle 的正式渲染** —— combo 数字、combo 颜色、命中/miss 动画。目前是 `DebugRenderer` 的占位圈。
 4. **HP drain(D1)** —— `drainPerMs` 的真实推导。stable 回放自带 `replay.lifeBar` 可作 ground truth。
 5. **L3 的 24 个 `todo` 逐条填绿** —— 随上面几项自然完成。
-6. **远端备份** —— 目前只有本地仓库,硬盘挂了就全没了。需要你决定放哪。
+
 
 ## 复现验收的方法
 
 ```bash
-npm test          # 437 通过 + 24 todo,~12s
+npm test          # 477 通过 + 24 todo,~13s
 npm run build     # tsc --noEmit + vite build
-npm run dev       # 然后开:
-                  #   http://localhost:5173/?osu=/fixtures/stable.osu&osr=/fixtures/stable.osr&t=76989
+npm run dev       # 然后开(只需要一个 .osr,谱面与音乐自动获取):
+                  #   http://localhost:5173/?osr=/fixtures/stable.osr
+                  # 想手动指定谱面就再加 &osu=/fixtures/stable.osu
+                  # 想直接跳到某时刻就加 &t=76989
 ```
 
-`?osu=` / `?osr=` / `?t=` 是开发用的自动载入参数(文件选择框没法从脚本填,headless 验收需要它)。
+`?osr=` / `?osu=` / `?t=` 是开发用的自动载入参数(文件选择框没法从脚本填,headless 验收需要它)。
 
-渲染层的逐像素验收(M0 验收 3 / 5)是用临时页面 + headless Chrome 跑的,**没有留在仓库里**。若要重跑,需要重新写一个页面:挂 `DebugRenderer` 到 canvas,对一批时刻做「顺序渲染 vs 乱序渲染」的 `canvas.toDataURL()` 比对。
+### 无人值守的浏览器验收
 
-> **值得补的一件事**:把它做成常驻的 `vitest --browser` 或 Playwright 用例,这样渲染层回归有自动化保护。现在没有 —— 下次改渲染器要靠手动重建这个页面。
+浏览器专属的东西(CORS、`decodeAudioData`、canvas 像素)只能在真实浏览器里验,而 headless Chrome 的 `--dump-dom` 是一次性快照 —— 等不到网络与音频解码,而且它本身会让 Chrome 立刻退出。
+
+所以加了 `verifySink`(见 `vite.config.ts`,仅 dev):
+
+```bash
+npm run dev   # 另开一个终端
+# 不要加 --dump-dom!页面需要活着把结果 POST 出来
+chrome --headless=new --disable-gpu --user-data-dir=<tmp> \
+  "http://localhost:5173/?osr=/fixtures/stable.osr&verify=app"
+# 然后轮询 .verify-out/app.txt(读的时候要显式 UTF-8)
+```
+
+自己写的验证页面也可以 `fetch('/__verify/<name>', { method: 'POST', body: ... })`。
+
+渲染层的逐像素验收(M0 验收 3 / 5)仍是用临时页面跑的,**没有留在仓库里** —— 但现在有了 `verifySink` 这条通道,把它做成常驻用例的门槛低了很多(见 [TECH-NOTES D8](./TECH-NOTES.md))。
 
 ---
 
 ## 版本控制约定
 
-2026-08-23 起纳入 git(此前无版本控制)。分支 `main`,无远端。
+2026-08-23 起纳入 git(此前无版本控制)。分支 `main`,远端 `KawakazeNotFound/osu-replay-web`(**私有**)。
 
 ### 每个 commit 都必须是绿的
 
@@ -322,7 +349,7 @@ git config core.hooksPath .githooks
 ## 待办杂项
 
 - **仓库改名**:目录名 `OSUReplay-Danser` 已不准确(danser 不再是后端),建议改为 `osu-replay-web`(`package.json` 里的 name 已经是这个)。不阻塞。
-- **git**:✅ 已纳入版本控制(2026-08-23),约定见上一节。**无远端** —— 若要备份需自己建 GitHub 仓库并 `git remote add`。
+- **git**:✅ 已纳入版本控制(2026-08-23),约定见上一节。远端 `KawakazeNotFound/osu-replay-web`(私有)。
 - **`fixtures/` 现有素材**(不入库):
   - 4 组完整配对:`stable` / `stable-hdfl` / `lazer` / `lazer-moonlight`(各含 `.osu` + `.osr`)
   - 1 个只有回放的:`lazer-ap.osr`(谱面 MD5 `43c04b70…` 本机没有,留作降级路径测试)

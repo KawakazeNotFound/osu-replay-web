@@ -159,6 +159,18 @@ async function autoLoadFromQuery(): Promise<void> {
 
   const t = Number(params.get('t'));
   if (params.has('t') && Number.isFinite(t)) controller.seek(t);
+
+  // 开发便利:`&verify=<name>` 把当前状态栏内容 POST 回 dev server,
+  // 供 headless 浏览器验收读取(见 vite.config.ts 的 verifySink)
+  const verify = params.get('verify');
+  if (verify) {
+    await fetch(`/__verify/${verify}`, {
+      method: 'POST',
+      body: statusEl.textContent ?? '(状态栏为空)',
+    }).catch(() => {
+      /* dev server 不在或没这个中间件时静默跳过 */
+    });
+  }
 }
 
 async function applyBeatmap(buffer: ArrayBuffer): Promise<void> {
