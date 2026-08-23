@@ -354,6 +354,9 @@ function judgeCircles(
     advanceScan(t);
   };
 
+  /** lazer 用 `StartTimeOrderedHitPolicy`,stable 用 `LegacyHitPolicy`。 */
+  const useLazerPolicy = options.sliderScoring === 'lazer';
+
   for (const press of extractPresses(frames)) {
     expireUpTo(press.time);
 
@@ -361,9 +364,14 @@ function judgeCircles(
       if (headConsumed[i] === 1) continue;
       const o = objects[i]!;
 
-      // notelock(LegacyHitPolicy 的顺序扫描):更早且**尚未解析**的物件,
-      // 若"结束得足够早",就阻挡这一个,连带阻挡它之后的所有物件
-      if (blockedByEarlier(objects, resolveTime, scanStart, i, press.time)) break;
+      if (useLazerPolicy) {
+        // lazer:只看最后一个阻挡物,且只在按下早于它的 startTime 时阻挡
+        if (lazerBlocker(objects, headConsumed, scanStart, i, press.time) >= 0) break;
+      } else {
+        // stable(LegacyHitPolicy):更早且**尚未解析**的物件,
+        // 若"结束得足够早",就阻挡这一个,连带阻挡它之后的所有物件
+        if (blockedByEarlier(objects, resolveTime, scanStart, i, press.time)) break;
+      }
 
       // hit policy 的时间闸门:|startTime - time| < hittableRange
       const gap = o.startTime - press.time;
@@ -380,6 +388,16 @@ function judgeCircles(
       const result = resultForOffset(press.time - o.startTime, windows);
       // None 表示"无判定" —— 这次按下对该物件不产生任何结果,但可以继续看下一个
       if (result === HitResult.None) continue;
+
+      // lazer 的 `HandleHit`:命中后把**先前所有未判定的**物件强制判 miss。
+      // stable 没有这一步 —— 那边靠 `blockedByEarlier` 挡住,物件自然过期
+      if (useLazerPolicy) {
+        for (let j = scanStart; j < i; j++) {
+          if (headConsumed[j] === 1) continue;
+          if (objects[j]!.kind === 'spinner') continue; // 转盘不参与
+          apply(j, objects[j]!.startTime + windows.meh, HitResult.Miss);
+        }
+      }
 
       apply(i, press.time, result);
       advanceScan(press.time);
@@ -677,6 +695,55 @@ function partNameOf(kind: SliderPart['kind']): JudgementPart {
     case 'legacyLastTick':
       return 'sliderTail';
   }
+}
+
+/**
+ * lazer 的 `StartTimeOrderedHitPolicy.CheckHittable` —— 与 stable 的
+ * {@link blockedByEarlier} 是**两套不同的模型**,不是参数差异。
+ *
+ * ```csharp
+ * // 取 candidate.startTime 之前**最后一个**能阻挡的物件
+ * if (!blockingObject.Judged && time < blockingObject.HitObject.StartTime)
+ *     return ClickAction.Shake;
+ * ```
+ *
+ * 三处与 `LegacyHitPolicy` 的关键不同:
+ *
+ * 1. **只看"最后一个"阻挡物**,不是遍历全部未判定物件。
+ * 2. **只有 HitCircle 能阻挡**(`hitObjectCanBlockFutureHits` 就一行
+ *    `hitObject is DrawableHitCircle`)。滑条本体与转盘不阻挡 ——
+ *    但 `DrawableSliderHead` 继承自 `DrawableHitCircle`,所以**滑条头算**。
+ * 3. **阻挡条件是 `time < 阻挡物.startTime`**,不是 stable 的
+ *    "结束得足够早"。也就是说:过了阻挡物的 startTime 之后就**不再阻挡**,
+ *    这次按下会被接受,而先前那个未判定物件由 `HandleHit` **强制判 miss**。
+ *
+ * 相同时刻刻意放行(源码注释:为了同时出现的物件,举了 /b/372245 的例子)。
+ *
+ * @returns 阻挡物的下标;`-1` 表示不阻挡
+ */
+function lazerBlocker(
+  objects: readonly SimHitObject[],
+  headConsumed: Uint8Array,
+  from: number,
+  target: number,
+  pressTime: number,
+): number {
+  const targetStart = objects[target]!.startTime;
+
+  // 往前找"最后一个"能阻挡的 —— 所以倒着扫,找到即止
+  for (let j = target - 1; j >= from; j--) {
+    const o = objects[j]!;
+    if (o.startTime >= targetStart) continue;
+
+    // 只有 circle 与滑条头能阻挡;转盘不能
+    if (o.kind === 'spinner') continue;
+
+    // 这就是那个"最后一个阻挡物" —— 不管它是否阻挡,都不再往前看
+    if (headConsumed[j] === 1) return -1; // 已判定 → 不阻挡
+    return pressTime < o.startTime ? j : -1;
+  }
+
+  return -1;
 }
 
 /**
