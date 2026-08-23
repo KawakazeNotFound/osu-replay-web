@@ -223,6 +223,29 @@ Beatmap
 
 顺带验证了 maxCombo 的构成:`lazer.osu` 那张 FC 回放 maxCombo = 346,恰好等于 `物件248 + 滑条尾95 + repeat3`(该图 0 tick)。`stable` 那张 FC maxCombo = 1151,而 `766 + 340 + 27 = 1133`,差 **18 = 滑条 tick 数**。
 
+### B11. `osu-standard-stable` 与当前 lazer master 有实质分歧 —— `已确认`(2026-08-23)
+
+调研过 `osu-standard-stable@5.0.1`(同作者 kionell 把 stable ruleset 移植到 TS)。
+它内容很多:**堆叠、滑条 tick/repeat/tail 嵌套物件、全部 mod、命中窗口、星数/pp**,
+且浏览器安全(只 import `osu-classes`,零 Node API)。
+
+**但它与当前 lazer master 有两处实质分歧:**
+
+| 项 | 当前 lazer master | osu-standard-stable 5.0.1 | 本项目 |
+|---|---|---|---|
+| preempt | `DifficultyRangeInt` = `(int)` 截断 | `Math.fround(...)`,**不截断** | `Math.trunc` ✅ |
+| 圈半径 | `CalculateScaleFromCircleSize(cs, applyFudge: **true**)` → ×1.00041 | **无** fudge | 带 ×1.00041 ✅ |
+
+AR 9.15 下 preempt:lazer 得 **577**,该包得 **577.5**。而堆叠阈值是
+`timePreempt * stackLeniency`,分歧会**传导进堆叠结果**。
+
+**决定:不引入该依赖**,自己实现堆叠,把它当 reference implementation 交叉参考。
+理由:本项目的全部价值系于 A2(复现原始成绩),而 `difficulty.ts` 是对照 master
+逐条验证过的(那次对照发现了三处真 bug),不能为省事倒退。
+
+⚠️ 若将来要用它的**滑条 tick 生成**(M2 的 maxCombo 精确计算需要),同样要先核
+它的 tick 间隔算法是否与 master 一致,不能直接信。
+
 ### B10. 真实谱面上的 `stateAt` 性能 —— `已确认`(2026-08-23)
 
 核心架构主张(`stateAt` 是 O(log n + k),所以 seek 免费)在真实数据上成立。已固化为 `performance.test.ts`,每次 `npm test` 都跑:
@@ -338,27 +361,36 @@ M0 验收 3 / 5 的逐像素判据(headless Chrome + `canvas.toDataURL()` 顺序
 
 现状:改渲染器要靠手动重建那个页面。
 
-### D9. 物件堆叠(stacking)未实现 —— `待解决`(M1)
+### D9. 物件堆叠(stacking)—— ✅ `已解决`(2026-08-23)
 
-osu 会把**位置相近、时间相邻**的物件依次错开一点,避免完全重叠。lazer:
-`StackedPosition = Position + StackOffset`,其中 `StackOffset = StackHeight * scale * -6.4`。
+已实现,见 `src/core/sim/stacking.ts`。算法逐行对照 `ppy/osu` master 的
+`OsuBeatmapProcessor.cs`,并与 `osu-standard-stable@5.0.1` 交叉比对。
 
-**osu-parsers 不做这一步** —— 物件上没有 `stackHeight` 字段(实测)。所以目前:
+**实测效果**(`stable-hdfl.osu`):61/302 个物件有堆叠,层数范围 `[-2, 11]`,
+其中 22 个负向。未堆叠时三个圈完全重合成一个,堆叠后沿左上依次错开。
 
-- 密集堆叠段的物件会画在同一个点上(视觉错误)
-- 判定位置也偏(lazer 的命中检测用的是 `StackedPosition`),会影响 A2
-
-算法在 `OsuBeatmapProcessor.ApplyStacking`,比想象中硬:
+**几处不能"顺手简化"的细节**(改之前务必读 `stacking.ts` 顶部注释):
 
 | 点 | 内容 |
 |---|---|
-| 阈值 | `stackThreshold = (int)TimePreempt * StackLeniency` —— **注意 `(int)` 截断**,lazer 注释说是为了 stable 兼容 |
-| 距离 | `STACK_DISTANCE = 3`(osu 单位) |
-| 两套算法 | `fileFormat >= 6` 走现代版;更老的走 `applyStackingOld`。我们的 fixture 都是 v14,但用户可能传老图 |
-| 正负堆叠 | 圈叠在滑条尾时是**负向**偏移(往右下),其余是正向(往左上) |
-| 又一处截断 | 现代版比较时间时把 `StartTime` 与前一物件的 end time **都转成 int**,注释明确写 "truncation to integer is required to match stable" |
+| 阈值 | `(int)TimePreempt * StackLeniency` —— **只截断 preempt,不截断乘积** |
+| circle 分支时间比较 | `(int)StartTime - (int)endTime > threshold`,两个操作数**各自**截断,start-vs-**end** |
+| slider 分支时间比较 | `StartTime - StartTime > threshold`,**不截断**,start-vs-**start**。与 circle 分支规则**不同** |
+| 距离 | `< STACK_DISTANCE`(int 3),**严格小于**。恰好相距 3 不堆叠 |
+| 链式 | `objectI` 会在内层循环被重新指向,`objectI.stackHeight` 随之改变 —— 这是链式堆叠的实现方式,不是笔误 |
+| 负向 | 圈落在滑条尾上时往**右下**偏(lazer:"bump notes down and right") |
 
-**做法**:实现时对照源码逐行抄,别自己推。这是那种"看起来能简化、简化了就对不上 stable"的代码。
+**滑条末端位置**用 `path.curvePositionAt(1, spans)` —— 它**考虑 repeat**,
+偶数 span 的滑条(来回一趟)末端会回到起点。堆叠用末端位置判断"圈是否落在
+滑条尾上",所以这个细节会影响结果。
+
+**已知微小分歧**:osu 里坐标与距离都是 float32,我们用 float64 算距离。
+只有当距离落在 `3` 附近约 1e-7 内时结论才可能不同 —— 若将来 A2 出现
+"个别物件堆叠层数差 1",这里是嫌疑点之一。
+
+**legacy 算法(`applyStackingOld`,fileFormat < 6)刻意未实现**:手上没有
+v6 以下谱面可测,照文字描述写一个测不了的算法出错概率高于不做 —— 错的堆叠
+比没堆叠更糟。遇到时抛明确错误而非静默跳过。v6 是 2008 年的格式。
 
 ### D10. 谱面与回放是否匹配未校验 —— `待解决`
 

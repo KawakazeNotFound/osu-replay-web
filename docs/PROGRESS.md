@@ -9,9 +9,9 @@
 
 ## 一句话现状
 
-**M0 完成,M1 的谱面解析这一层已落地。** 真实谱面的物件、combo、break、难度全部解析并上屏渲染;A2(判定复现)的测试骨架已建,第一层断言实测 4/4 精确通过。302 个单测全绿 + 24 个 `todo` 占位。
+**M0 完成,M1 的谱面层与堆叠已落地。** 真实谱面的物件、combo、break、难度、**堆叠**全部解析并上屏渲染;A2 的测试骨架已建,第一层断言实测 4/4 精确通过。345 个单测全绿 + 24 个 `todo` 占位。
 
-下一步是**判定器本身** —— `JudgementPass` 的插桩接口早就留好了,现在有谱面可以填了。
+下一步是**判定器本身** —— `JudgementPass` 的插桩接口早就留好了,命中窗口对齐了 lazer,堆叠位置也就位了,现在缺的是"哪一帧的哪次点击命中了哪个物件"。
 
 > ⚠️ **本仓库出现过多会话并行编辑**(2026-08-23):`timeline.test.ts` 由另一次会话写入。
 > 现已纳入 git(见下方「版本控制约定」),多会话并行编辑至少有了退回点。
@@ -65,10 +65,18 @@
 - [x] 侧栏显示谱面信息(曲目/难度/作者/物件构成/难度值)
 - [x] 同时载入谱面与回放时提示"匹配未校验"(见 [TECH-NOTES D10](./TECH-NOTES.md))
 
+**物件堆叠**(`core/sim/stacking.ts`)—— [TECH-NOTES D9](./TECH-NOTES.md)
+
+- [x] 逐行对照 `ppy/osu` master 的 `OsuBeatmapProcessor.cs` 实现现代堆叠算法
+- [x] 两处 `(int)` 截断、circle/slider 两分支不同的时间比较规则、链式堆叠、负向堆叠全部落地
+- [x] `SimHitObject` 新增 `endX/endY`(考虑 repeat 的滑条末端)、`stackHeight`、`stackedX/stackedY`、`spans`
+- [x] `DebugRenderer` 改用堆叠后坐标。实测 `stable-hdfl.osu` 上 61/302 个物件有堆叠,层数 `[-2, 11]`
+- [x] **调研并否决 `osu-standard-stable`** —— 它与 master 有两处实质分歧,见 [TECH-NOTES B11](./TECH-NOTES.md)
+- [x] 51 条测试,期望值全按 lazer 算法手推;真实谱面判据是"独立算出的候选对数量"
+
 ### 待完成
 
-- [ ] **判定器** —— 填 `JudgementPass`。circle 的命中判定(命中窗口已对齐 lazer)、combo 累积、分数
-- [ ] **物件堆叠** —— 影响渲染位置**与判定位置**,见 [TECH-NOTES D9](./TECH-NOTES.md)。算法要照源码逐行抄
+- [ ] **判定器** —— 填 `JudgementPass`。circle 的命中判定(命中窗口已对齐 lazer、堆叠位置已就位)、combo 累积、分数
 - [ ] circle 的正式渲染(combo 数字、combo 颜色、命中/miss 动画)—— 目前是 `DebugRenderer` 的占位圈
 - [ ] 接线 D7:DT/HT 的播放倍率补偿
 - [ ] L3 的 24 个 `todo` 逐条填绿
@@ -187,7 +195,7 @@
 |---|---|---|
 | ~~A1~~ | ~~osu-parsers 能否在浏览器里解 `.osr` 的 LZMA 帧数据~~ | ✅ **已解除**(2026-08-23) |
 | **A2** | 自己模拟的判定能否复现 `.osr` 头部的原始成绩 | 🟡 **骨架已建,L1 实测 4/4 通过**;L3(判定器)未开始 —— 仍是最高风险 |
-| **D9** | 物件堆叠未实现 | 🔴 **影响判定位置,直接拖累 A2**。算法要照 `OsuBeatmapProcessor` 逐行抄 |
+| ~~D9~~ | ~~物件堆叠未实现~~ | ✅ **已解决**(2026-08-23)。实测 61/302 物件堆叠,层数 `[-2, 11]` |
 | D10 | 谱面与回放是否匹配未校验 | 🟡 UI 有提醒;浏览器 `crypto.subtle` 不支持 MD5,需自带实现 |
 | D1 | HP drain 的分段计算 | 🟡 结构与 `hpAt` 已实现且有单测;`drainPerMs` 仍是占位值。stable 的 `replay.lifeBar` 可作 ground truth |
 | D2 | 倍速的音高保持 | 🟡 M0 接受变调,待确认用户预期 |
@@ -202,16 +210,17 @@
 
 ## 下一步(按优先级)
 
-1. **判定器(`JudgementPass`)** —— M1 的核心,也是 A2 的钥匙。命中窗口已对齐 lazer(含那个 `floor - 0.5`),combo 分段已验证,现在缺的是"哪一帧的哪次点击命中了哪个物件"这套逻辑。**必须对照 `OsuHitObject` / `DrawableHitCircle` 的判定流程写**,尤其是 notelock。
-2. **物件堆叠(D9)** —— 判定位置依赖它,所以要在判定器之前或同时做。照 `OsuBeatmapProcessor.ApplyStacking` 逐行抄,注意两处 `(int)` 截断。
-3. **L3 的 24 个 `todo` 逐条填绿** —— 每填一条就是 A2 往前一步。
-4. **生态调研** —— 调研 `rewind`(Electron + PixiJS 的 osu 回放分析器)。原计划"写 M1 代码前做完",现在 M1 已开工,价值下降但仍可能对 M2 的滑条渲染有参考。需要放开 WebSearch / `git clone` 权限。
-5. **`git init`** —— 已经出现过多会话并行编辑同一文件,没有版本兜底是真风险。
+1. **判定器(`JudgementPass`)** —— M1 的核心,也是 A2 的钥匙。前置条件现在都齐了:命中窗口已对齐 lazer(含那个 `floor - 0.5`)、combo 分段已验证、**堆叠位置已就位**。缺的是"哪一帧的哪次点击命中了哪个物件"这套逻辑。**必须对照 `DrawableHitCircle` / `OsuHitObject` 的判定流程写**,尤其是 notelock(同一时刻只允许最早的物件被点中)。
+2. **L3 的 24 个 `todo` 逐条填绿** —— 每填一条就是 A2 往前一步。
+3. **circle 的正式渲染** —— combo 数字、combo 颜色、命中/miss 动画。目前是 `DebugRenderer` 的占位圈。
+4. **接线 D7** —— DT/HT 的播放倍率补偿,`speedMultiplierOfLegacyMods()` 已写好。
+5. **生态调研** —— `rewind`(Electron + PixiJS 的 osu 回放分析器)。对 M2 的滑条渲染可能有参考。需要放开 WebSearch / `git clone` 权限。
+6. **远端备份** —— 目前只有本地仓库,硬盘挂了就全没了。需要你决定放哪。
 
 ## 复现验收的方法
 
 ```bash
-npm test          # 302 通过 + 24 todo,~3s
+npm test          # 345 通过 + 24 todo,~3s
 npm run build     # tsc --noEmit + vite build
 npm run dev       # 然后开:
                   #   http://localhost:5173/?osu=/fixtures/stable.osu&osr=/fixtures/stable.osr&t=76989
