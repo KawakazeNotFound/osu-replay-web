@@ -9,11 +9,11 @@
 
 ## 一句话现状
 
-**M0 完成,M1 已经能"只丢一个 `.osr` 进来就播"** —— 自动按谱面 MD5 从镜像站取回 `.osz`,解包挑出正确难度,连音乐一起装好(真实浏览器实测 **6 秒**),然后跑完整链路:堆叠 → 判定 → combo 累积。492 个单测全绿 + 24 个 `todo` 占位。
+**M0 完成,M1 已经能"只丢一个 `.osr` 进来就播"** —— 自动按谱面 MD5 从镜像站取回 `.osz`,解包挑出正确难度,连音乐一起装好(真实浏览器实测 **6 秒**),然后跑完整链路:堆叠 → 判定(circle + 滑条部件 + 转盘) → 记分 → combo 累积。**532 个单测全绿,0 个 `todo` 占位。**
 
-**距"可交付"还有多远:** 分数公式、HP、滑条刻度判定、正式渲染(combo 数字/颜色/命中动画)、皮肤 —— 见下方待完成与里程碑表。M2(滑条体渲染)仍是最硬的一块。
+**距"可交付"还有多远:** HP drain、正式渲染(combo 数字/颜色/命中动画)、皮肤 —— 见下方待完成与里程碑表。M2(滑条体渲染)仍是最硬的一块。
 
-下一步(滑条刻度/尾判定)的**规则已全部核完并记在 [TECH-NOTES B15](./TECH-NOTES.md)** —— 照那份实现即可,不必重新推导源码。
+**当前最大的正确性缺口是 [D13](./TECH-NOTES.md):`stable.osr` 的 maxCombo 只有 412 vs 头部 1151**,而它的判定计数只差 1 个 —— 说明有极少数滑条部件被误判成 miss,每次都把 combo 归零。四个样本里 `lazer` 已精确复现、`lazer-moonlight` 差 1、`stable-hdfl` 差 7,只有 `stable` 差得离谱。D13 里记了三个按可疑度排序的排查方向。
 
 > ⚠️ **本仓库出现过多会话并行编辑**(2026-08-23):`timeline.test.ts` 由另一次会话写入。
 > 现已纳入 git 并推到私有远端 `KawakazeNotFound/osu-replay-web`,多会话并行编辑有了退回点。
@@ -26,9 +26,9 @@
 | | 内容 | 状态 |
 |---|---|---|
 | **M0** | 地基:解析 + 时钟 + timeline + `stateAt` + 调试渲染器 | ✅ **完成** |
-| **M1** | circle 渲染 + approach circle + combo 数字 + circle 判定 | 🟡 只传 `.osr` 即可播放;分数、HP、正式渲染未做 |
-| M2 | 滑条(路径生成 + WebGL slider body)← 最难 | ⬜ 未开始 |
-| M3 | spinner + 记分/HP/连击 HUD | ⬜ 未开始 |
+| **M1** | circle 渲染 + approach circle + combo 数字 + circle 判定 | 🟡 只传 `.osr` 即可播放;判定+记分已完;正式渲染、HP 未做 |
+| M2 | 滑条(路径生成 + WebGL slider body)← 最难 | 🟡 路径采样与部件判定已完,渲染未开始 |
+| M3 | spinner + 记分/HP/连击 HUD | 🟡 spinner 判定与 stable 记分已完,HP 与 HUD 未做 |
 | M4 | stable 皮肤系统(.osk,预设 + 用户上传) | ⬜ 未开始 |
 | M5 | lazer 记分体系 + mod | ⬜ 未开始 |
 | M6 | Argon 风格皮肤 + 网页 UI 打磨 | ⬜ 未开始 |
@@ -130,13 +130,15 @@ circle miss 都是铁证。
 
 ### 待完成
 
-- [ ] **滑条刻度/尾的判定** —— **规则已全部核完并记在 [TECH-NOTES B15](./TECH-NOTES.md)**,照那份实现即可。要点:follow area 有滞回(`radius` vs `radius × 2.4`)、"有效键"规则比想象复杂(防"预按住 + 补点"滥用)、滑条头命中时会**追认**已到时刻的部件。这是 maxCombo 与滑条整体 300/100/50 精确对上的前提
-- [ ] **stable 分数公式** —— **刻意排在滑条判定之后**:每个刻度都加分,在刻度判定
-      实现前算出的分数无法与 `.osr` 比对。难度系数公式已核过(见 TECH-NOTES B14)
+- [x] ~~**滑条刻度/尾的判定**~~ ✅ 已实现(`sliderTracking.ts` / `sliderParts.ts`)。规则见 [TECH-NOTES B15](./TECH-NOTES.md)
+- [x] ~~**stable 分数公式**~~ ✅ 已实现(`stableScoring.ts`)。三处刻意保留的 stable 取整见 [TECH-NOTES B14](./TECH-NOTES.md)
+- [ ] 🔴 **[D13](./TECH-NOTES.md):`stable.osr` 的 combo 缺口(412 vs 1151)** —— 当前最大偏差。
+      判定计数只差 1,说明是极少数滑条部件被误判成 miss。**这条不解决,分数就永远对不上**
+      (分数被 combo 加成主导)。D13 里记了三个按可疑度排序的排查方向
 - [ ] **HP drain** —— `drainPerMs` 仍是占位值(D1)
 - [ ] circle 的正式渲染(combo 数字、combo 颜色、命中/miss 动画)
 - [x] ~~接线 D7:DT/HT 的播放倍率补偿~~ ✅
-- [ ] L3 的 24 个 `todo` 逐条填绿
+- [x] ~~L3 的 24 个 `todo` 逐条填绿~~ ✅ **0 个 todo 剩余**(532 测试全绿)
 
 ---
 
@@ -270,11 +272,12 @@ circle miss 都是铁证。
 
 ## 下一步(按优先级)
 
-1. **滑条刻度 / repeat / 尾的判定** —— **规则已全部核完,见 [TECH-NOTES B15](./TECH-NOTES.md)**,照那份实现即可,不必重新推导。这是 maxCombo 与滑条整体 300/100/50 精确对上的**唯一前提**,也是 M2 的一半工作量。
-2. **stable 分数公式** —— **刻意排在滑条判定之后**:每个刻度都加分,所以在刻度判定实现前,算出的分数无法与 `.osr` 比对。写一个验不了的公式等于埋雷。难度系数公式已核过(`CalculateDifficultyPeppyStars`,见 TECH-NOTES B14)。
-3. **circle 的正式渲染** —— combo 数字、combo 颜色、命中/miss 动画。目前是 `DebugRenderer` 的占位圈。
-4. **HP drain(D1)** —— `drainPerMs` 的真实推导。stable 回放自带 `replay.lifeBar` 可作 ground truth。
-5. **L3 的 24 个 `todo` 逐条填绿** —— 随上面几项自然完成。
+1. 🔴 **查清 [D13](./TECH-NOTES.md):`stable.osr` 的 combo 缺口(412 vs 1151)** —— 全项目当前最大的正确性偏差,且**挡住了分数验证**(分数被 combo 加成主导,combo 不对分数就不可能对)。判定计数只差 1 个,所以问题范围很窄:极少数滑条部件被误判成 miss。D13 记了三个按可疑度排序的方向,第一位是滑条跟踪的"有效键"规则(B15 的 `acceptAnyKeyAfter`)。
+   **需要先加一个诊断**:列出所有 combo 归零的时刻 + 对应物件下标,才能定位到具体物件。
+2. **circle 的正式渲染** —— combo 数字、combo 颜色、命中/miss 动画。目前是 `DebugRenderer` 的占位圈。这是"可交付"观感上最缺的一块。
+3. **HP drain(D1)** —— `drainPerMs` 的真实推导。stable 回放自带 `replay.lifeBar` 可作 ground truth。
+4. **M2 滑条体的 WebGL 渲染** —— 最硬的一块。路径采样(`sliderPath.ts`)已经有了,渲染没做。
+5. **[D8](./TECH-NOTES.md):渲染器还没有回归测试** —— 判定有 532 个测试兜着,渲染一个都没有。
 
 
 ## 复现验收的方法
