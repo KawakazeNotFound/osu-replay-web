@@ -16,6 +16,12 @@
 .gitignore      text
 .gitattributes  text
 
+# git hook 是 shell 脚本,**必须**是 LF。
+# CRLF 的 sh 脚本在部分系统上会报 `/bin/sh^M: bad interpreter` 直接失效 ——
+# 而 hook 失效是静默的:提交照样成功,只是闸门没跑。
+.githooks/* text eol=lf
+*.sh        text eol=lf
+
 # osu! 素材是二进制或带特殊编码,永不做换行转换。
 # (这些目前都被 .gitignore 排除,此处是双保险 —— 万一将来要入库小样本)
 *.osr binary
