@@ -21,6 +21,33 @@ import { lastIndexAtOrBefore } from '../core/util/search';
 const PLAYFIELD_WIDTH = 512;
 const PLAYFIELD_HEIGHT = 384;
 
+/**
+ * 判定区占可用区域的比例。
+ *
+ * ## 这个数不能瞎写
+ *
+ * 核 `osu.Game.Rulesets.Osu/UI/OsuPlayfieldAdjustmentContainer.cs`(2026-08-24):
+ *
+ * ```csharp
+ * private const float playfield_size_adjust = 0.8f;
+ * // Calculated from osu!stable as 512 (default gamefield size) / 640 (default window size)
+ * Size = new Vector2(playfield_size_adjust);
+ * InternalChild = new Container { FillMode = FillMode.Fit, FillAspectRatio = 4f / 3, ... };
+ * ```
+ *
+ * 即:**先把可用区域两个维度各乘 0.8,再在那个盒子里按 4:3 letterbox**。
+ * 等价于 `min(W/512, H/384) * 0.8`。
+ *
+ * ⚠️ 之前这里写的是 `0.9`(我随手定的),导致判定区与泡泡都**大了 12.5%** ——
+ * 用户实测一眼看出来"泡泡大小不对"。
+ *
+ * 另一处已核实的事:**默认没有垂直偏移**。`ScalingContainer` 里
+ * `Position = new Vector2(0, (PlayfieldShift ? 8f : 0f) * Scale.X)`,
+ * 而 `PlayfieldShift` 只有 `AlignWithStoryboard` 才置真(为了对齐老故事板)。
+ * 所以正常回放里判定区就是**居中**的 —— 我们的居中是对的。
+ */
+const PLAYFIELD_SIZE_ADJUST = 0.8;
+
 /** 光标拖尾显示的时长(ms,谱面时间) */
 const TRAIL_MS = 400;
 
@@ -92,12 +119,13 @@ export class DebugRenderer {
     this.canvas.width = Math.max(1, Math.round(rect.width * dpr));
     this.canvas.height = Math.max(1, Math.round(rect.height * dpr));
 
-    // 等比缩放并居中(letterbox),留 5% 边距
+    // 等比缩放并居中(letterbox)。0.8 是 osu 的 playfield_size_adjust,
+    // 见 PLAYFIELD_SIZE_ADJUST 的注释 —— 这个数是核过源码的,别改成"看起来舒服"的值
     const fit = Math.min(
       this.canvas.width / PLAYFIELD_WIDTH,
       this.canvas.height / PLAYFIELD_HEIGHT,
     );
-    this.scale = fit * 0.9;
+    this.scale = fit * PLAYFIELD_SIZE_ADJUST;
     this.offsetX = (this.canvas.width - PLAYFIELD_WIDTH * this.scale) / 2;
     this.offsetY = (this.canvas.height - PLAYFIELD_HEIGHT * this.scale) / 2;
   }
