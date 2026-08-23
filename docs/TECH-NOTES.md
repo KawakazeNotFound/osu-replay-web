@@ -287,6 +287,79 @@ AR 9.15 下 preempt:lazer 得 **577**,该包得 **577.5**。而堆叠阈值是
 ⚠️ 若将来要用它的**滑条 tick 生成**(M2 的 maxCombo 精确计算需要),同样要先核
 它的 tick 间隔算法是否与 master 一致,不能直接信。
 
+### B16. lazer 的 standardised 记分(ScoreV2)—— ✅ `已实现且精确复现`(2026-08-24)
+
+`src/core/sim/lazerScoring.ts`。核 `ScoreProcessor.cs` + `HitResult.cs`。
+
+```
+Accuracy      = currentBaseScore / currentMaximumBaseScore
+comboProgress = currentComboPortion / maximumComboPortion
+accProgress   = currentAccuracyJudgementCount / maximumAccuracyJudgementCount
+
+分数 = round( 500000·Accuracy·comboProgress + 500000·Accuracy⁵·accProgress + bonusPortion )
+```
+
+累积(`ApplyResultInternal`):
+
+```
+若 MaxResult.AffectsAccuracy():  currentMaximumBaseScore += 基础分(MaxResult); accCount++
+若 Type.AffectsAccuracy():       currentBaseScore += 基础分(Type)
+若 Type.IsBonus():               currentBonusPortion += 基础分(Type)
+否则若 Type.IsScorable():         currentComboPortion += 基础分(MaxResult) · combo^0.5
+```
+
+**三处与 ScoreV1 根本不同:**
+
+1. **combo 开平方**(`COMBO_EXPONENT = 0.5`)后归一化 → 总分恒 ≤ 100 万。
+   ScoreV1 是线性放大且无上限,所以长图能上千万。
+2. **准确率进了两次** —— 一次线性(乘 comboProgress 那半),一次五次方。
+   `Accuracy⁵` 让 99% 与 100% 的差距被显著放大。
+3. **上限来自"完美走一遍"的模拟**(源码里 `Reset` 会跑一次 autoplay)。
+   所以算分前必须先按满分遍历整张图 → `lazerMaxima()`。
+
+**基础分表**(`GetBaseScoreForResult`):Great 300、Ok 100、Meh 50、
+**SliderTailHit 150**、LargeTickHit 30、SmallTickHit 10、SmallBonus 10、LargeBonus 50。
+
+#### 滑条末端:lazer 与 stable 的根本分歧
+
+| | lazer | stable(`ClassicSliderBehaviour`) |
+|---|---|---|
+| 末端的 MaxResult | `SliderTailHit`(基础分 **150**) | `LargeTickHit`(30) |
+| 末端的 MinResult | `IgnoreMiss` | `LargeTickMiss` |
+| 漏掉末端 | **不断 combo,也不加 combo** | **断 combo** |
+
+关键依据:`HitResultExtensions.AffectsCombo` 的列表里**没有 `IgnoreMiss`**,
+而 `LargeTickMiss` 在。所以 combo 规则必须按记分体系分支 —— 见 `judgement.ts`
+的 `ScoreModel`。这不是"换个算分函数"能解决的。
+
+#### 验证结果
+
+| 样本 | `.osr` | 我们 | 差 |
+|---|---|---|---|
+| `lazer` | 966,821 | **966,821** | ✅ **0** |
+| `lazer-moonlight` | 741,861 | 743,545 | 1684(0.23%) |
+
+`lazer-moonlight` 的 0.23% 完全能被它已知的判定偏差解释(1 个 300 判成 100、
+maxCombo 多 1)。另外 `accCount` 两边恰好相等(346/346、1258/1258)——
+`lazerMaxima` 独立构造的物件图与判定器产生的事件图一致,是个有力的交叉验证。
+
+#### ⚠️ lazer 的分数**会回跌**(反直觉但正确)
+
+`Accuracy` 是个 running 比值:一次 miss 让分母 `currentMaximumBaseScore` 增长
+而分子不变,准确率就掉;而 `acc` 与 `acc⁵` 都是**乘性**因子,所以即使
+`comboProgress` 在涨,总分也可能净减少。真实 lazer 里 miss 的瞬间显示分数确实回跌。
+
+我最初写了"分数单调不减"的断言,两个 lazer 样本都失败 —— **前提错了,不是代码错**。
+现在断言的是那个更精确的性质:**回跌只发生在拿不到满档的判定上**。
+
+#### 仍未实现
+
+- **转盘的 bonus 刻度**(`SpinnerTick` → `SmallBonus`、`SpinnerBonusTick` → `LargeBonus`)。
+  `bonusPortion` 是加在 100 万**之外**的,漏掉它会让带转盘的图偏低。
+  `lazer.osr` 无转盘所以不受影响;`lazer-moonlight` 有 2 个。
+- **lazer 的 mod 系数**。lazer 每个 mod 自带 `ScoreMultiplier`,与 stable 的表**不同**,
+  现在硬编码为 1。两个样本都是 NM 所以没暴露。
+
 ### B14. stable 分数公式的难度系数 —— `已实现`(2026-08-23,`src/core/sim/stableScoring.ts`)
 
 公式在 `LegacyRulesetExtensions.CalculateDifficultyPeppyStars(difficulty, objectCount, drainLength)`:
