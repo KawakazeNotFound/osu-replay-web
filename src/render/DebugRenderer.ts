@@ -1,5 +1,5 @@
 import { ReplayKey, normalizeKeys } from '../core/replay/frames';
-import { radiusFromCS } from '../core/sim/difficulty';
+import { preemptFromAR, radiusFromCS } from '../core/sim/difficulty';
 import { sliderBallAt } from '../core/sim/sliderTracking';
 import {
   HitResult,
@@ -32,6 +32,31 @@ const TRAIL_MS = 400;
  * 于是圈被点掉之后还会继续画到视觉窗口末尾 —— 表现就是"泡泡点完了不消失"。
  */
 const HIT_FADE_MS = 240;
+
+/**
+ * 占位的 combo 配色。
+ *
+ * ⚠️ **这是硬编码的假数据。** 真实来源有三层优先级:
+ * 1. `.osu` 的 `[Colours]` 段(`Combo1:` … `Combo8:`)
+ * 2. 皮肤 `skin.ini` 的 `[Colours]`
+ * 3. 皮肤没给就用 osu 默认色
+ *
+ * 而且皮肤可以设 `ComboOverride` 反过来压过谱面。我们**一个都没解析** ——
+ * 谱面的 `[Colours]` 目前根本没读进 `SimBeatmap`。皮肤系统是 M4。
+ * 所以这里只是让不同 combo 段能看出区别,颜色本身没有任何权威性。
+ */
+const PLACEHOLDER_COMBO_COLOURS = [
+  '#5ac8fa', '#ffdd55', '#7fe07f', '#ff8fb1', '#c08fff', '#ffa64d',
+] as const;
+
+function comboColourOf(comboIndex: number): string {
+  const list = PLACEHOLDER_COMBO_COLOURS;
+  return list[((comboIndex % list.length) + list.length) % list.length]!;
+}
+
+function clamp01(value: number): number {
+  return value < 0 ? 0 : value > 1 ? 1 : value;
+}
 
 /**
  * canvas2d 调试渲染器 —— **M0 专用,不追求观感**。
@@ -135,16 +160,27 @@ export class DebugRenderer {
     const { ctx } = this;
     const radius = radiusFromCS(timeline.beatmap.difficulty.circleSize) * this.scale;
 
+    // ⚠️ 之前这里硬编码 800ms 当 preempt —— 必错:AR 越高 preempt 越短
+    // (AR10 只有 450ms),硬编码会让高 AR 的图 approach circle 收缩得过慢。
+    // 真实值:TimePreempt = trunc(difficultyRange(AR, 1800, 1200, 450))
+    const preempt = preemptFromAR(timeline.beatmap.difficulty.approachRate);
+    // TimeFadeIn = 400 * min(1, TimePreempt / 450)
+    const fadeIn = 400 * Math.min(1, preempt / 450);
+
     // 倒序绘制:osu! 的图层约定是越早的物件在越上层
     for (let i = state.activeObjects.length - 1; i >= 0; i--) {
       const active = state.activeObjects[i]!;
       const { object, result } = active;
 
-      // 命中淡出。滑条要等整条走完(endTime)才消失,所以只对非滑条生效
-      let alpha = 1;
-      let grow = 1;
-      const hitTime = result?.hitTime ?? null;
+      const untilHit = object.startTime - state.time;
 
+      // 淡入:物件在 startTime - preempt 出现,over TimeFadeIn 淡到不透明。
+      // 少了这个物件会"啪"地凭空出现
+      let alpha = untilHit > 0 ? clamp01((preempt - untilHit) / fadeIn) : 1;
+      let grow = 1;
+
+      // 命中淡出。滑条要等整条走完(endTime)才消失,所以只对非滑条生效
+      const hitTime = result?.hitTime ?? null;
       if (hitTime !== null && object.kind === 'circle') {
         const since = state.time - hitTime;
         if (since >= HIT_FADE_MS) continue; // 淡完了,不画
@@ -173,20 +209,28 @@ export class DebugRenderer {
       ctx.strokeStyle =
         missed ? '#ff4d6d'
         : object.kind === 'spinner' ? '#7f7fff'
-        : '#5ac8fa';
+        : comboColourOf(object.comboIndex);
       ctx.lineWidth = Math.max(1.5, 2 * this.scale);
       ctx.beginPath();
       ctx.arc(cx, cy, radius * grow, 0, Math.PI * 2);
       ctx.stroke();
 
-      // approach circle:从 preempt 开始时的 4 倍半径收缩到 1 倍
-      const untilHit = object.startTime - state.time;
+      // combo 内序号。皮肤系统(M4)会换成 default-N 贴图
+      if (object.kind !== 'spinner' && hitTime === null) {
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+        ctx.font = `${Math.round(radius * 0.9)}px system-ui, sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(String(object.indexInCombo), cx, cy);
+      }
+
+      // approach circle:从 4 倍半径按真实 preempt 收缩到 1 倍
       if (untilHit > 0) {
-        const preemptRadius = radius * (1 + 3 * Math.min(1, untilHit / 800));
-        ctx.strokeStyle = 'rgba(90, 200, 250, 0.35)';
+        const approachRadius = radius * (1 + 3 * Math.min(1, untilHit / preempt));
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.45)';
         ctx.lineWidth = Math.max(1, 1.5 * this.scale);
         ctx.beginPath();
-        ctx.arc(cx, cy, preemptRadius, 0, Math.PI * 2);
+        ctx.arc(cx, cy, approachRadius, 0, Math.PI * 2);
         ctx.stroke();
       }
 
