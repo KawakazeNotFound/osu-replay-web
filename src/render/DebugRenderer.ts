@@ -1,6 +1,12 @@
 import { ReplayKey, normalizeKeys } from '../core/replay/frames';
 import { radiusFromCS } from '../core/sim/difficulty';
-import type { PlaybackState, ReplayTimeline } from '../core/sim/types';
+import { sliderBallAt } from '../core/sim/sliderTracking';
+import {
+  HitResult,
+  type PlaybackState,
+  type ReplayTimeline,
+  type SimHitObject,
+} from '../core/sim/types';
 import { lastIndexAtOrBefore } from '../core/util/search';
 
 /**
@@ -17,6 +23,15 @@ const PLAYFIELD_HEIGHT = 384;
 
 /** 光标拖尾显示的时长(ms,谱面时间) */
 const TRAIL_MS = 400;
+
+/**
+ * 命中后的淡出时长(ms,谱面时间)。
+ *
+ * osu! 里圈被点中后会**立刻**开始命中动画(扩散 + 淡出),而不是等到判定窗口结束。
+ * 之前的实现无条件画出 `activeObjects` 里的每一个物件、完全不看判定结果,
+ * 于是圈被点掉之后还会继续画到视觉窗口末尾 —— 表现就是"泡泡点完了不消失"。
+ */
+const HIT_FADE_MS = 240;
 
 /**
  * canvas2d 调试渲染器 —— **M0 专用,不追求观感**。
@@ -105,9 +120,16 @@ export class DebugRenderer {
   }
 
   /**
-   * 物件占位绘制:圈 + approach circle。
+   * 物件绘制:滑条体 + 圈 + approach circle + 命中淡出。
    *
-   * M0 只画轮廓,滑条也退化成一个圈(滑条体是 M2 的专项,见 TECH-NOTES D4)。
+   * ## 命中后的消失
+   *
+   * 关键是**查 `active.result`**,而不是只按时间窗画。圈一旦被判定,就从
+   * `hitTime` 起走 {@link HIT_FADE_MS} 的淡出(同时轻微扩散),淡完就不画。
+   * miss 的物件用红色标出,不淡出扩散。
+   *
+   * ⚠️ 这里仍然**不持有跨帧状态** —— 淡出进度是从 `state.time - hitTime` 算出来的,
+   * 所以倒退与任意 seek 都正确。若改成"命中时启动一个动画计时器"就会破坏这一点。
    */
   private drawHitObjects(timeline: ReplayTimeline, state: PlaybackState): void {
     const { ctx } = this;
@@ -116,17 +138,45 @@ export class DebugRenderer {
     // 倒序绘制:osu! 的图层约定是越早的物件在越上层
     for (let i = state.activeObjects.length - 1; i >= 0; i--) {
       const active = state.activeObjects[i]!;
-      const { object } = active;
+      const { object, result } = active;
+
+      // 命中淡出。滑条要等整条走完(endTime)才消失,所以只对非滑条生效
+      let alpha = 1;
+      let grow = 1;
+      const hitTime = result?.hitTime ?? null;
+
+      if (hitTime !== null && object.kind === 'circle') {
+        const since = state.time - hitTime;
+        if (since >= HIT_FADE_MS) continue; // 淡完了,不画
+        if (since >= 0) {
+          const progress = since / HIT_FADE_MS;
+          alpha = 1 - progress;
+          grow = 1 + 0.4 * progress; // 命中瞬间轻微扩散
+        }
+      }
 
       // 用**堆叠后**的坐标 —— osu 会把位置相近、时间相邻的物件依次错开,
       // 而 lazer 的命中检测也是基于 StackedPosition。见 sim/stacking.ts
       const cx = this.toScreenX(object.stackedX);
       const cy = this.toScreenY(object.stackedY);
 
-      ctx.strokeStyle = object.kind === 'spinner' ? '#7f7fff' : '#5ac8fa';
+      const missed = result !== null && result.result === HitResult.Miss;
+
+      ctx.save();
+      ctx.globalAlpha = alpha;
+
+      // 滑条体:画在圈底下
+      if (object.kind === 'slider' && object.path.count > 0) {
+        this.drawSliderBody(object, radius, state.time);
+      }
+
+      ctx.strokeStyle =
+        missed ? '#ff4d6d'
+        : object.kind === 'spinner' ? '#7f7fff'
+        : '#5ac8fa';
       ctx.lineWidth = Math.max(1.5, 2 * this.scale);
       ctx.beginPath();
-      ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+      ctx.arc(cx, cy, radius * grow, 0, Math.PI * 2);
       ctx.stroke();
 
       // approach circle:从 preempt 开始时的 4 倍半径收缩到 1 倍
@@ -139,7 +189,59 @@ export class DebugRenderer {
         ctx.arc(cx, cy, preemptRadius, 0, Math.PI * 2);
         ctx.stroke();
       }
+
+      ctx.restore();
     }
+  }
+
+  /**
+   * 滑条体 + 滑条球。
+   *
+   * ## 这是 canvas2d 的近似,不是 M2 的正式实现
+   *
+   * osu! 真正的滑条体是**带深度测试的 WebGL 三角带**(内亮外暗的渐变管道),
+   * 自相交处不会叠加亮度。这里用 `lineWidth = 直径` 的粗折线近似 ——
+   * 交叠处会变亮,与 osu 观感不同。正式实现是 M2,见 TECH-NOTES D4。
+   *
+   * 但"完全不画"比"画得不像"糟糕得多:没有滑条体根本看不出回放在跟什么。
+   *
+   * `object.path` 存的是**相对起点的偏移**,要加上堆叠后的起点。
+   */
+  private drawSliderBody(object: SimHitObject, radius: number, time: number): void {
+    const { ctx } = this;
+    const { path } = object;
+
+    const px = (k: number) => this.toScreenX(object.stackedX + path.x[k]!);
+    const py = (k: number) => this.toScreenY(object.stackedY + path.y[k]!);
+
+    ctx.save();
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+
+    ctx.beginPath();
+    ctx.moveTo(px(0), py(0));
+    for (let k = 1; k < path.count; k++) ctx.lineTo(px(k), py(k));
+
+    // 外圈描边(边框)后再画内部填充,近似 osu 的"暗边 + 亮心"
+    ctx.strokeStyle = 'rgba(90, 200, 250, 0.30)';
+    ctx.lineWidth = radius * 2;
+    ctx.stroke();
+
+    ctx.strokeStyle = 'rgba(20, 30, 45, 0.55)';
+    ctx.lineWidth = radius * 2 - Math.max(2, 3 * this.scale);
+    ctx.stroke();
+
+    ctx.restore();
+
+    // 滑条球:只在滑条进行中画
+    if (time < object.startTime || time > object.endTime) return;
+
+    const ball = sliderBallAt(object, time);
+    ctx.strokeStyle = '#ffdd55';
+    ctx.lineWidth = Math.max(1.5, 2 * this.scale);
+    ctx.beginPath();
+    ctx.arc(this.toScreenX(ball.x), this.toScreenY(ball.y), radius, 0, Math.PI * 2);
+    ctx.stroke();
   }
 
   /**
