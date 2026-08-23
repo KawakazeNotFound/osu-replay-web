@@ -40,6 +40,7 @@ function obj(
     stackedX: 256,
     stackedY: 192,
     spans: 1,
+    tickCount: 0,
     newCombo: false,
     comboIndex: 0,
     indexInCombo: 1,

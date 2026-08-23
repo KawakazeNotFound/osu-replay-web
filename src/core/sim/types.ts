@@ -80,6 +80,14 @@ export interface SimHitObject {
   /** 滑条的 span 数(= repeat + 1)。circle / spinner 恒为 1。 */
   readonly spans: number;
 
+  /**
+   * 滑条的刻度总数(全部 span 之和)。circle / spinner 恒为 0。
+   *
+   * 由 `sim/sliderParts.ts` 按 lazer 的 `SliderEventGenerator` 算出。
+   * combo 与 maxCombo 依赖它。
+   */
+  readonly tickCount: number;
+
   readonly newCombo: boolean;
   /** 第几个 combo(用于取 combo colour) */
   readonly comboIndex: number;

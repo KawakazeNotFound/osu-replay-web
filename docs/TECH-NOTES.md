@@ -221,7 +221,48 @@ Beatmap
 
 意义:这四个数记的是"产生了主判定的物件数",滑条 tick / repeat **不计入**。所以它是一条不依赖判定器就能跑的强断言 —— 对不上就说明物件解析漏了或多了,而那会让**每一条**后续判定错位。已落在 `judgementAccuracy.test.ts` 的 L1。
 
-顺带验证了 maxCombo 的构成:`lazer.osu` 那张 FC 回放 maxCombo = 346,恰好等于 `物件248 + 滑条尾95 + repeat3`(该图 0 tick)。`stable` 那张 FC maxCombo = 1151,而 `766 + 340 + 27 = 1133`,差 **18 = 滑条 tick 数**。
+### B12. `countMiss == 0` **不等于** full combo —— `已确认`(2026-08-23,踩坑记录)
+
+**这条纠正了 B9 里一个基于错误前提的推论。**
+
+stable 里漏掉滑条尾或某个刻度会产生 **slider break**:它**打断 combo,但不计入 miss**
+(整条滑条仍按命中了多少部件给出 100 或 50)。所以 0 miss 的成绩完全可以没拿到
+理论最大 combo。
+
+**踩坑过程**:我曾想用"FC 回放的 maxCombo"反推滑条刻度数 ——
+`stable`:`1151 - (物件 766 + 尾 340 + repeat 27) = 18`,于是断定该图有 18 个刻度。
+实现刻度公式后算出 **19**,以为是浮点边界问题,去查 `GetPrecisionAdjustedBeatLength`。
+
+手算下来公式是对的:该图唯一带刻度的长滑条(t=220431,inherited SV `-333.333`)
+`precisionAdjustedBeatLength = 327.869 × 3.3333 = 1092.9` →
+`Velocity = 170 / 1092.9 = 0.15555` → `scoringDistance = 51.0` → 19 个刻度。
+**错的是前提**:该回放理论最大 1152、实得 1151,在最后一条滑条上断了一次 combo。
+
+**教训**:`.osr` 的 maxCombo 只能当**上界**,不能当等式 —— 除非已知是真 full combo。
+`lazer.osu` 那张就是真 FC(理论 346 == 实得 346),它才是精确确认刻度公式的那个样本。
+
+### B13. 滑条刻度与理论最大 combo —— `已确认`(2026-08-23)
+
+`tickDistance = velocity × beatLength / sliderTickRate`,刻度按该步长从 `tickDistance`
+起铺,条件 `distance < pathDistance - velocity × 10`(**严格小于**),每个 span 各铺一遍。
+
+⚠️ lazer 注释明确说**不要**把 `scoringDistance` 写成 `BASE_SCORING_DISTANCE × sliderMultiplier`
+—— 它刻意保留 stable 的浮点误差("intentionally introducing floating point errors to
+match stable")。所以要走 `velocity × beatLength`,不能"化简"。
+
+`beatLength` 取该滑条起点处生效的**非继承** timing point(`controlPoints.timingPointAt()`)。
+
+**理论最大 combo** = 物件数 + 刻度 + repeat + 滑条尾。实测:
+
+| 样本 | 物件 | 刻度 | repeat | 尾 | 理论 | `.osr` 实得 |
+|---|---|---|---|---|---|---|
+| stable | 766 | 19 | 27 | 340 | **1152** | 1151(断过一次) |
+| lazer | 248 | 0 | 3 | 95 | **346** | **346** ✅ 精确 |
+
+`lazer.osu` 刻度为 0 是正常的:`tickDistance ≈ 170` 大于路径长度 128,循环一次都不进。
+
+⚠️ **未实现**:刻度/尾的**判定**(玩家是否真的按住滑过)。那需要跟踪光标是否在
+follow circle 内,属 M2。目前只算"理论"值,用作上界断言。
 
 ### B11. `osu-standard-stable` 与当前 lazer master 有实质分歧 —— `已确认`(2026-08-23)
 

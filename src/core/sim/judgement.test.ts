@@ -111,6 +111,7 @@ function circle(startTime: number, x = 256, y = 192): SimHitObject {
     stackHeight: 0,
     stackedX: x, stackedY: y,
     spans: 1,
+    tickCount: 0,
     newCombo: false,
     comboIndex: 0,
     indexInCombo: 1,

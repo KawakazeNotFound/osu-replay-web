@@ -1,6 +1,7 @@
-import type { Beatmap, HitObject, Vector2 } from 'osu-classes';
+import type { Beatmap, ControlPointInfo, HitObject, Vector2 } from 'osu-classes';
 
 import { OBJECT_RADIUS, preemptFromAR, radiusFromCS } from '../sim/difficulty';
+import { tickCountOf } from '../sim/sliderParts';
 import { computeStackHeights, stackOffset, type StackableObject } from '../sim/stacking';
 import type {
   BreakPeriod,
@@ -78,7 +79,13 @@ function toSimBeatmap(raw: Beatmap): SimBeatmap {
   const difficulty = toDifficulty(raw);
 
   return {
-    hitObjects: toSimHitObjects(raw.hitObjects, difficulty, raw.fileFormat, raw.general.stackLeniency),
+    hitObjects: toSimHitObjects(
+      raw.hitObjects,
+      difficulty,
+      raw.fileFormat,
+      raw.general.stackLeniency,
+      raw.controlPoints,
+    ),
     breaks: toBreaks(raw),
     difficulty,
     audioLeadIn: raw.general.audioLeadIn,
@@ -93,13 +100,15 @@ function toSimBeatmap(raw: Beatmap): SimBeatmap {
  * 实测恒为 `undefined`,只有 `isNewCombo` / `comboOffset` 是解析出来的。
  * 所以这里必须自己走一遍 lazer 的 `UpdateComboInformation` 逻辑。
  *
- * 堆叠同理:osu-parsers 不算 `stackHeight`,见 `sim/stacking.ts`。
+ * 堆叠同理:osu-parsers 不算 `stackHeight`,见 `sim/stacking.ts`;
+ * 滑条刻度数也不算,见 `sim/sliderParts.ts`。
  */
 function toSimHitObjects(
   objects: readonly HitObject[],
   difficulty: Difficulty,
   fileFormat: number,
   stackLeniency: number,
+  controlPoints: ControlPointInfo,
 ): SimHitObject[] {
   // 解析器给的顺序理论上按 startTime,但不假定 —— 判定与视觉索引都依赖有序
   const sorted = [...objects].sort((a, b) => a.startTime - b.startTime);
@@ -107,22 +116,25 @@ function toSimHitObjects(
   const forced = forceNewCombos(sorted);
 
   // Pass 1:先摊平成堆叠算法需要的形状(它只要位置与时间)
-  const flat = sorted.map<StackableObject & { readonly spans: number }>((o) => {
-    const kind = kindOf(o);
-    const spans = spansOf(o, kind);
-    const end = endPositionOf(o, kind, spans);
+  const flat = sorted.map<StackableObject & { readonly spans: number; readonly tickCount: number }>(
+    (o) => {
+      const kind = kindOf(o);
+      const spans = spansOf(o, kind);
+      const end = endPositionOf(o, kind, spans);
 
-    return {
-      kind,
-      startTime: o.startTime,
-      endTime: endTimeOf(o, kind),
-      x: o.startPosition.x,
-      y: o.startPosition.y,
-      endX: end.x,
-      endY: end.y,
-      spans,
-    };
-  });
+      return {
+        kind,
+        startTime: o.startTime,
+        endTime: endTimeOf(o, kind),
+        x: o.startPosition.x,
+        y: o.startPosition.y,
+        endX: end.x,
+        endY: end.y,
+        spans,
+        tickCount: tickCountFor(o, kind, spans, controlPoints, difficulty.sliderTickRate),
+      };
+    },
+  );
 
   // Pass 2:堆叠。必须在全部物件就位后算 —— 它要前后互相参照
   const heights = computeStackHeights(flat, {
@@ -168,6 +180,7 @@ function toSimHitObjects(
       stackedX: f.x + offset,
       stackedY: f.y + offset,
       spans: f.spans,
+      tickCount: f.tickCount,
       newCombo,
       comboIndex,
       // 圈内数字从 1 开始,而 lazer 的 IndexInCurrentCombo 从 0 开始
@@ -178,8 +191,39 @@ function toSimHitObjects(
   return out;
 }
 
-/** 滑条的 span 数 = repeat + 1。circle / spinner 恒为 1。 */
-function spansOf(o: HitObject, kind: HitObjectKind): number {
+/**
+ * 滑条刻度数。
+ *
+ * 需要该滑条起点处生效的(**非继承**)timing point 的 `beatLength` ——
+ * `controlPoints.timingPointAt()` 给的就是它。刻度公式见 `sim/sliderParts.ts`。
+ */
+function tickCountFor(
+  o: HitObject,
+  kind: HitObjectKind,
+  spans: number,
+  controlPoints: ControlPointInfo,
+  sliderTickRate: number,
+): number {
+  if (kind !== 'slider') return 0;
+
+  const slider = o as unknown as {
+    readonly velocity?: unknown;
+    readonly path?: { readonly distance?: unknown };
+  };
+
+  const velocity = slider.velocity;
+  const pathDistance = slider.path?.distance;
+
+  if (typeof velocity !== 'number' || !Number.isFinite(velocity) || velocity <= 0) return 0;
+  if (typeof pathDistance !== 'number' || !Number.isFinite(pathDistance)) return 0;
+
+  const beatLength = controlPoints.timingPointAt(o.startTime)?.beatLength;
+  if (typeof beatLength !== 'number' || !Number.isFinite(beatLength) || beatLength <= 0) return 0;
+
+  return tickCountOf({ pathDistance, velocity, spans, beatLength, sliderTickRate });
+}
+
+/** 滑条的 span 数 = repeat + 1。circle / spinner 恒为 1。 */function spansOf(o: HitObject, kind: HitObjectKind): number {
   if (kind !== 'slider') return 1;
 
   const spans = (o as unknown as { readonly spans?: unknown }).spans;

@@ -47,6 +47,7 @@ function makeBeatmap(overrides: Partial<SimBeatmap> = {}): SimBeatmap {
     stackedX: 100 + i * 20,
     stackedY: 150,
     spans: 1,
+    tickCount: 0,
     newCombo: i === 0 || i === 5,
     comboIndex: i < 5 ? 0 : 1,
     indexInCombo: (i < 5 ? i : i - 5) + 1,
