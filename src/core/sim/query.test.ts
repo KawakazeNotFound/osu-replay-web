@@ -4,6 +4,7 @@ import { buildReplayFrames } from '../replay/frames';
 import { HIT_ANIMATION_MS, preemptFromAR } from './difficulty';
 import { activeObjectsAt, hpAt, stateAt } from './query';
 import { buildTimeline, type JudgementPass } from './timeline';
+import { makeHitObject } from './testFixtures';
 import {
   HitResult,
   ZERO_CUMULATIVE,
@@ -34,24 +35,19 @@ function makeBeatmap(overrides: Partial<SimBeatmap> = {}): SimBeatmap {
     [13100, 13100, 'circle'],
   ];
 
-  const hitObjects: SimHitObject[] = specs.map(([startTime, endTime, kind], i) => ({
-    kind,
-    startTime,
-    endTime,
-    x: 100 + i * 20,
-    y: 150,
-    // 本文件测的是 stateAt / activeObjectsAt / hpAt,与堆叠无关 —— 给中性值
-    endX: 100 + i * 20,
-    endY: 150,
-    stackHeight: 0,
-    stackedX: 100 + i * 20,
-    stackedY: 150,
-    spans: 1,
-    tickCount: 0,
-    newCombo: i === 0 || i === 5,
-    comboIndex: i < 5 ? 0 : 1,
-    indexInCombo: (i < 5 ? i : i - 5) + 1,
-  }));
+  // 本文件测的是 stateAt / activeObjectsAt / hpAt,与堆叠、滑条部件无关
+  const hitObjects: SimHitObject[] = specs.map(([startTime, endTime, kind], i) =>
+    makeHitObject({
+      kind,
+      startTime,
+      endTime,
+      x: 100 + i * 20,
+      y: 150,
+      newCombo: i === 0 || i === 5,
+      comboIndex: i < 5 ? 0 : 1,
+      indexInCombo: (i < 5 ? i : i - 5) + 1,
+    }),
+  );
 
   return {
     hitObjects,

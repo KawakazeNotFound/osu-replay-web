@@ -1,7 +1,8 @@
 import type { Beatmap, ControlPointInfo, HitObject, Vector2 } from 'osu-classes';
 
 import { OBJECT_RADIUS, preemptFromAR, radiusFromCS } from '../sim/difficulty';
-import { tickCountOf } from '../sim/sliderParts';
+import { EMPTY_PATH, samplePath, type SliderPathSamples } from '../sim/sliderPath';
+import { generateSliderParts, type SliderPart } from '../sim/sliderParts';
 import { computeStackHeights, stackOffset, type StackableObject } from '../sim/stacking';
 import type {
   BreakPeriod,
@@ -116,25 +117,36 @@ function toSimHitObjects(
   const forced = forceNewCombos(sorted);
 
   // Pass 1:先摊平成堆叠算法需要的形状(它只要位置与时间)
-  const flat = sorted.map<StackableObject & { readonly spans: number; readonly tickCount: number }>(
-    (o) => {
-      const kind = kindOf(o);
-      const spans = spansOf(o, kind);
-      const end = endPositionOf(o, kind, spans);
+  const flat = sorted.map<
+    StackableObject & {
+      readonly spans: number;
+      readonly tickCount: number;
+      readonly parts: readonly SliderPart[];
+      readonly path: SliderPathSamples;
+    }
+  >((o) => {
+    const kind = kindOf(o);
+    const spans = spansOf(o, kind);
+    const end = endPositionOf(o, kind, spans);
+    const endTime = endTimeOf(o, kind);
 
-      return {
-        kind,
-        startTime: o.startTime,
-        endTime: endTimeOf(o, kind),
-        x: o.startPosition.x,
-        y: o.startPosition.y,
-        endX: end.x,
-        endY: end.y,
-        spans,
-        tickCount: tickCountFor(o, kind, spans, controlPoints, difficulty.sliderTickRate),
-      };
-    },
-  );
+    const slider =
+      kind === 'slider'
+        ? sliderGeometryOf(o, spans, endTime, controlPoints, difficulty.sliderTickRate)
+        : { tickCount: 0, parts: [] as readonly SliderPart[], path: EMPTY_PATH };
+
+    return {
+      kind,
+      startTime: o.startTime,
+      endTime,
+      x: o.startPosition.x,
+      y: o.startPosition.y,
+      endX: end.x,
+      endY: end.y,
+      spans,
+      ...slider,
+    };
+  });
 
   // Pass 2:堆叠。必须在全部物件就位后算 —— 它要前后互相参照
   const heights = computeStackHeights(flat, {
@@ -181,6 +193,8 @@ function toSimHitObjects(
       stackedY: f.y + offset,
       spans: f.spans,
       tickCount: f.tickCount,
+      parts: f.parts,
+      path: f.path,
       newCombo,
       comboIndex,
       // 圈内数字从 1 开始,而 lazer 的 IndexInCurrentCombo 从 0 开始
@@ -192,35 +206,74 @@ function toSimHitObjects(
 }
 
 /**
- * 滑条刻度数。
+ * 滑条的几何与部件:刻度数、嵌套部件、路径采样。
  *
+ * 三者共用同一组输入(路径长度、速度、beatLength),所以一次算完。
  * 需要该滑条起点处生效的(**非继承**)timing point 的 `beatLength` ——
- * `controlPoints.timingPointAt()` 给的就是它。刻度公式见 `sim/sliderParts.ts`。
+ * `controlPoints.timingPointAt()` 给的就是它。公式见 `sim/sliderParts.ts`。
  */
-function tickCountFor(
+function sliderGeometryOf(
   o: HitObject,
-  kind: HitObjectKind,
   spans: number,
+  endTime: number,
   controlPoints: ControlPointInfo,
   sliderTickRate: number,
-): number {
-  if (kind !== 'slider') return 0;
-
+): {
+  readonly tickCount: number;
+  readonly parts: readonly SliderPart[];
+  readonly path: SliderPathSamples;
+} {
   const slider = o as unknown as {
     readonly velocity?: unknown;
-    readonly path?: { readonly distance?: unknown };
+    readonly path?: {
+      readonly distance?: unknown;
+      positionAt?: (progress: number) => Vector2;
+    };
   };
 
   const velocity = slider.velocity;
   const pathDistance = slider.path?.distance;
+  const positionAt = slider.path?.positionAt;
 
-  if (typeof velocity !== 'number' || !Number.isFinite(velocity) || velocity <= 0) return 0;
-  if (typeof pathDistance !== 'number' || !Number.isFinite(pathDistance)) return 0;
+  const usable =
+    typeof velocity === 'number' &&
+    Number.isFinite(velocity) &&
+    velocity > 0 &&
+    typeof pathDistance === 'number' &&
+    Number.isFinite(pathDistance) &&
+    pathDistance > 0;
+
+  if (!usable) {
+    // 退化滑条(零长度 / 速度算不出来):不产生部件,也没有路径。
+    // 不抛错 —— 这种谱面确实存在,让它退化成"只有头"比整张图打不开好
+    return { tickCount: 0, parts: [], path: EMPTY_PATH };
+  }
 
   const beatLength = controlPoints.timingPointAt(o.startTime)?.beatLength;
-  if (typeof beatLength !== 'number' || !Number.isFinite(beatLength) || beatLength <= 0) return 0;
+  if (typeof beatLength !== 'number' || !Number.isFinite(beatLength) || beatLength <= 0) {
+    return { tickCount: 0, parts: [], path: EMPTY_PATH };
+  }
 
-  return tickCountOf({ pathDistance, velocity, spans, beatLength, sliderTickRate });
+  const input = {
+    pathDistance,
+    velocity,
+    spans,
+    beatLength,
+    sliderTickRate,
+    startTime: o.startTime,
+    duration: Math.max(0, endTime - o.startTime),
+  };
+
+  const parts = generateSliderParts(input);
+
+  return {
+    tickCount: parts.filter((p) => p.kind === 'tick').length,
+    parts,
+    path:
+      typeof positionAt === 'function'
+        ? samplePath(pathDistance, (progress) => positionAt.call(slider.path, progress))
+        : EMPTY_PATH,
+  };
 }
 
 /** 滑条的 span 数 = repeat + 1。circle / spinner 恒为 1。 */function spansOf(o: HitObject, kind: HitObjectKind): number {

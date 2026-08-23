@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { buildReplayFrames } from '../replay/frames';
 import { HIT_ANIMATION_MS, TIMELINE_PADDING_MS, preemptFromAR } from './difficulty';
+import { makeHitObject } from './testFixtures';
 import {
   buildDrainProfile,
   buildTimeline,
@@ -27,24 +28,8 @@ function obj(
   endTime: number = startTime,
   kind: SimHitObject['kind'] = 'circle',
 ): SimHitObject {
-  return {
-    kind,
-    startTime,
-    endTime,
-    x: 256,
-    y: 192,
-    // 本文件测的是 timeline 构建(break 分段、范围并集),与堆叠无关 —— 给中性值
-    endX: 256,
-    endY: 192,
-    stackHeight: 0,
-    stackedX: 256,
-    stackedY: 192,
-    spans: 1,
-    tickCount: 0,
-    newCombo: false,
-    comboIndex: 0,
-    indexInCombo: 1,
-  };
+  // 本文件测的是 timeline 构建(break 分段、范围并集),与堆叠、滑条部件无关
+  return makeHitObject({ kind, startTime, endTime });
 }
 
 function makeBeatmap(

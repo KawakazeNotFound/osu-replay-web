@@ -1,5 +1,9 @@
-import { normalizeKeys, type ReplayFrames } from '../replay/frames';
+import { ReplayKey, normalizeKeys, type ReplayFrames } from '../replay/frames';
+import { firstIndexAtOrAfter, lastIndexAtOrBefore } from '../util/search';
 import { MISS_WINDOW, hitWindowsFromOD, radiusFromCS, type HitWindows } from './difficulty';
+import { TAIL_LENIENCY, type SliderPart } from './sliderParts';
+import { SliderTracker } from './sliderTracking';
+import { judgeSpinner } from './spinner';
 import type { JudgementPass } from './timeline';
 import {
   HitResult,
@@ -11,6 +15,60 @@ import {
   type SimBeatmap,
   type SimHitObject,
 } from './types';
+
+/** 判定结果的中间表示。排序与累积之前先收集成这个。 */
+interface RawJudgement {
+  readonly time: number;
+  readonly objectIndex: number;
+  readonly result: HitResult;
+  readonly part: JudgementPart;
+  /**
+   * 计入 300/100/50/miss 的结果。`undefined` = 该事件不计数。
+   *
+   * ⚠️ 与 {@link result} 分开是必须的:combo 由**每个部件**驱动,而
+   * 300/100/50 **一个物件只有一个**。滑条尤其如此 —— 见 {@link SliderScoring}。
+   */
+  readonly counted?: HitResult;
+}
+
+/**
+ * 滑条整体判定的计数口径。
+ *
+ * ## 这是实测比对出来的,不是猜的
+ *
+ * 把我们的判定与 4 个真实 `.osr` 头部逐项对照后发现:
+ *
+ * **lazer**:`count300/100/50` = circle 的结果 + **滑条头**的结果。
+ * `lazer.osr` 上精确吻合(circle 149 great + 头 94 great = 243 = 真实值;
+ * 4 + 1 = 5 = 真实值)。原因:lazer 里滑条本身不产生 `Great/Ok/Meh`,
+ * 是 `SliderHeadCircle` 产生的;刻度走 `LargeTickHit` 等**另外的** statistics
+ * 键,不进 `count300`。
+ *
+ * **stable**:滑条整体按**命中部件的比例**给一个 300/100/50。
+ * `stable.osr` 上"circle + 头"比真实少 14 个 300、多 14 个 100 ——
+ * 正是那 14 条"头判得晚但部件全中"的滑条:stable 仍给 300。
+ */
+export type SliderScoring = 'stable' | 'lazer';
+
+/**
+ * stable 的滑条整体判定:按命中部件的比例。
+ *
+ * 部件 = 头 + 全部刻度 + 全部 repeat + 末端。
+ *
+ * | 命中比例 | 结果 |
+ * |---|---|
+ * | 全部 | 300 |
+ * | > 1/2 | 100 |
+ * | ≥ 1 个 | 50 |
+ * | 0 | miss |
+ */
+export function aggregateSliderResult(hit: number, total: number): HitResult {
+  if (total <= 0) return HitResult.Miss;
+  if (hit >= total) return HitResult.Great;
+  if (hit * 2 > total) return HitResult.Ok;
+  if (hit > 0) return HitResult.Meh;
+  return HitResult.Miss;
+}
 
 /**
  * circle 判定。
@@ -146,6 +204,13 @@ export interface CircleJudgementOptions {
    * 转盘是转的不是点的,正常不该消耗按下。这个开关只为测试保留。
    */
   readonly spinnersConsumePresses?: boolean;
+
+  /**
+   * 滑条整体判定的计数口径。默认 `'stable'`。
+   *
+   * 载入回放时应按 `info.isLazer` 传入 —— 两者规则不同,见 {@link SliderScoring}。
+   */
+  readonly sliderScoring?: SliderScoring;
 }
 
 /**
@@ -205,12 +270,7 @@ function judgeCircles(
   }
 
   /** 判定结果的时间线。先收集,最后统一排序 + 累积。 */
-  const raw: {
-    time: number;
-    objectIndex: number;
-    result: HitResult;
-    part: JudgementPart;
-  }[] = [];
+  const raw: RawJudgement[] = [];
 
   /**
    * 最早一个"可能尚未解析"的物件下标。
@@ -239,7 +299,16 @@ function judgeCircles(
       result,
       hitTime: result === HitResult.Miss ? null : time,
     };
-    raw.push({ time, objectIndex: index, result, part: partOf(o.kind) });
+
+    // circle 的结果直接计数;滑条头是否计数取决于口径(见 SliderScoring),
+    // 在 judgeSliderParts 里统一处理
+    raw.push({
+      time,
+      objectIndex: index,
+      result,
+      part: partOf(o.kind),
+      ...(o.kind === 'circle' ? { counted: result } : {}),
+    });
   };
 
   /**
@@ -299,7 +368,267 @@ function judgeCircles(
     apply(i, objects[i]!.startTime + windows.meh, HitResult.Miss);
   }
 
+  // 滑条部件(刻度 / repeat / 末端)—— 必须在所有头判定完之后,
+  // 因为部件判定依赖"滑条头被哪个键命中"
+  judgeSliderParts(
+    objects,
+    frames,
+    radius,
+    objectResults,
+    raw,
+    options.sliderScoring ?? 'stable',
+  );
+
+  // 转盘 —— 不吃按下,靠转圈数判定,与前面完全独立
+  for (let i = 0; i < n; i++) {
+    const spinner = objects[i]!;
+    if (spinner.kind !== 'spinner') continue;
+
+    const { result } = judgeSpinner(spinner, frames, beatmap.difficulty.overallDifficulty);
+
+    objectResults[i] = {
+      objectIndex: i,
+      result,
+      hitTime: result === HitResult.Miss ? null : spinner.endTime,
+    };
+
+    raw.push({
+      time: spinner.endTime,
+      objectIndex: i,
+      result,
+      part: 'spinner',
+      counted: result,
+    });
+  }
+
   return { events: accumulate(raw), objectResults };
+}
+
+/**
+ * 判定滑条的嵌套部件。
+ *
+ * 对每条滑条建一个 {@link SliderTracker},按部件时间顺序推进,在各部件的判定
+ * 时刻问"此刻是否在跟踪"。规则见 `sliderTracking.ts` 与 TECH-NOTES B15。
+ *
+ * ## 两处与 lazer 对齐的顺序规则
+ *
+ * 1. **滑条头未命中则所有部件全 miss。** lazer 的 `TryJudgeNestedObject` 要求
+ *    `slider.HeadCircle.Judged`,而且头 miss 时 `HitAction` 为 null → 跟踪键
+ *    不受限但玩家通常也没在跟;这里直接短路,结果一致且更明确。
+ * 2. **末端(legacyLastTick)有 36ms 提前宽容。** lazer:tail 在
+ *    `timeOffset >= TAIL_LENIENCY`(即 `t >= 末端时刻 - 36`)就可以判 ——
+ *    所以那 36ms 内**任意一帧**在跟踪都算命中。
+ *
+ * ## 未建模
+ *
+ * lazer 的 `PostProcessHeadJudgement`(头命中瞬间"追认"已到时刻的部件)。
+ * 它只在"头命中得很晚、部件时刻已过"时才有影响 —— 而那种情况下 tracker 从
+ * 头命中时刻开始推进,结论通常相同。若 A2 出现个别滑条差 1,这里是嫌疑点。
+ */
+function judgeSliderParts(
+  objects: readonly SimHitObject[],
+  frames: ReplayFrames,
+  radius: number,
+  objectResults: (ObjectResult | null)[],
+  raw: RawJudgement[],
+  scoring: SliderScoring,
+): void {
+  for (let i = 0; i < objects.length; i++) {
+    const slider = objects[i]!;
+    if (slider.kind !== 'slider') continue;
+
+    const head = objectResults[i];
+    const headResult = head?.result ?? HitResult.Miss;
+    const headHit = headResult !== HitResult.Miss;
+
+    /** 部件命中数与总数,用于 stable 的比例聚合。头也算一个部件。 */
+    let hitParts = headHit ? 1 : 0;
+    let totalParts = 1;
+
+    if (slider.parts.length > 0) {
+      if (!headHit) {
+        // 头没命中 → 所有部件 miss(见函数注释第 1 条)
+        for (const part of slider.parts) {
+          totalParts++;
+          raw.push({
+            time: part.time,
+            objectIndex: i,
+            result: HitResult.Miss,
+            part: partNameOf(part.kind),
+          });
+        }
+      } else {
+        // 单次前向扫过滑条时间范围内的**每一帧**,顺路记下各部件时刻的跟踪状态。
+        //
+        // ⚠️ 必须逐帧推进,不能只在部件时刻问一次 —— 跟踪的 follow area 有滞回:
+        // 初始 `tracking = false` 用的是**小圈**。真实 osu 是从滑条头开始每帧更新,
+        // 在头那里光标就在小圈内,于是"咬住"并切到大圈。
+        // 只在部件时刻采样的话,第一个部件常常因为还没咬住而落在小圈外 → 假 miss。
+        // (实测:改成逐帧前,stable.osu 的 maxCombo 从 1152 掉到 317)
+        const results = trackPartsOverFrames(slider, frames, radius, head?.hitTime ?? null);
+
+        for (let k = 0; k < slider.parts.length; k++) {
+          const part = slider.parts[k]!;
+          const hit = results[k]!;
+
+          totalParts++;
+          if (hit) hitParts++;
+
+          raw.push({
+            time: part.time,
+            objectIndex: i,
+            result: hit ? HitResult.Great : HitResult.Miss,
+            part: partNameOf(part.kind),
+          });
+        }
+      }
+    }
+
+    // ---- 计数:一个滑条只产生一个 300/100/50/miss ----
+    if (scoring === 'lazer') {
+      // lazer:滑条头的结果**就是**滑条的 Great/Ok/Meh;刻度走另外的 statistics 键
+      markCounted(raw, i, 'sliderHead', headResult);
+    } else {
+      // stable:按命中部件比例聚合,计在**末端**时刻(那才是结果揭晓的时候)
+      const aggregate = aggregateSliderResult(hitParts, totalParts);
+      const endPart = slider.parts.at(-1);
+
+      if (endPart) {
+        markCounted(raw, i, partNameOf(endPart.kind), aggregate);
+      } else {
+        // 退化滑条(没有部件):只能按头算
+        markCounted(raw, i, 'sliderHead', aggregate);
+      }
+
+      // objectResults 反映的是**整体**结果,渲染层要看这个
+      objectResults[i] = {
+        objectIndex: i,
+        result: aggregate,
+        hitTime: head?.hitTime ?? null,
+      };
+    }
+  }
+}
+
+/**
+ * 逐帧跟踪整条滑条,返回每个部件是否命中(与 `slider.parts` 同序)。
+ *
+ * 一次前向扫描完成所有部件 —— 跟踪状态有滞回,必须连续推进。
+ *
+ * ## 各部件的判定窗口
+ *
+ * - 刻度 / repeat:在其时刻**当下**是否在跟踪
+ * - **末端有 36ms 提前宽容**:lazer 的 tail 在 `timeOffset >= TAIL_LENIENCY`
+ *   (即 `t >= 末端时刻 - 36`)就可以判 —— 所以那 36ms 内**任意一帧**在跟踪都算命中
+ *
+ * 起点从"滑条头命中时刻"开始(而不是 startTime)—— 头命中之前谈不上跟踪键的限制,
+ * 而且 lazer 的嵌套物件判定要求头已判定。
+ */
+function trackPartsOverFrames(
+  slider: SimHitObject,
+  frames: ReplayFrames,
+  radius: number,
+  headHitTime: number | null,
+): boolean[] {
+  const parts = slider.parts;
+  const hit = new Array<boolean>(parts.length).fill(false);
+  if (parts.length === 0) return hit;
+
+  const tracker = new SliderTracker(slider, frames, radius);
+  tracker.setHeadResult(headKeyOf(frames, headHitTime));
+
+  // 每个部件的判定窗口起点(末端提前 36ms)
+  const windowStart = parts.map((p) =>
+    p.kind === 'legacyLastTick' ? p.time + TAIL_LENIENCY : p.time,
+  );
+
+  const from = headHitTime ?? slider.startTime;
+  let index = firstIndexAtOrAfter(frames.time, frames.count, from);
+
+  // 先在起点问一次,让跟踪器有机会在滑条头处"咬住"
+  let tracking = tracker.advanceTo(from);
+  applyToWindows(hit, parts, windowStart, from, tracking);
+
+  while (index < frames.count && frames.time[index]! <= slider.endTime) {
+    const t = frames.time[index]!;
+    tracking = tracker.advanceTo(t);
+    applyToWindows(hit, parts, windowStart, t, tracking);
+    index++;
+  }
+
+  // 帧可能不落在部件时刻上,所以每个部件时刻再问一次
+  for (let k = 0; k < parts.length; k++) {
+    if (hit[k]) continue;
+    if (tracker.advanceTo(parts[k]!.time)) hit[k] = true;
+  }
+
+  return hit;
+}
+
+/** 把某一时刻的跟踪状态记到所有"窗口已开启且时刻未过"的部件上。 */
+function applyToWindows(
+  hit: boolean[],
+  parts: readonly SliderPart[],
+  windowStart: readonly number[],
+  t: number,
+  tracking: boolean,
+): void {
+  if (!tracking) return;
+
+  for (let k = 0; k < parts.length; k++) {
+    if (hit[k]) continue;
+    if (t >= windowStart[k]! && t <= parts[k]!.time) hit[k] = true;
+  }
+}
+
+/**
+ * 把某个已收集的判定标记为"计数事件"。
+ *
+ * `raw` 是数组(元素只读),所以就地替换那一项。找**最后一个**匹配的 ——
+ * 一条滑条可能有多个同类部件(多个刻度),末端只有一个。
+ */
+function markCounted(
+  raw: RawJudgement[],
+  objectIndex: number,
+  part: JudgementPart,
+  counted: HitResult,
+): void {
+  for (let i = raw.length - 1; i >= 0; i--) {
+    const entry = raw[i]!;
+    if (entry.objectIndex === objectIndex && entry.part === part) {
+      raw[i] = { ...entry, counted };
+      return;
+    }
+  }
+}
+
+/**
+ * 找出命中滑条头的是哪个键。
+ *
+ * 取命中时刻那一帧按住的键。若两个键同时按住,取 M1 —— lazer 用的是实际触发
+ * `OnPressed` 的那个 action,我们从回放帧只能看到"哪些键按住",这是必要的近似。
+ */
+function headKeyOf(frames: ReplayFrames, hitTime: number | null): number {
+  if (hitTime === null) return 0;
+
+  const index = lastIndexAtOrBefore(frames.time, frames.count, hitTime);
+  if (index < 0) return 0;
+
+  const keys = normalizeKeys(frames.keys[index]!);
+  if (keys & ReplayKey.M1) return ReplayKey.M1;
+  if (keys & ReplayKey.M2) return ReplayKey.M2;
+  return 0;
+}
+
+function partNameOf(kind: SliderPart['kind']): JudgementPart {
+  switch (kind) {
+    case 'tick':
+      return 'sliderTick';
+    case 'repeat':
+      return 'sliderRepeat';
+    case 'legacyLastTick':
+      return 'sliderTail';
+  }
 }
 
 /**
@@ -347,14 +676,7 @@ function withinCircle(
  * `buildTimeline` 要求事件按时间升序,且每个事件的 `cum` 是该事件**生效后**的
  * 累积状态 —— 这是 `stateAt` 能 O(log n) 的全部原因。
  */
-function accumulate(
-  raw: readonly {
-    time: number;
-    objectIndex: number;
-    result: HitResult;
-    part: JudgementPart;
-  }[],
-): JudgementEvent[] {
+function accumulate(raw: readonly RawJudgement[]): JudgementEvent[] {
   // 同一时刻的多个判定按物件下标稳定排序,保证可复现
   const sorted = [...raw].sort((a, b) => a.time - b.time || a.objectIndex - b.objectIndex);
 
@@ -362,7 +684,7 @@ function accumulate(
   let cum: CumulativeState = ZERO_CUMULATIVE;
 
   for (const r of sorted) {
-    cum = applyToCumulative(cum, r.result, r.part);
+    cum = applyToCumulative(cum, r.result, r.counted);
     events.push({
       time: r.time,
       objectIndex: r.objectIndex,
@@ -378,37 +700,33 @@ function accumulate(
 /**
  * 单条判定对累积状态的影响。
  *
- * **combo** 对 circle 与滑条头都递增(osu 里命中滑条头就 +1 combo)。
+ * **combo** 由**每个部件**驱动(circle、滑条头、每个刻度 / repeat / 末端)——
+ * osu 里命中滑条头 +1、每个刻度 +1、末端 +1;miss 任何一个都断连。
  *
- * **300/100/50 计数**只算 `part === 'circle'`。原因:stable 里整条滑条只产生
- * **一个** 300/100/50,取决于命中了多少个部件(头/刻度/repeat/尾),
- * 而刻度与尾尚未实现。把滑条头当成 300 会让准确率虚高。
+ * **300/100/50 计数**只由带 `counted` 的事件驱动,**一个物件只有一个** ——
+ * 口径见 {@link SliderScoring}。
  *
  * ⚠️ `score` 是**占位实现**(基础分之和,无 combo 加成、无难度系数)。
- * stable 的真实公式是 `基础分 + 基础分 * (combo - 1) * 难度系数 / 25`,
- * 难度系数由 HP+CS+OD 之和推出 —— 需要另核源码,尚未做。
+ * 真实公式见 TECH-NOTES B14。
  *
  * HP 变化也未实现,见 TECH-NOTES D1。
  */
 function applyToCumulative(
   previous: CumulativeState,
   result: HitResult,
-  part: JudgementPart,
+  counted: HitResult | undefined,
 ): CumulativeState {
   const isMiss = result === HitResult.Miss;
   const combo = isMiss ? 0 : previous.combo + 1;
-
-  // 只有 circle 计入 300/100/50 —— 滑条整体判定要等刻度实现
-  const counts = part === 'circle';
 
   return {
     score: previous.score + baseScoreOf(result),
     combo,
     maxCombo: Math.max(previous.maxCombo, combo),
-    countGreat: previous.countGreat + (counts && result === HitResult.Great ? 1 : 0),
-    countOk: previous.countOk + (counts && result === HitResult.Ok ? 1 : 0),
-    countMeh: previous.countMeh + (counts && result === HitResult.Meh ? 1 : 0),
-    countMiss: previous.countMiss + (counts && isMiss ? 1 : 0),
+    countGreat: previous.countGreat + (counted === HitResult.Great ? 1 : 0),
+    countOk: previous.countOk + (counted === HitResult.Ok ? 1 : 0),
+    countMeh: previous.countMeh + (counted === HitResult.Meh ? 1 : 0),
+    countMiss: previous.countMiss + (counted === HitResult.Miss ? 1 : 0),
     // HP 变化尚未实现(见 TECH-NOTES D1),先原样带过
     hp: previous.hp,
   };

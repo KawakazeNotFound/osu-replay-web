@@ -40,7 +40,10 @@ describe.skipIf(AVAILABLE.length === 0)('判定复现差距报告', () => {
         loadReplay(read(join(FIXTURE_DIR, `${name}.osr`))),
       ]);
       const timeline = buildTimeline(bm.beatmap, rp.frames, {
-        judge: createCircleJudgement(),
+        judge: createCircleJudgement({
+          // 两种记分的滑条计数口径不同,见 judgement.ts 的 SliderScoring
+          sliderScoring: rp.info.isLazer ? 'lazer' : 'stable',
+        }),
       });
 
       const objects = bm.beatmap.hitObjects;
@@ -48,48 +51,50 @@ describe.skipIf(AVAILABLE.length === 0)('判定复现差距报告', () => {
       const sliders = objects.filter((o) => o.kind === 'slider').length;
       const spinners = objects.filter((o) => o.kind === 'spinner').length;
 
-      // 仅 circle 的判定(权威计数,与 .osr 的 300/100/50 同口径)
-      const circleOnly = { great: 0, ok: 0, meh: 0, miss: 0 };
-      // 滑条头的判定(计 combo,不计 300/100/50)
-      const heads = { great: 0, ok: 0, meh: 0, miss: 0 };
-
-      for (const e of timeline.events) {
-        const bucket = e.part === 'circle' ? circleOnly : e.part === 'sliderHead' ? heads : null;
-        if (!bucket) continue;
-        if (e.result === HitResult.Great) bucket.great++;
-        else if (e.result === HitResult.Ok) bucket.ok++;
-        else if (e.result === HitResult.Meh) bucket.meh++;
-        else if (e.result === HitResult.Miss) bucket.miss++;
-      }
-
       const real = rp.info;
       const cum = timeline.events.at(-1)?.cum;
       const realTotal = real.count300 + real.count100 + real.count50 + real.countMiss;
-      const circleTotal = circleOnly.great + circleOnly.ok + circleOnly.meh + circleOnly.miss;
+      const simTotal =
+        (cum?.countGreat ?? 0) + (cum?.countOk ?? 0) + (cum?.countMeh ?? 0) + (cum?.countMiss ?? 0);
+
+      // 滑条部件的命中情况
+      const parts = { tick: [0, 0], repeat: [0, 0], tail: [0, 0] } as Record<
+        string,
+        [number, number]
+      >;
+      for (const e of timeline.events) {
+        const bucket =
+          e.part === 'sliderTick' ? 'tick'
+          : e.part === 'sliderRepeat' ? 'repeat'
+          : e.part === 'sliderTail' ? 'tail'
+          : null;
+        if (!bucket) continue;
+        parts[bucket]![1]++;
+        if (e.result !== HitResult.Miss) parts[bucket]![0]++;
+      }
 
       lines.push(`\n=== ${name} (${real.isLazer ? 'lazer' : 'stable'}, mods ${real.mods}) ===`);
       lines.push(`  谱面: ${objects.length} 物件 = circle ${circles} + slider ${sliders} + spinner ${spinners}`);
-      lines.push(`  OD ${bm.beatmap.difficulty.overallDifficulty.toFixed(2)} CS ${bm.beatmap.difficulty.circleSize.toFixed(2)}`);
       lines.push('');
       lines.push(`                    300      100      50     miss    合计`);
-      lines.push(`  .osr 头部(全图)${pad(real.count300)} ${pad(real.count100)} ${pad(real.count50)} ${pad(real.countMiss)}  ${pad(realTotal)}`);
-      lines.push(`  我们 circle    ${pad(circleOnly.great)} ${pad(circleOnly.ok)} ${pad(circleOnly.meh)} ${pad(circleOnly.miss)}  ${pad(circleTotal)}`);
-      lines.push(`  我们 滑条头    ${pad(heads.great)} ${pad(heads.ok)} ${pad(heads.meh)} ${pad(heads.miss)}  ${pad(heads.great + heads.ok + heads.meh + heads.miss)}`);
+      lines.push(`  .osr 头部     ${pad(real.count300)} ${pad(real.count100)} ${pad(real.count50)} ${pad(real.countMiss)}  ${pad(realTotal)}`);
+      lines.push(`  我们模拟      ${pad(cum?.countGreat ?? 0)} ${pad(cum?.countOk ?? 0)} ${pad(cum?.countMeh ?? 0)} ${pad(cum?.countMiss ?? 0)}  ${pad(simTotal)}`);
+      lines.push(`  差            ${pad(real.count300 - (cum?.countGreat ?? 0))} ${pad(real.count100 - (cum?.countOk ?? 0))} ${pad(real.count50 - (cum?.countMeh ?? 0))} ${pad(real.countMiss - (cum?.countMiss ?? 0))}  ${pad(realTotal - simTotal)}`);
       lines.push('');
-      lines.push(`  circle 数 == 我们的 circle 判定数: ${
-        circleTotal === circles ? '✅' : `❌ ${circleTotal} vs ${circles}`}`);
-      lines.push(`  滑条数 == 我们的滑条头判定数: ${
-        heads.great + heads.ok + heads.meh + heads.miss === sliders ? '✅' : '❌'}`);
+      const exact =
+        real.count300 === cum?.countGreat &&
+        real.count100 === cum?.countOk &&
+        real.count50 === cum?.countMeh &&
+        real.countMiss === cum?.countMiss;
+      lines.push(`  ${exact ? '✅ 判定计数完全一致!' : '⚠️ 仍有差异'}`);
       lines.push('');
-      lines.push(`  === 关键判据:circle 的 miss 数 ===`);
-      lines.push(`  我们判出的 circle miss: ${circleOnly.miss}`);
-      lines.push(`  .osr 全图 miss(含滑条/转盘): ${real.countMiss}`);
-      lines.push(`  ${circleOnly.miss > real.countMiss
-        ? `❌ 多出 ${circleOnly.miss - real.countMiss} 个 —— 全图 miss 是上界,circle 不可能超过它`
-        : '✅ 未超过上界'}`);
-      lines.push('');
+      lines.push(`  滑条部件命中率: 刻度 ${parts.tick![0]}/${parts.tick![1]}` +
+        `  repeat ${parts.repeat![0]}/${parts.repeat![1]}` +
+        `  末端 ${parts.tail![0]}/${parts.tail![1]}`);
       lines.push(`  maxCombo: .osr ${real.maxCombo}  vs  我们 ${cum?.maxCombo ?? 0}` +
-        `  (我们缺滑条刻度/repeat/尾,必然偏小)`);
+        `  ${real.maxCombo === cum?.maxCombo ? '✅ 一致' : `(差 ${real.maxCombo - (cum?.maxCombo ?? 0)})`}`);
+      lines.push(`  准确率: .osr ${(real.accuracy * 100).toFixed(2)}%` +
+        `  vs  我们 ${(accuracyOf(cum) * 100).toFixed(2)}%`);
     }
 
     console.log(lines.join('\n'));
@@ -98,4 +103,12 @@ describe.skipIf(AVAILABLE.length === 0)('判定复现差距报告', () => {
 
 function pad(n: number): string {
   return String(n).padStart(7);
+}
+
+/** 与 `query.ts` 的 `accuracyOf` 同公式,这里独立算一份免得循环依赖。 */
+function accuracyOf(cum: { countGreat: number; countOk: number; countMeh: number; countMiss: number } | undefined): number {
+  if (!cum) return 0;
+  const hits = cum.countGreat + cum.countOk + cum.countMeh + cum.countMiss;
+  if (hits === 0) return 1;
+  return (300 * cum.countGreat + 100 * cum.countOk + 50 * cum.countMeh) / (300 * hits);
 }

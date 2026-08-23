@@ -41,7 +41,7 @@ function minDistanceFromEnd(velocity: number): number {
   return velocity * 10;
 }
 
-/** lazer `SliderEventGenerator.SLIDER_MAX_DISTANCE`。 */
+/** lazer `SliderEventGenerator` 里的 `max_length`,给用户手改过的边缘谱面兜底。 */
 const SLIDER_MAX_DISTANCE = 100000;
 
 export interface SliderTickInput {
@@ -98,10 +98,134 @@ export function tickCountOf(input: SliderTickInput): number {
 }
 
 /**
+ * 滑条末端判定的历史偏移(ms,**负数**)。
+ *
+ * lazer 的 `SliderEventGenerator.TAIL_LENIENCY = -36`。滑条的最终判定点历史上
+ * 被前移了 36ms,现在只为 osu!catch 转换与难度兼容保留 —— 但 stable 回放的
+ * 判定确实按这个走。
+ */
+export const TAIL_LENIENCY = -36;
+
+/** 滑条的嵌套部件种类。 */
+export type SliderPartKind = 'tick' | 'repeat' | 'legacyLastTick';
+
+/**
+ * 滑条的一个嵌套部件。
+ *
+ * ⚠️ 只生成**参与判定**的三种。lazer 的 `SliderEventGenerator` 还会产出 `Head`
+ * 与 `Tail`,但:
+ * - `Head` 我们已经当作滑条本体判了(见 `judgement.ts`)
+ * - `Tail` 在 lazer 的 `Slider.CreateNestedHitObjects` 里**没有**被用来建嵌套物件;
+ *   真正的 `SliderTailCircle` 是从 **`LegacyLastTick`** 建的(时刻 = 末尾 - 36ms)
+ */
+export interface SliderPart {
+  readonly kind: SliderPartKind;
+  /** 判定时刻(ms) */
+  readonly time: number;
+  /** 路径进度 0..1,用于算该部件的位置 */
+  readonly pathProgress: number;
+  readonly spanIndex: number;
+}
+
+export interface SliderPartsInput extends SliderTickInput {
+  readonly startTime: number;
+  /** 整条滑条的时长(ms) */
+  readonly duration: number;
+}
+
+/**
+ * 生成滑条的嵌套部件,按时间升序。
+ *
+ * 逐行对照 lazer 的 `SliderEventGenerator.Generate`。几处不能改的细节:
+ *
+ * 1. **刻度进度从路径起点算**(`d / length`),不是从 span 起点 ——
+ *    这样 repeat span 的刻度会落在完全相同的位置上
+ * 2. **反向 span 的时间进度取反**(`1 - pathProgress`),然后整段 `reverse()`
+ *    让时间恢复升序
+ * 3. `legacyLastTick` 的时刻是 `max(起点 + 总时长/2, 末尾 - 36)` ——
+ *    **取较晚者**,所以短于 72ms 的滑条宽容会小于 36ms
+ * 4. lazer 注释说末尾那个表达式**故意不化简**,为了匹配 stable 的浮点精度
+ */
+export function generateSliderParts(input: SliderPartsInput): SliderPart[] {
+  const spans = Math.max(1, input.spans);
+  const spanDuration = input.duration / spans;
+
+  const length = Math.min(SLIDER_MAX_DISTANCE, input.pathDistance);
+  const tickDistance = clamp(tickDistanceOf(input), 0, length);
+  const minFromEnd = minDistanceFromEnd(input.velocity);
+
+  const parts: SliderPart[] = [];
+
+  for (let span = 0; span < spans; span++) {
+    const spanStartTime = input.startTime + span * spanDuration;
+    const reversed = span % 2 === 1;
+
+    if (tickDistance > 0 && Number.isFinite(tickDistance)) {
+      const ticks: SliderPart[] = [];
+
+      for (let d = tickDistance; d <= length; d += tickDistance) {
+        // lazer:先判 <= length,再在循环体里 break —— 与 d < length - minFromEnd 等价
+        if (d >= length - minFromEnd) break;
+
+        const pathProgress = d / length;
+        const timeProgress = reversed ? 1 - pathProgress : pathProgress;
+
+        ticks.push({
+          kind: 'tick',
+          time: spanStartTime + timeProgress * spanDuration,
+          pathProgress,
+          spanIndex: span,
+        });
+      }
+
+      // 反向 span 的刻度是按时间倒序生成的,翻回来
+      if (reversed) ticks.reverse();
+      parts.push(...ticks);
+    }
+
+    if (span < spans - 1) {
+      parts.push({
+        kind: 'repeat',
+        time: spanStartTime + spanDuration,
+        pathProgress: (span + 1) % 2,
+        spanIndex: span,
+      });
+    }
+  }
+
+  // legacyLastTick —— 它才是 stable 的"滑条末端"判定点
+  const totalDuration = spans * spanDuration;
+  const finalSpanIndex = spans - 1;
+  const finalSpanStartTime = input.startTime + finalSpanIndex * spanDuration;
+
+  const legacyTime = Math.max(
+    input.startTime + totalDuration / 2,
+    // 刻意不化简成 startTime + totalDuration + TAIL_LENIENCY,见函数注释第 4 条
+    finalSpanStartTime + spanDuration + TAIL_LENIENCY,
+  );
+
+  let legacyProgress = (legacyTime - finalSpanStartTime) / spanDuration;
+  if (spans % 2 === 0) legacyProgress = 1 - legacyProgress;
+
+  parts.push({
+    kind: 'legacyLastTick',
+    time: legacyTime,
+    pathProgress: clamp(legacyProgress, 0, 1),
+    spanIndex: finalSpanIndex,
+  });
+
+  return parts;
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return value < min ? min : value > max ? max : value;
+}
+
+/**
  * 一个物件对 combo 的贡献(全部命中时)。
  *
  * - circle / spinner:1
- * - slider:1(头)+ 刻度数 + repeat 数 + 1(尾)
+ * - slider:1(头)+ 刻度数 + repeat 数 + 1(末端)
  */
 export function comboContributionOf(object: SimHitObject): number {
   if (object.kind !== 'slider') return 1;

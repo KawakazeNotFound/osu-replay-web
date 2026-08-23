@@ -1,4 +1,6 @@
 import type { CursorSample, ReplayFrames } from '../replay/frames';
+import type { SliderPathSamples } from './sliderPath';
+import type { SliderPart } from './sliderParts';
 
 /**
  * 判定结果。
@@ -87,6 +89,21 @@ export interface SimHitObject {
    * combo 与 maxCombo 依赖它。
    */
   readonly tickCount: number;
+
+  /**
+   * 滑条的嵌套部件(刻度 / repeat / 末端),按时间升序。circle / spinner 为空。
+   *
+   * 判定这些部件需要跟踪光标,见 `sim/sliderTracking.ts`。
+   */
+  readonly parts: readonly SliderPart[];
+
+  /**
+   * 滑条路径的采样折线,**相对物件起点**的偏移。circle / spinner 为空路径。
+   *
+   * 判定要用它求任意时刻的滑条球位置(跟踪),M2 画滑条体也要用。
+   * 见 `sim/sliderPath.ts`。
+   */
+  readonly path: SliderPathSamples;
 
   readonly newCombo: boolean;
   /** 第几个 combo(用于取 combo colour) */

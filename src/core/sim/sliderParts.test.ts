@@ -12,6 +12,7 @@ import {
   tickCountOf,
   tickDistanceOf,
 } from './sliderParts';
+import { makeHitObject } from './testFixtures';
 import type { SimHitObject } from './types';
 
 /* ---------------- 纯函数 ---------------- */
@@ -81,15 +82,8 @@ describe('tickCountOf', () => {
 });
 
 describe('comboContributionOf', () => {
-  const base = (kind: SimHitObject['kind'], spans = 1, tickCount = 0): SimHitObject => ({
-    kind,
-    startTime: 0,
-    endTime: kind === 'circle' ? 0 : 500,
-    x: 0, y: 0, endX: 0, endY: 0,
-    stackHeight: 0, stackedX: 0, stackedY: 0,
-    spans, tickCount,
-    newCombo: false, comboIndex: 0, indexInCombo: 1,
-  });
+  const base = (kind: SimHitObject['kind'], spans = 1, tickCount = 0): SimHitObject =>
+    makeHitObject({ kind, spans, tickCount });
 
   it('circle 与 spinner 各贡献 1', () => {
     expect(comboContributionOf(base('circle'))).toBe(1);
