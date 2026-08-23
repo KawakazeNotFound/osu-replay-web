@@ -1,7 +1,7 @@
 # 工作进度
 
 > 最后更新:2026-08-23
-> 当前阶段:**M1 —— circle 渲染与判定(谱面解析已完成)**
+> 当前阶段:**M1 —— 谱面解析与堆叠已完成,判定器待实现**
 
 关联文档:[架构设计](./ARCHITECTURE.md) · [技术问题记录](./TECH-NOTES.md)
 
@@ -24,7 +24,7 @@
 | | 内容 | 状态 |
 |---|---|---|
 | **M0** | 地基:解析 + 时钟 + timeline + `stateAt` + 调试渲染器 | ✅ **完成** |
-| **M1** | circle 渲染 + approach circle + combo 数字 + circle 判定 | 🟡 谱面解析已完成,判定器未开始 |
+| **M1** | circle 渲染 + approach circle + combo 数字 + circle 判定 | 🟡 谱面解析 + 堆叠已完成,判定器未开始 |
 | M2 | 滑条(路径生成 + WebGL slider body)← 最难 | ⬜ 未开始 |
 | M3 | spinner + 记分/HP/连击 HUD | ⬜ 未开始 |
 | M4 | stable 皮肤系统(.osk,预设 + 用户上传) | ⬜ 未开始 |
@@ -144,8 +144,8 @@
 | `query.test.ts` | 18 | `stateAt` 幂等/顺序无关/倒序一致、`activeObjectsAt` **对照暴力扫描**、`hpAt` 的 break 分段 |
 | `replayLoader.test.ts` | 46 | mod 位掩码格式化 + 5 个真实 `.osr` 的字段映射(素材缺失则跳过) |
 
-> M1 又加了三个文件:`beatmapLoader.test.ts`(61)、`judgementAccuracy.test.ts`(23 + 24 todo)、
-> `performance.test.ts`(16)。当前总计 **302 通过 + 24 todo**。
+> M1 又加了四个文件:`beatmapLoader.test.ts`(61)、`judgementAccuracy.test.ts`(23 + 24 todo)、
+> `performance.test.ts`(16)、`stacking.test.ts`(51)。当前总计 **345 通过 + 24 todo**。
 
 > `timeline.test.ts` 由另一次会话补写(补的原因:`timeline.ts` 当时是唯一没有专属测试的核心模块 ——
 > `query.test.ts` 只间接覆盖到它,而 `buildDrainProfile` 的 break 裁剪/合并、`buildTimeline` 的
