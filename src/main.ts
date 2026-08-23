@@ -11,6 +11,12 @@
 
 import { AudioClock } from './core/clock/AudioClock';
 import {
+  autoFetchBeatmap,
+  describeStage,
+  type AutoFetchedBeatmap,
+} from './core/load/autoFetch';
+import { md5OfBuffer } from './core/load/beatmapHash';
+import {
   countByKind,
   loadBeatmap,
   type LoadedBeatmap,
@@ -39,6 +45,7 @@ const statusEl = el<HTMLParagraphElement>('status');
 const scrubber = el<HTMLInputElement>('scrubber');
 const playButton = el<HTMLButtonElement>('play');
 const rateSelect = el<HTMLSelectElement>('rate');
+const autoFetchEnabled = el<HTMLInputElement>('auto-fetch');
 
 const audioContext = new AudioContext();
 const clock = new AudioClock(audioContext);
@@ -48,6 +55,7 @@ const renderer = new DebugRenderer(canvas);
 /** 拖动进度条期间暂停自动回写,否则会和用户的输入打架。 */
 let scrubbing = false;
 let replayLoaded = false;
+let audioLoaded = false;
 
 /**
  * 当前载入的谱面与回放。
@@ -58,6 +66,15 @@ let replayLoaded = false;
  */
 let currentBeatmap: LoadedBeatmap | null = null;
 let currentReplay: LoadedReplay | null = null;
+
+/** 当前谱面的 MD5,用于与回放头部比对(TECH-NOTES D10)。 */
+let currentBeatmapMd5: string | null = null;
+
+/** 最近一次自动获取的结果,供状态栏显示来源。 */
+let lastAutoFetch: AutoFetchedBeatmap | null = null;
+
+/** 正在进行的自动下载。换回放时要取消上一个。 */
+let autoFetchAbort: AbortController | null = null;
 
 /* ---------------- 载入 ---------------- */
 
@@ -147,6 +164,8 @@ async function autoLoadFromQuery(): Promise<void> {
 async function applyBeatmap(buffer: ArrayBuffer): Promise<void> {
   try {
     currentBeatmap = await loadBeatmap(buffer);
+    // 记下手动上传谱面的 MD5,用于与回放比对(TECH-NOTES D10)
+    currentBeatmapMd5 = md5OfBuffer(buffer);
     rebuildTimeline();
     showBeatmapInfo(currentBeatmap);
     setStatus(describeLoaded(), 'ok');
@@ -171,6 +190,68 @@ async function applyReplay(buffer: ArrayBuffer): Promise<void> {
     console.log('[spike] 回放原始 Score:', currentReplay.raw);
   } catch (error) {
     reportFailure('.osr 解析失败', error);
+    return;
+  }
+
+  // 回放载入成功后自动去取谱面。失败不影响已经能播的光标轨迹。
+  if (autoFetchEnabled.checked) await autoFetchForCurrentReplay();
+}
+
+/**
+ * 按当前回放的谱面哈希自动取回谱面与音频。
+ *
+ * ⚠️ 依赖外部镜像站(见 `core/load/mirror.ts`)。失败时**不清空已载入的回放**
+ * —— 光标轨迹本身已经能播,退回手动上传即可。
+ */
+async function autoFetchForCurrentReplay(): Promise<void> {
+  const replay = currentReplay;
+  if (!replay) return;
+
+  // 已经手动载入了正确的谱面就不必再下载
+  if (currentBeatmap && currentBeatmapMd5 === replay.info.beatmapHashMD5) return;
+
+  // 取消上一次未完成的下载 —— 用户可能连续换了两个回放
+  autoFetchAbort?.abort();
+  const abort = new AbortController();
+  autoFetchAbort = abort;
+
+  try {
+    const fetched = await autoFetchBeatmap(replay.info.beatmapHashMD5, {
+      signal: abort.signal,
+      onStage: (stage) => setStatus(`${describeStage(stage)}\n\n${describeLoaded()}`),
+    });
+
+    currentBeatmap = fetched.beatmap;
+    currentBeatmapMd5 = replay.info.beatmapHashMD5;
+    lastAutoFetch = fetched;
+
+    rebuildTimeline();
+    showBeatmapInfo(fetched.beatmap);
+
+    if (fetched.audio) {
+      await decodeAndSetAudio(
+        fetched.audio.bytes.buffer.slice(
+          fetched.audio.bytes.byteOffset,
+          fetched.audio.bytes.byteOffset + fetched.audio.bytes.byteLength,
+        ) as ArrayBuffer,
+        fetched.audio.name,
+      );
+    }
+
+    setStatus(describeLoaded(), 'ok');
+    console.log('[spike] 自动取回的谱面包:', fetched);
+  } catch (error) {
+    if (error instanceof Error && error.name === 'AbortError') return;
+
+    const detail = error instanceof Error ? error.message : String(error);
+    setStatus(
+      `⚠️ 自动获取谱面失败,但回放本身已载入(可播光标轨迹)。\n\n${detail}\n\n` +
+        `可以手动上传 .osu 与音频继续。\n\n${describeLoaded()}`,
+      'error',
+    );
+    console.warn('[spike] 自动取谱面失败:', error);
+  } finally {
+    if (autoFetchAbort === abort) autoFetchAbort = null;
   }
 }
 
@@ -211,6 +292,8 @@ function describeLoaded(): string {
     lines.push('回放:未载入');
   }
 
+  lines.push(audioLoaded ? '音频:已载入(音画同步可用)' : '音频:未载入(只有画面,时钟自由运行)');
+
   lines.push(
     '',
     `时间范围 ${formatTime(controller.timeline.startTime)} → ` +
@@ -218,11 +301,32 @@ function describeLoaded(): string {
   );
 
   if (currentBeatmap && currentReplay) {
-    const md5 = currentReplay.info.beatmapHashMD5;
+    // D10:现在真的能校验了 —— 有 MD5 实现
+    const wanted = currentReplay.info.beatmapHashMD5;
+    if (currentBeatmapMd5 === null) {
+      lines.push('', `⚠️ 未能算出当前谱面的 MD5,无法校验是否与回放匹配。`);
+    } else if (currentBeatmapMd5 === wanted) {
+      lines.push('', `✅ 谱面与回放匹配(MD5 ${wanted.slice(0, 8)}…)`);
+    } else {
+      lines.push(
+        '',
+        `❌ **谱面与回放不匹配!**`,
+        `  回放要的:${wanted}`,
+        `  当前谱面:${currentBeatmapMd5}`,
+        `  物件与判定会完全错位。请换成正确的难度。`,
+      );
+    }
+  }
+
+  if (lastAutoFetch && currentBeatmap === lastAutoFetch.beatmap) {
+    const f = lastAutoFetch;
     lines.push(
       '',
-      `⚠️ 谱面与回放是否匹配未校验(需算 .osu 的 MD5 比对 ${md5.slice(0, 8)}…)。` +
-        '配错了物件与判定会完全错位。',
+      `谱面来源:${f.mirror.name} 自动获取` +
+        `(beatmapset ${f.lookup.beatmapSetId},${f.lookup.status},包 ${
+          (f.oszBytes / 1024 / 1024).toFixed(1)
+        } MB)`,
+      `  音频:${f.audio ? f.audio.name : '❌ 包内未找到'}`,
     );
   }
 
@@ -240,12 +344,23 @@ function fmt(value: number): string {
 }
 
 async function loadAudioFile(file: File): Promise<void> {
+  await decodeAndSetAudio(await file.arrayBuffer(), file.name);
+}
+
+/** 解码音频并挂到时钟上。自动获取与手动上传走同一条路。 */
+async function decodeAndSetAudio(buffer: ArrayBuffer, label: string): Promise<void> {
   try {
-    const decoded = await audioContext.decodeAudioData(await file.arrayBuffer());
+    // decodeAudioData 会**吞掉**传入的 buffer(detach),所以给它一份拷贝 ——
+    // 否则同一份字节想再用(比如换设备重新解码)就会拿到长度 0 的 buffer
+    const decoded = await audioContext.decodeAudioData(buffer.slice(0));
     clock.setBuffer(decoded);
-    console.log(`[spike] 音频已载入:${decoded.duration.toFixed(2)}s`);
+    audioLoaded = true;
+    console.log(`[spike] 音频已载入 ${label}:${decoded.duration.toFixed(2)}s`);
   } catch (error) {
-    setStatus(`音频解码失败:${error instanceof Error ? error.message : String(error)}`, 'error');
+    setStatus(
+      `音频解码失败(${label}):${error instanceof Error ? error.message : String(error)}`,
+      'error',
+    );
   }
 }
 

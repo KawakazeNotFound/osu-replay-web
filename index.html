@@ -73,6 +73,28 @@
         display: none;
       }
 
+      label.toggle {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 5px 12px;
+        background: var(--panel-2);
+        border: 1px solid var(--border);
+        border-radius: 999px;
+        cursor: pointer;
+        font-size: 13px;
+        user-select: none;
+      }
+
+      label.toggle:hover {
+        background: #40343a;
+      }
+
+      label.toggle input {
+        accent-color: var(--accent, #ff66aa);
+        margin: 0;
+      }
+
       main {
         flex: 1;
         display: flex;
@@ -225,12 +247,16 @@
     <header>
       <h1>osu! replay web <small>M1 spike</small></h1>
       <label class="file">
-        <input type="file" id="osu-input" accept=".osu" />
-        选择 .osu 谱面
-      </label>
-      <label class="file">
         <input type="file" id="osr-input" accept=".osr" />
         选择 .osr 回放
+      </label>
+      <label class="toggle">
+        <input type="checkbox" id="auto-fetch" checked />
+        自动获取谱面与音乐
+      </label>
+      <label class="file">
+        <input type="file" id="osu-input" accept=".osu" />
+        手动指定 .osu(可选)
       </label>
       <label class="file">
         <input type="file" id="audio-input" accept="audio/*" />
