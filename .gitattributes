@@ -1,0 +1,41 @@
+# 仓库内统一存 LF,检出时按平台还原(Windows 上仍是 CRLF)。
+# 不加这条的后果:Windows 上写的 CRLF 原样入库,换机器/走 CI 时整仓库显示被改动。
+* text=auto
+
+# 明确标注文本类型,避免 git 猜错
+*.ts      text
+*.js      text
+*.mjs     text
+*.cjs     text
+*.json    text
+*.md      text
+*.html    text
+*.css     text
+*.yml     text
+*.yaml    text
+.gitignore      text
+.gitattributes  text
+
+# osu! 素材是二进制或带特殊编码,永不做换行转换。
+# (这些目前都被 .gitignore 排除,此处是双保险 —— 万一将来要入库小样本)
+*.osr binary
+*.osz binary
+*.osk binary
+*.osu -text
+
+# 二进制资源
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.ico binary
+*.mp3 binary
+*.ogg binary
+*.wav binary
+*.woff  binary
+*.woff2 binary
+
+# 锁文件由 npm 生成。只在 GitHub UI 上默认折叠,**不**加 -diff ——
+# 依赖变更是安全相关的,必须能看到 diff。
+package-lock.json linguist-generated=true

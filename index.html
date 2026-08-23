@@ -1,0 +1,313 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>osu! replay web — M0 spike</title>
+    <style>
+      :root {
+        --bg: #1c1719;
+        --panel: #2a2226;
+        --panel-2: #352b30;
+        --text: #f0e6ea;
+        --muted: #9d8f95;
+        --pink: #ff66aa;
+        --blue: #5ac8fa;
+        --border: rgba(255, 255, 255, 0.08);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        height: 100vh;
+        display: flex;
+        flex-direction: column;
+        background: var(--bg);
+        color: var(--text);
+        font: 14px/1.5 'Segoe UI', 'Microsoft YaHei', system-ui, sans-serif;
+      }
+
+      header {
+        padding: 10px 16px;
+        background: var(--panel);
+        border-bottom: 1px solid var(--border);
+        display: flex;
+        align-items: center;
+        gap: 16px;
+        flex-wrap: wrap;
+      }
+
+      header h1 {
+        margin: 0;
+        font-size: 15px;
+        font-weight: 600;
+        letter-spacing: 0.02em;
+      }
+
+      header h1 small {
+        color: var(--muted);
+        font-weight: 400;
+        margin-left: 6px;
+      }
+
+      label.file {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 5px 12px;
+        background: var(--panel-2);
+        border: 1px solid var(--border);
+        border-radius: 999px;
+        cursor: pointer;
+        font-size: 13px;
+      }
+
+      label.file:hover {
+        background: #40343a;
+      }
+
+      label.file input {
+        display: none;
+      }
+
+      main {
+        flex: 1;
+        display: flex;
+        min-height: 0;
+      }
+
+      #stage {
+        flex: 1;
+        position: relative;
+        min-width: 0;
+      }
+
+      #canvas {
+        width: 100%;
+        height: 100%;
+        display: block;
+      }
+
+      #sidebar {
+        width: 300px;
+        flex-shrink: 0;
+        padding: 14px;
+        background: var(--panel);
+        border-left: 1px solid var(--border);
+        overflow-y: auto;
+        font-size: 13px;
+      }
+
+      #sidebar h2 {
+        margin: 18px 0 8px;
+        font-size: 12px;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: var(--muted);
+      }
+
+      #sidebar h2:first-child {
+        margin-top: 0;
+      }
+
+      .kv {
+        display: flex;
+        justify-content: space-between;
+        gap: 8px;
+        padding: 2px 0;
+        font-variant-numeric: tabular-nums;
+      }
+
+      .kv span:first-child {
+        color: var(--muted);
+      }
+
+      #status {
+        margin: 0;
+        padding: 8px 10px;
+        border-radius: 6px;
+        background: var(--panel-2);
+        white-space: pre-wrap;
+        word-break: break-word;
+        font-size: 12px;
+        line-height: 1.5;
+      }
+
+      #status.error {
+        background: #4a1f28;
+        color: #ffb3c4;
+      }
+
+      #status.ok {
+        background: #1f3a2c;
+        color: #a8e6bd;
+      }
+
+      footer {
+        padding: 10px 16px 14px;
+        background: var(--panel);
+        border-top: 1px solid var(--border);
+      }
+
+      #scrubber {
+        width: 100%;
+        margin: 0 0 10px;
+        accent-color: var(--pink);
+      }
+
+      .controls {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        flex-wrap: wrap;
+      }
+
+      button {
+        padding: 6px 12px;
+        background: var(--panel-2);
+        color: var(--text);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        cursor: pointer;
+        font-size: 13px;
+        font-family: inherit;
+      }
+
+      button:hover:not(:disabled) {
+        background: #40343a;
+      }
+
+      button:disabled {
+        opacity: 0.4;
+        cursor: default;
+      }
+
+      #play {
+        min-width: 76px;
+        background: var(--pink);
+        border-color: transparent;
+        color: #2a1119;
+        font-weight: 600;
+      }
+
+      #play:hover:not(:disabled) {
+        background: #ff85bb;
+      }
+
+      .sep {
+        width: 1px;
+        height: 22px;
+        background: var(--border);
+        margin: 0 4px;
+      }
+
+      .hint {
+        color: var(--muted);
+        font-size: 12px;
+        margin-left: auto;
+      }
+
+      select {
+        padding: 6px 8px;
+        background: var(--panel-2);
+        color: var(--text);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        font-family: inherit;
+        font-size: 13px;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>osu! replay web <small>M1 spike</small></h1>
+      <label class="file">
+        <input type="file" id="osu-input" accept=".osu" />
+        选择 .osu 谱面
+      </label>
+      <label class="file">
+        <input type="file" id="osr-input" accept=".osr" />
+        选择 .osr 回放
+      </label>
+      <label class="file">
+        <input type="file" id="audio-input" accept="audio/*" />
+        选择音频(可选)
+      </label>
+    </header>
+
+    <main>
+      <div id="stage"><canvas id="canvas"></canvas></div>
+
+      <aside id="sidebar">
+        <h2>状态</h2>
+        <p id="status">等待载入 .osr。</p>
+
+        <h2>时钟</h2>
+        <div class="kv"><span>时间</span><span id="v-time">—</span></div>
+        <div class="kv"><span>倍速</span><span id="v-rate">—</span></div>
+        <div class="kv"><span>运行中</span><span id="v-running">—</span></div>
+        <div class="kv"><span>渲染 fps</span><span id="v-fps">—</span></div>
+
+        <h2>光标</h2>
+        <div class="kv"><span>位置</span><span id="v-pos">—</span></div>
+        <div class="kv"><span>按键</span><span id="v-keys">—</span></div>
+        <div class="kv"><span>回放帧</span><span id="v-frame">—</span></div>
+
+        <h2>成绩(模拟)</h2>
+        <div class="kv"><span>分数</span><span id="v-score">—</span></div>
+        <div class="kv"><span>连击</span><span id="v-combo">—</span></div>
+        <div class="kv"><span>准确率</span><span id="v-acc">—</span></div>
+        <div class="kv"><span>HP</span><span id="v-hp">—</span></div>
+
+        <h2>谱面</h2>
+        <div class="kv"><span>曲目</span><span id="v-map">—</span></div>
+        <div class="kv"><span>难度</span><span id="v-diff">—</span></div>
+        <div class="kv"><span>作者</span><span id="v-mapper">—</span></div>
+        <div class="kv"><span>物件 (C/S/Sp)</span><span id="v-objects">—</span></div>
+        <div class="kv"><span>难度值</span><span id="v-stats">—</span></div>
+
+        <h2>.osr 原始成绩</h2>
+        <div class="kv"><span>玩家</span><span id="v-player">—</span></div>        <div class="kv"><span>分数</span><span id="v-rawscore">—</span></div>
+        <div class="kv"><span>最大连击</span><span id="v-rawcombo">—</span></div>
+        <div class="kv"><span>300/100/50/X</span><span id="v-rawcounts">—</span></div>
+        <div class="kv"><span>mods</span><span id="v-rawmods">—</span></div>
+        <div class="kv"><span>来源</span><span id="v-source">—</span></div>
+        <div class="kv"><span>总帧数</span><span id="v-framecount">—</span></div>
+      </aside>
+    </main>
+
+    <footer>
+      <input type="range" id="scrubber" min="0" max="1000" value="0" step="1" disabled />
+      <div class="controls">
+        <button id="play" disabled>播放</button>
+        <div class="sep"></div>
+        <button id="back-5s" disabled>« 5s</button>
+        <button id="back-1s" disabled>« 1s</button>
+        <button id="fwd-1s" disabled>1s »</button>
+        <button id="fwd-5s" disabled>5s »</button>
+        <div class="sep"></div>
+        <button id="prev-frame" disabled title="步进一个显示帧(1/60 秒)">‹ 帧</button>
+        <button id="next-frame" disabled title="步进一个显示帧(1/60 秒)">帧 ›</button>
+        <button id="prev-input" disabled title="步进一个回放输入帧(不等间隔)">‹ 输入</button>
+        <button id="next-input" disabled title="步进一个回放输入帧(不等间隔)">输入 ›</button>
+        <div class="sep"></div>
+        <select id="rate">
+          <option value="0.05">0.05×</option>
+          <option value="0.25">0.25×</option>
+          <option value="0.5">0.5×</option>
+          <option value="0.75">0.75×</option>
+          <option value="1" selected>1×</option>
+          <option value="1.5">1.5×</option>
+          <option value="2">2×</option>
+          <option value="4">4×</option>
+        </select>
+        <span class="hint">空格 播放/暂停 · ←→ 跳 1s · , . 逐帧 · ; ' 逐输入帧</span>
+      </div>
+    </footer>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
