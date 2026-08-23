@@ -1,7 +1,7 @@
 # 工作进度
 
 > 最后更新:2026-08-23
-> 当前阶段:**M1 —— 谱面解析与堆叠已完成,判定器待实现**
+> 当前阶段:**M1 —— 解析/堆叠/判定链路已打通,分数与渲染未做**
 
 关联文档:[架构设计](./ARCHITECTURE.md) · [技术问题记录](./TECH-NOTES.md)
 
@@ -9,9 +9,9 @@
 
 ## 一句话现状
 
-**M0 完成,M1 的谱面层与堆叠已落地。** 真实谱面的物件、combo、break、难度、**堆叠**全部解析并上屏渲染;A2 的测试骨架已建,第一层断言实测 4/4 精确通过。345 个单测全绿 + 24 个 `todo` 占位。
+**M0 完成,M1 的核心链路已打通:谱面解析 → 堆叠 → 判定 → 累积状态。** 真实回放能算出 combo 与判定计数,四个样本的 circle miss 数全部通过 `.osr` 全图 miss 的上界判据,`lazer.osu` 的理论最大 combo 精确等于实测值。437 个单测全绿 + 24 个 `todo` 占位。
 
-下一步是**判定器本身** —— `JudgementPass` 的插桩接口早就留好了,命中窗口对齐了 lazer,堆叠位置也就位了,现在缺的是"哪一帧的哪次点击命中了哪个物件"。
+**距"可交付"还有多远:** 分数公式、HP、滑条刻度判定、正式渲染、皮肤 —— 见下方待完成与里程碑表。M2(滑条渲染)仍是最硬的一块。
 
 > ⚠️ **本仓库出现过多会话并行编辑**(2026-08-23):`timeline.test.ts` 由另一次会话写入。
 > 现已纳入 git(见下方「版本控制约定」),多会话并行编辑至少有了退回点。
@@ -24,7 +24,7 @@
 | | 内容 | 状态 |
 |---|---|---|
 | **M0** | 地基:解析 + 时钟 + timeline + `stateAt` + 调试渲染器 | ✅ **完成** |
-| **M1** | circle 渲染 + approach circle + combo 数字 + circle 判定 | 🟡 谱面解析 + 堆叠已完成,判定器未开始 |
+| **M1** | circle 渲染 + approach circle + combo 数字 + circle 判定 | 🟡 解析/堆叠/判定已完成;分数、HP、正式渲染未做 |
 | M2 | 滑条(路径生成 + WebGL slider body)← 最难 | ⬜ 未开始 |
 | M3 | spinner + 记分/HP/连击 HUD | ⬜ 未开始 |
 | M4 | stable 皮肤系统(.osk,预设 + 用户上传) | ⬜ 未开始 |
@@ -74,10 +74,47 @@
 - [x] **调研并否决 `osu-standard-stable`** —— 它与 master 有两处实质分歧,见 [TECH-NOTES B11](./TECH-NOTES.md)
 - [x] 51 条测试,期望值全按 lazer 算法手推;真实谱面判据是"独立算出的候选对数量"
 
+**判定器**(`core/sim/judgement.ts`)—— circle + 滑条头
+
+- [x] 对照 `DrawableHitCircle.CheckForResult` / `LegacyHitPolicy` / `HitWindows` 三处源码
+- [x] **纠正一处心智模型**:自动 miss 的阈值是 **meh 窗口**,不是 400ms;400 只是 hit policy 的 `hittableRange`
+- [x] 由此推出 stable 的真实行为:在 `(meh, 400]` 区间点击会**判 Miss 并消耗物件**("点早了吃 miss")
+- [x] notelock(含 3ms 宽容)、按键边沿提取、圆形命中区用堆叠坐标
+- [x] **用真实回放抓出两个真 bug**(见下方"教训"),都靠 FC 回放上的 miss 数铁证定位
+- [x] 65 条测试;四个样本的 circle miss 数全部不超过 `.osr` 全图 miss 上界
+
+**滑条刻度与理论最大 combo**(`core/sim/sliderParts.ts`)
+
+- [x] `tickDistance = velocity × beatLength / tickRate`,刻度铺法照 `SliderEventGenerator`
+- [x] 理论最大 combo = 物件 + 刻度 + repeat + 滑条尾
+- [x] **`lazer.osu` 精确验证**:理论 346 == `.osr` 实得 346(真 full combo)
+- [x] **纠正一个基于错误前提的推论**:`countMiss == 0` **不等于** full combo(slider break 打断 combo 但不计 miss),见 [TECH-NOTES B12](./TECH-NOTES.md)
+
+### 两个"靠 ground truth 抓出来"的真 bug
+
+判据:`.osr` 头部的 `countMiss` 是全图 miss 数,而一个 circle 恰好产生一个判定,
+所以它是我们判出的 circle miss 数的**上界**。在 FC 回放(0 miss)上判出任何
+circle miss 都是铁证。
+
+1. **跳过滑条 → 按下漏到后面的 circle 上。** 最初以为"只判 circle,至少 circle
+   部分是对的"。错了:`stable.osr` 是 FC 却判出 1 个 circle miss。滑条在 155841、
+   circle 在 156169,玩家在 155836 按下(那是给滑条头的),但滑条不参与判定,
+   这次按下漏到 333ms 后的 circle 上 —— 距离 32.0 落在半径 36.49 内,333ms 落在
+   `(meh, 400]` 区间,判出 Miss 并消耗掉那个 circle。
+   **"跳过滑条"不是部分实现,是主动引入错误:按下必须被正确的物件吃掉。**
+
+2. **滑条在"头命中"时就被当作判定完成。** 修了 1 之后仍有 1 个误判:滑动过程中
+   (155932)的按下又漏出去了。真实 osu 里滑条要到 `endTime` 才算 `AllJudged`。
+   → 引入 `resolveTime`:circle 解析于自己的判定时刻,slider/spinner 解析于 `endTime`。
+
 ### 待完成
 
-- [ ] **判定器** —— 填 `JudgementPass`。circle 的命中判定(命中窗口已对齐 lazer、堆叠位置已就位)、combo 累积、分数
-- [ ] circle 的正式渲染(combo 数字、combo 颜色、命中/miss 动画)—— 目前是 `DebugRenderer` 的占位圈
+- [ ] **滑条刻度/尾的判定** —— 需要跟踪光标是否在 follow circle 内(M2)。这是
+      maxCombo 与滑条整体 300/100/50 精确对上的前提
+- [ ] **stable 分数公式** —— 现在 `score` 是占位(基础分之和)。真实公式是
+      `基础分 + 基础分 × (combo-1) × 难度系数 / 25`,难度系数由 HP+CS+OD 推出,需另核源码
+- [ ] **HP drain** —— `drainPerMs` 仍是占位值(D1)
+- [ ] circle 的正式渲染(combo 数字、combo 颜色、命中/miss 动画)
 - [ ] 接线 D7:DT/HT 的播放倍率补偿
 - [ ] L3 的 24 个 `todo` 逐条填绿
 
@@ -144,8 +181,10 @@
 | `query.test.ts` | 18 | `stateAt` 幂等/顺序无关/倒序一致、`activeObjectsAt` **对照暴力扫描**、`hpAt` 的 break 分段 |
 | `replayLoader.test.ts` | 46 | mod 位掩码格式化 + 5 个真实 `.osr` 的字段映射(素材缺失则跳过) |
 
-> M1 又加了四个文件:`beatmapLoader.test.ts`(61)、`judgementAccuracy.test.ts`(23 + 24 todo)、
-> `performance.test.ts`(16)、`stacking.test.ts`(51)。当前总计 **345 通过 + 24 todo**。
+> M1 又加了六个文件:`beatmapLoader.test.ts`(61)、`judgementAccuracy.test.ts`(23 + 24 todo)、
+> `performance.test.ts`(16)、`stacking.test.ts`(51)、`judgement.test.ts`(65)、
+> `sliderParts.test.ts`(26),另有 `judgementReport.test.ts`(诊断报告,只打印)。
+> 当前总计 **437 通过 + 24 todo**。
 
 > `timeline.test.ts` 由另一次会话补写(补的原因:`timeline.ts` 当时是唯一没有专属测试的核心模块 ——
 > `query.test.ts` 只间接覆盖到它,而 `buildDrainProfile` 的 break 裁剪/合并、`buildTimeline` 的
@@ -220,7 +259,7 @@
 ## 复现验收的方法
 
 ```bash
-npm test          # 345 通过 + 24 todo,~3s
+npm test          # 437 通过 + 24 todo,~12s
 npm run build     # tsc --noEmit + vite build
 npm run dev       # 然后开:
                   #   http://localhost:5173/?osu=/fixtures/stable.osu&osr=/fixtures/stable.osr&t=76989
