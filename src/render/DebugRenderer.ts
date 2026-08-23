@@ -118,8 +118,10 @@ export class DebugRenderer {
       const active = state.activeObjects[i]!;
       const { object } = active;
 
-      const cx = this.toScreenX(object.x);
-      const cy = this.toScreenY(object.y);
+      // 用**堆叠后**的坐标 —— osu 会把位置相近、时间相邻的物件依次错开,
+      // 而 lazer 的命中检测也是基于 StackedPosition。见 sim/stacking.ts
+      const cx = this.toScreenX(object.stackedX);
+      const cy = this.toScreenY(object.stackedY);
 
       ctx.strokeStyle = object.kind === 'spinner' ? '#7f7fff' : '#5ac8fa';
       ctx.lineWidth = Math.max(1.5, 2 * this.scale);

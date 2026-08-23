@@ -33,6 +33,13 @@ function obj(
     endTime,
     x: 256,
     y: 192,
+    // 本文件测的是 timeline 构建(break 分段、范围并集),与堆叠无关 —— 给中性值
+    endX: 256,
+    endY: 192,
+    stackHeight: 0,
+    stackedX: 256,
+    stackedY: 192,
+    spans: 1,
     newCombo: false,
     comboIndex: 0,
     indexInCombo: 1,

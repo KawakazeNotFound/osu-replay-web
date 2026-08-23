@@ -1,5 +1,7 @@
-import type { Beatmap, HitObject } from 'osu-classes';
+import type { Beatmap, HitObject, Vector2 } from 'osu-classes';
 
+import { OBJECT_RADIUS, preemptFromAR, radiusFromCS } from '../sim/difficulty';
+import { computeStackHeights, stackOffset, type StackableObject } from '../sim/stacking';
 import type {
   BreakPeriod,
   Difficulty,
@@ -73,35 +75,73 @@ export async function loadBeatmap(data: ArrayBuffer): Promise<LoadedBeatmap> {
 }
 
 function toSimBeatmap(raw: Beatmap): SimBeatmap {
+  const difficulty = toDifficulty(raw);
+
   return {
-    hitObjects: toSimHitObjects(raw.hitObjects),
+    hitObjects: toSimHitObjects(raw.hitObjects, difficulty, raw.fileFormat, raw.general.stackLeniency),
     breaks: toBreaks(raw),
-    difficulty: toDifficulty(raw),
+    difficulty,
     audioLeadIn: raw.general.audioLeadIn,
     stackLeniency: raw.general.stackLeniency,
   };
 }
 
 /**
- * 物件转换 + **combo 信息推算**。
+ * 物件转换 + **combo 信息推算** + **堆叠**。
  *
  * ⚠️ osu-parsers **不填** combo 索引:`currentComboIndex` / `indexInCombo`
  * 实测恒为 `undefined`,只有 `isNewCombo` / `comboOffset` 是解析出来的。
  * 所以这里必须自己走一遍 lazer 的 `UpdateComboInformation` 逻辑。
+ *
+ * 堆叠同理:osu-parsers 不算 `stackHeight`,见 `sim/stacking.ts`。
  */
-function toSimHitObjects(objects: readonly HitObject[]): SimHitObject[] {
+function toSimHitObjects(
+  objects: readonly HitObject[],
+  difficulty: Difficulty,
+  fileFormat: number,
+  stackLeniency: number,
+): SimHitObject[] {
   // 解析器给的顺序理论上按 startTime,但不假定 —— 判定与视觉索引都依赖有序
   const sorted = [...objects].sort((a, b) => a.startTime - b.startTime);
 
   const forced = forceNewCombos(sorted);
 
+  // Pass 1:先摊平成堆叠算法需要的形状(它只要位置与时间)
+  const flat = sorted.map<StackableObject & { readonly spans: number }>((o) => {
+    const kind = kindOf(o);
+    const spans = spansOf(o, kind);
+    const end = endPositionOf(o, kind, spans);
+
+    return {
+      kind,
+      startTime: o.startTime,
+      endTime: endTimeOf(o, kind),
+      x: o.startPosition.x,
+      y: o.startPosition.y,
+      endX: end.x,
+      endY: end.y,
+      spans,
+    };
+  });
+
+  // Pass 2:堆叠。必须在全部物件就位后算 —— 它要前后互相参照
+  const heights = computeStackHeights(flat, {
+    stackLeniency,
+    // lazer 的阈值用 (int)TimePreempt,而 preemptFromAR 已经取整
+    timePreempt: preemptFromAR(difficulty.approachRate),
+    fileFormat,
+  });
+
+  // Scale = Radius / OBJECT_RADIUS。堆叠偏移是 stackHeight * scale * -6.4
+  const scale = radiusFromCS(difficulty.circleSize) / OBJECT_RADIUS;
+
+  // Pass 3:合成最终物件(combo 递推 + 堆叠偏移)
   const out: SimHitObject[] = [];
   let comboIndex = -1;
   let indexInCombo = 0;
 
-  for (let i = 0; i < sorted.length; i++) {
-    const o = sorted[i]!;
-    const kind = kindOf(o);
+  for (let i = 0; i < flat.length; i++) {
+    const f = flat[i]!;
     const newCombo = forced[i]!;
 
     // lazer `UpdateComboInformation`:新 combo 时 index++ 且 inCombo 归零,
@@ -113,12 +153,21 @@ function toSimHitObjects(objects: readonly HitObject[]): SimHitObject[] {
       indexInCombo++;
     }
 
+    const stackHeight = heights[i]!;
+    const offset = stackOffset(stackHeight, scale);
+
     out.push({
-      kind,
-      startTime: o.startTime,
-      endTime: endTimeOf(o, kind),
-      x: o.startPosition.x,
-      y: o.startPosition.y,
+      kind: f.kind,
+      startTime: f.startTime,
+      endTime: f.endTime,
+      x: f.x,
+      y: f.y,
+      endX: f.endX,
+      endY: f.endY,
+      stackHeight,
+      stackedX: f.x + offset,
+      stackedY: f.y + offset,
+      spans: f.spans,
       newCombo,
       comboIndex,
       // 圈内数字从 1 开始,而 lazer 的 IndexInCurrentCombo 从 0 开始
@@ -127,6 +176,49 @@ function toSimHitObjects(objects: readonly HitObject[]): SimHitObject[] {
   }
 
   return out;
+}
+
+/** 滑条的 span 数 = repeat + 1。circle / spinner 恒为 1。 */
+function spansOf(o: HitObject, kind: HitObjectKind): number {
+  if (kind !== 'slider') return 1;
+
+  const spans = (o as unknown as { readonly spans?: unknown }).spans;
+  if (typeof spans === 'number' && Number.isFinite(spans) && spans >= 1) return spans;
+
+  // 退回 repeats + 1
+  const repeats = (o as unknown as { readonly repeats?: unknown }).repeats;
+  return typeof repeats === 'number' && Number.isFinite(repeats) ? repeats + 1 : 1;
+}
+
+/**
+ * 物件末端位置(未堆叠)。
+ *
+ * circle / spinner 等于起点。slider 是 `startPosition + path.curvePositionAt(1, spans)`
+ * —— 对应 lazer 的 `Slider.EndPosition => Position + this.CurvePositionAt(1)`。
+ *
+ * ⚠️ `curvePositionAt` **考虑 repeat**:偶数 span 的滑条(来回一趟)末端会回到
+ * 起点。堆叠算法用末端位置判断"圈是否落在滑条尾上",所以这个细节会影响结果。
+ */
+function endPositionOf(
+  o: HitObject,
+  kind: HitObjectKind,
+  spans: number,
+): { readonly x: number; readonly y: number } {
+  if (kind !== 'slider') return { x: o.startPosition.x, y: o.startPosition.y };
+
+  const path = (o as unknown as {
+    readonly path?: { curvePositionAt?: (progress: number, spans: number) => Vector2 };
+  }).path;
+
+  if (!path || typeof path.curvePositionAt !== 'function') {
+    throw new Error(
+      `slider 在 startTime=${o.startTime} 处没有可用的 path.curvePositionAt()。` +
+        '堆叠与滑条渲染都依赖它,请检查 osu-parsers 版本。',
+    );
+  }
+
+  const relative = path.curvePositionAt(1, spans);
+  return { x: o.startPosition.x + relative.x, y: o.startPosition.y + relative.y };
 }
 
 /**

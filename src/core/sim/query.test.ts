@@ -40,6 +40,13 @@ function makeBeatmap(overrides: Partial<SimBeatmap> = {}): SimBeatmap {
     endTime,
     x: 100 + i * 20,
     y: 150,
+    // 本文件测的是 stateAt / activeObjectsAt / hpAt,与堆叠无关 —— 给中性值
+    endX: 100 + i * 20,
+    endY: 150,
+    stackHeight: 0,
+    stackedX: 100 + i * 20,
+    stackedY: 150,
+    spans: 1,
     newCombo: i === 0 || i === 5,
     comboIndex: i < 5 ? 0 : 1,
     indexInCombo: (i < 5 ? i : i - 5) + 1,

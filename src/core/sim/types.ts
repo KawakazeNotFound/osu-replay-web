@@ -48,18 +48,38 @@ export interface SimHitObject {
   /** circle 上等于 startTime;slider / spinner 上是结束时刻 */
   readonly endTime: number;
   /**
-   * osu! 坐标系(0..512)。
+   * osu! 坐标系(0..512)。**未堆叠**的原始坐标。
    *
-   * ⚠️ 这是**未堆叠**的原始坐标。osu 会把位置相近、时间相邻的物件依次错开
-   * (stacking),lazer 的 `StackedPosition = Position + StackOffset`,
-   * 其中 `StackOffset = StackHeight * scale * -6.4`。
-   *
-   * osu-parsers **不做**这一步(物件上没有 stackHeight),所以密集堆叠段
-   * 的物件目前会画在同一点上,判定位置也偏。见 TECH-NOTES D9。
+   * 渲染与判定都应该用 {@link stackedX} —— 这里保留原始值是为了可调试
+   * (对照 `.osu` 文件能直接看出来),与 lazer 保留 `Position` 与
+   * `StackedPosition` 两者的做法一致。
    */
   readonly x: number;
   /** osu! 坐标系(0..384)。同 {@link x},未堆叠。 */
   readonly y: number;
+
+  /**
+   * 物件末端位置(未堆叠)。circle / spinner 上等于起点。
+   *
+   * slider 上是**路径末端**,且**考虑 repeat** —— 偶数 span 的滑条末端会回到
+   * 起点(来回一趟)。堆叠算法要用它(圈叠在滑条尾上时是负向偏移)。
+   */
+  readonly endX: number;
+  readonly endY: number;
+
+  /**
+   * 堆叠层数。0 = 不堆叠;可以为**负数**(圈叠在滑条尾上时往右下偏)。
+   *
+   * 由 `computeStackHeights()` 算出,见 `sim/stacking.ts`。
+   */
+  readonly stackHeight: number;
+  /** 堆叠后的实际位置 = {@link x} + stackHeight * scale * -6.4。渲染与判定用这个。 */
+  readonly stackedX: number;
+  readonly stackedY: number;
+
+  /** 滑条的 span 数(= repeat + 1)。circle / spinner 恒为 1。 */
+  readonly spans: number;
+
   readonly newCombo: boolean;
   /** 第几个 combo(用于取 combo colour) */
   readonly comboIndex: number;
