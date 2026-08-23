@@ -287,6 +287,37 @@ AR 9.15 下 preempt:lazer 得 **577**,该包得 **577.5**。而堆叠阈值是
 ⚠️ 若将来要用它的**滑条 tick 生成**(M2 的 maxCombo 精确计算需要),同样要先核
 它的 tick 间隔算法是否与 master 一致,不能直接信。
 
+### B14. stable 分数公式的难度系数 —— `已确认`(2026-08-23,已核源码但**尚未实现**)
+
+公式在 `LegacyRulesetExtensions.CalculateDifficultyPeppyStars(difficulty, objectCount, drainLength)`:
+
+```
+objectToDrainRatio = drainLength != 0
+    ? clamp((decimal)objectCount / drainLength * 8, 0, 16)
+    : 16
+
+difficultyPeppyStars = (int)round(
+    (HP + OD + CS + objectToDrainRatio) / 38 * 5
+)
+```
+
+`drainLength` 是可玩时长(秒)减去 break。
+
+⚠️ **两处必须照抄的类型细节**(lazer 注释写明原因):
+
+1. `DrainRate` / `OverallDifficulty` / `CircleSize` 要按 **float → double → decimal** 逐级转。
+   注释说这些 cast "ARE IMPORTANT AND MUST REMAIN" —— 直接 float→decimal 会把单精度
+   值"悄悄"清理干净,而当年 x87 FPU 不是那样。
+2. 全程用 `decimal` 而非 double。理由:.NET Framework 的浮点运算走 x87 寄存器,是
+   **80 位**宽,比 float 和 double 都宽;现代 .NET 走 SSE。用 `decimal` 当高精度替身。
+   lazer 承认有一张 ranked 图仍然对不上,算"acceptable casualty"。
+
+JS 里没有 `decimal`,只有 float64 —— 这是一处**已知的潜在偏差来源**,实现时要留意。
+
+**为什么还没实现**:分数公式是 `基础分 + 基础分 × (combo-1) × 难度系数 × mod 系数 / 25`,
+而**每个滑条刻度都加分**。刻度判定还没做,所以算出的分数无法与 `.osr` 的 `totalScore`
+比对 —— 写一个验不了的公式等于埋雷。故刻意排在滑条刻度判定之后。
+
 ### B10. 真实谱面上的 `stateAt` 性能 —— `已确认`(2026-08-23)
 
 核心架构主张(`stateAt` 是 O(log n + k),所以 seek 免费)在真实数据上成立。已固化为 `performance.test.ts`,每次 `npm test` 都跑:
@@ -383,13 +414,13 @@ lazer 的 Argon / Triangles 皮肤**不是贴图,是代码画的**,要另外实�
 
 最后发布 2024-04,但实测能解 2026 年的 stable(`gameVersion` 20260312 / 20260412)与 lazer(30000016)`.osr`,10/10 通过;`.osu` 谱面 4/4 通过(fileFormat 14)。见 A1 与 B8。
 
-### D7. 变速 mod 的播放倍率未补偿 —— `待解决`(M1)
+### D7. 变速 mod 的播放倍率 —— ✅ `已解决`(2026-08-23)
 
 回放帧的时间戳是**谱面时间**,DT 的含义是谱面时间相对真实时间跑得更快。所以要忠实还原一段 DT 回放,时钟推进谱面时间的速率必须是 1.5×,用户设定的倍速再乘在这之上。
 
-M0 的时钟还没算这个倍率,DT/HT 回放现在按 1× 播 —— 光标位置对,节奏比玩家当时听到的慢/快。载入时会在状态栏提示。
+已实现:`PlaybackController` 把 mod 倍率与用户倍速**分开**存,时钟速率 = `modRate × userRate`。于是"1× 播放"表示按玩家当时的实际节奏播,而不是"谱面时间 1ms/ms"。载入回放时按 `rawMods` 重设 —— 必须每次重设,否则上一段 DT 回放的倍率会漏到下一段 NM 回放上(已写测试卡住)。
 
-`speedMultiplierOfLegacyMods()` 已经写好(在 `replayLoader.ts`),接进 `PlaybackController` 是 M1 的事。
+HUD 会显示 `用户倍速 × mod 倍率 = 实际倍率`。
 
 ⚠️ 该函数**只对 stable 准确**:lazer 的 DT/HT 倍速可由玩家自定义(0.5×~2×),legacy 位掩码里读不到,一律返回 1.5 / 0.75 会出错。属于 M5 要处理的"lazer mod 有损投影"问题(见 A1 与 `formatLegacyMods` 的注释)。
 

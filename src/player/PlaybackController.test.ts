@@ -204,6 +204,67 @@ describe('togglePlay', () => {
   });
 });
 
+describe('mod 倍率(D7)', () => {
+  it('默认 modRate 为 1,时钟速率等于用户倍速', () => {
+    const { clock, controller } = makeController();
+    controller.setRate(2);
+    expect(controller.modRate).toBe(1);
+    expect(controller.userRate).toBe(2);
+    expect(clock.rate).toBe(2);
+  });
+
+  it('时钟速率 = modRate × userRate', () => {
+    const { clock, controller } = makeController();
+
+    controller.setModRate(1.5); // DT
+    expect(clock.rate).toBe(1.5);
+
+    controller.setRate(2);
+    expect(clock.rate).toBe(3);
+
+    controller.setRate(0.5);
+    expect(clock.rate).toBe(0.75);
+  });
+
+  it('setModRate 不影响已设定的 userRate', () => {
+    const { clock, controller } = makeController();
+    controller.setRate(0.25);
+
+    controller.setModRate(0.75); // HT
+    expect(controller.userRate).toBe(0.25);
+    expect(clock.rate).toBeCloseTo(0.1875, 10);
+  });
+
+  it('换回放时重设 modRate,不会漏到下一段', () => {
+    const { clock, controller } = makeController();
+
+    controller.setModRate(1.5); // 上一段是 DT
+    expect(clock.rate).toBe(1.5);
+
+    controller.setModRate(1); // 下一段是 NM
+    expect(clock.rate).toBe(1);
+  });
+
+  it('两个倍率都必须 > 0', () => {
+    const { controller } = makeController();
+    expect(() => controller.setRate(0)).toThrow(RangeError);
+    expect(() => controller.setRate(-1)).toThrow(RangeError);
+    expect(() => controller.setModRate(0)).toThrow(RangeError);
+    expect(() => controller.setModRate(-1)).toThrow(RangeError);
+  });
+
+  it('DT 下"1× 播放"意味着谱面时间以 1.5× 推进', () => {
+    // 这条把 D7 的语义写进测试:回放帧时间戳是谱面时间,DT 表示它相对
+    // 真实时间跑得更快。所以忠实还原时时钟速率必须是 1.5,而不是 1。
+    const { clock, controller } = makeController();
+    controller.setModRate(1.5);
+    controller.setRate(1);
+
+    expect(controller.userRate).toBe(1);
+    expect(clock.rate).toBe(1.5);
+  });
+});
+
 describe('clampedTime', () => {
   it('时钟跑出范围时仍返回范围内的值', () => {
     const { clock, controller } = makeController(0);

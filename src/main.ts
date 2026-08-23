@@ -159,6 +159,8 @@ async function applyBeatmap(buffer: ArrayBuffer): Promise<void> {
 async function applyReplay(buffer: ArrayBuffer): Promise<void> {
   try {
     currentReplay = await loadReplay(buffer);
+    // mod 倍率随回放变化,必须每次重设 —— 否则上一段 DT 回放的倍率会漏过来
+    controller.setModRate(speedMultiplierOfLegacyMods(currentReplay.info.rawMods));
     rebuildTimeline();
 
     showReplayInfo(currentReplay.info);
@@ -274,19 +276,19 @@ function showReplayInfo(info: ReplayInfoSummary): void {
 }
 
 /**
- * 变速 mod 的提醒。
+ * 变速 mod 的说明。
  *
- * 回放帧时间戳是谱面时间,DT 的含义是谱面时间相对真实时间跑得更快。M0 的时钟
- * 还没把这个倍率算进去,所以 DT/HT 回放现在是按 1× 播的 —— 光标位置对,
- * 但节奏比玩家当时听到的慢/快。M1 接入谱面后一并修。
+ * 回放帧时间戳是谱面时间,DT 的含义是谱面时间相对真实时间跑得更快。载入时会把
+ * 这个倍率设进时钟(见 `controller.setModRate`),所以"1×"表示按玩家当时的
+ * 实际节奏播。
  */
 function modRateNotice(rawMods: number): string {
   const multiplier = speedMultiplierOfLegacyMods(rawMods);
   if (multiplier === 1) return '';
 
   return (
-    `⚠️ 该回放带变速 mod(应为 ${multiplier}×),M0 的时钟尚未补偿,` +
-    `当前按 1× 播放。\n\n`
+    `⏩ 该回放带变速 mod,已按 ${multiplier}× 推进谱面时间。` +
+    `倍速选择器是在此之上再乘。\n\n`
   );
 }
 
@@ -407,7 +409,12 @@ function updateHud(state: ReturnType<typeof stateAt>, time: number): void {
   playButton.textContent = controller.isPlaying ? '暂停' : '播放';
 
   el('v-time').textContent = formatTime(time);
-  el('v-rate').textContent = `${controller.rate}×`;
+  el('v-rate').textContent =
+    controller.modRate === 1
+      ? `${controller.userRate}×`
+      : `${controller.userRate}× × mod ${controller.modRate}× = ${
+          Math.round(controller.rate * 1000) / 1000
+        }×`;
   el('v-running').textContent = controller.isPlaying ? '是' : '否';
   el('v-fps').textContent = smoothedFps > 0 ? smoothedFps.toFixed(0) : '—';
 

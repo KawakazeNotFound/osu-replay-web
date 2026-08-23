@@ -115,7 +115,7 @@ circle miss 都是铁证。
       `基础分 + 基础分 × (combo-1) × 难度系数 / 25`,难度系数由 HP+CS+OD 推出,需另核源码
 - [ ] **HP drain** —— `drainPerMs` 仍是占位值(D1)
 - [ ] circle 的正式渲染(combo 数字、combo 颜色、命中/miss 动画)
-- [ ] 接线 D7:DT/HT 的播放倍率补偿
+- [x] ~~接线 D7:DT/HT 的播放倍率补偿~~ ✅
 - [ ] L3 的 24 个 `todo` 逐条填绿
 
 ---
@@ -239,7 +239,7 @@ circle miss 都是铁证。
 | D1 | HP drain 的分段计算 | 🟡 结构与 `hpAt` 已实现且有单测;`drainPerMs` 仍是占位值。stable 的 `replay.lifeBar` 可作 ground truth |
 | D2 | 倍速的音高保持 | 🟡 M0 接受变调,待确认用户预期 |
 | ~~D6~~ | ~~osu-parsers 格式版本时效性~~ | ✅ **已完全解除**:`.osr` 10/10、`.osu` 4/4(fileFormat 14) |
-| D7 | DT/HT 回放的播放倍率未补偿 | 🟡 已识别,`speedMultiplierOfLegacyMods()` 写好待接线 |
+| ~~D7~~ | ~~DT/HT 回放的播放倍率未补偿~~ | ✅ **已解决**(2026-08-23)。时钟速率 = modRate × userRate |
 | D8 | 渲染层没有常驻的自动化回归保护 | 🟡 逐像素验收是临时页面跑的,未入库。改渲染器时要手动重建 |
 | D4 | 滑条体 WebGL 渲染 | ⬜ M2 专项。好消息:`SliderPath` 带 `positionAt()`,路径细分不必自己写 |
 
@@ -249,11 +249,11 @@ circle miss 都是铁证。
 
 ## 下一步(按优先级)
 
-1. **判定器(`JudgementPass`)** —— M1 的核心,也是 A2 的钥匙。前置条件现在都齐了:命中窗口已对齐 lazer(含那个 `floor - 0.5`)、combo 分段已验证、**堆叠位置已就位**。缺的是"哪一帧的哪次点击命中了哪个物件"这套逻辑。**必须对照 `DrawableHitCircle` / `OsuHitObject` 的判定流程写**,尤其是 notelock(同一时刻只允许最早的物件被点中)。
-2. **L3 的 24 个 `todo` 逐条填绿** —— 每填一条就是 A2 往前一步。
+1. **滑条刻度 / repeat / 尾的判定** —— 需要跟踪光标是否落在 follow circle 内、按键是否保持按住。这是 maxCombo 与滑条整体 300/100/50 精确对上的**唯一前提**,也是 M2 的一半工作量。
+2. **stable 分数公式** —— **刻意排在滑条判定之后**:每个刻度都加分,所以在刻度判定实现前,算出的分数无法与 `.osr` 比对。写一个验不了的公式等于埋雷。难度系数公式已核过(`CalculateDifficultyPeppyStars`,见 TECH-NOTES B14)。
 3. **circle 的正式渲染** —— combo 数字、combo 颜色、命中/miss 动画。目前是 `DebugRenderer` 的占位圈。
-4. **接线 D7** —— DT/HT 的播放倍率补偿,`speedMultiplierOfLegacyMods()` 已写好。
-5. **生态调研** —— `rewind`(Electron + PixiJS 的 osu 回放分析器)。对 M2 的滑条渲染可能有参考。需要放开 WebSearch / `git clone` 权限。
+4. **HP drain(D1)** —— `drainPerMs` 的真实推导。stable 回放自带 `replay.lifeBar` 可作 ground truth。
+5. **L3 的 24 个 `todo` 逐条填绿** —— 随上面几项自然完成。
 6. **远端备份** —— 目前只有本地仓库,硬盘挂了就全没了。需要你决定放哪。
 
 ## 复现验收的方法

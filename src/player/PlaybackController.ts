@@ -17,6 +17,18 @@ export class PlaybackController {
 
   private readonly clock: Clock;
 
+  /**
+   * mod 带来的速度倍率(DT 1.5 / HT 0.75 / 其余 1)。
+   *
+   * 回放帧的时间戳是**谱面时间**,DT 的含义是谱面时间相对真实时间跑得更快。
+   * 所以要忠实还原一段 DT 回放,时钟推进谱面时间的速率必须是 1.5×。
+   *
+   * 用户设定的倍速**乘在这之上**:`clock.rate = modRate * userRate`。
+   * 于是"1× 播放"表示"按玩家当时的实际节奏播",而不是"谱面时间 1ms/ms"。
+   */
+  private _modRate = 1;
+  private _userRate = 1;
+
   constructor(clock: Clock, timeline: ReplayTimeline) {
     this.clock = clock;
     this.timeline = timeline;
@@ -26,8 +38,19 @@ export class PlaybackController {
     return this.clock.currentTime;
   }
 
+  /** 时钟实际速率 = modRate × userRate。 */
   get rate(): number {
     return this.clock.rate;
+  }
+
+  /** 用户设定的倍速(不含 mod 倍率)。UI 显示这个。 */
+  get userRate(): number {
+    return this._userRate;
+  }
+
+  /** mod 带来的倍率。 */
+  get modRate(): number {
+    return this._modRate;
   }
 
   get isPlaying(): boolean {
@@ -64,8 +87,28 @@ export class PlaybackController {
     this.seek(this.clock.currentTime + deltaMs);
   }
 
+  /** 设定用户倍速。实际时钟速率 = modRate × 这个值。 */
   setRate(rate: number): void {
-    this.clock.setRate(rate);
+    if (rate <= 0) throw new RangeError(`user rate must be > 0, got ${rate}`);
+
+    this._userRate = rate;
+    this.clock.setRate(this._modRate * rate);
+  }
+
+  /**
+   * 设定 mod 倍率(载入回放时调用)。
+   *
+   * 用 `speedMultiplierOfLegacyMods(rawMods)` 取值。换回放时要重设,
+   * 否则上一段 DT 回放的倍率会漏到下一段 NM 回放上。
+   *
+   * ⚠️ 只对 stable 回放准确:lazer 的 DT/HT 倍速可由玩家自定义(0.5×~2×),
+   * legacy 位掩码里读不到。见 TECH-NOTES D7。
+   */
+  setModRate(rate: number): void {
+    if (rate <= 0) throw new RangeError(`mod rate must be > 0, got ${rate}`);
+
+    this._modRate = rate;
+    this.clock.setRate(rate * this._userRate);
   }
 
   /**
