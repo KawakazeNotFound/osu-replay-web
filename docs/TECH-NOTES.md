@@ -653,8 +653,89 @@ Chrome 不加 `--dump-dom` 直接开页面,拿到文件后再 kill。
    若这个时刻算偏了,末端会落在跟踪范围外。
 3. **重复滑条(repeat)的时间反转**。反向 span 的刻度顺序若错了,刻度位置就全错。
 
-诊断入口:`npx vitest run src/core/sim/judgementReport` 会打印每个样本的滑条部件命中率。
-要定位到具体物件,得再加一个"列出所有 combo 归零时刻 + 对应物件下标"的诊断输出。
+#### 已完成的定位(2026-08-23,第一轮)
+
+加了两个诊断(都是"永远通过、只打印"的报告型测试):
+
+- `comboBreakReport.test.ts` —— 列出**每一次 combo 归零**的时刻、物件下标、部件类型、
+  断连前的 combo。**739 的 combo 缺口收窄到了 2 个物件。**
+- `sliderTrackingReport.test.ts` —— 把指定滑条在其存续期间的**每一帧**摊开:
+  光标坐标、球坐标、距离、按键位域。改 `TARGETS` 换目标。
+
+`stable.osr` 只断 2 次,且都在滑条部件上(头部是 countMiss 0 / maxCombo 1151,满连):
+
+| 物件 | 部件 | 时刻 | 断连前 combo |
+|---|---|---|---|
+| #225 | `legacyLastTick` | 67.281s | 340 |
+| #501 | `sliderRepeat` | 145.431s | 412 |
+
+**#225**(spans 1,半径 36.49,follow 半径 87.59):末端刻度时刻光标在 (5.2, −26.6)、
+球在 (60.3, 68.0),距离 **109.5 > 87.59**。光标"跑到球前面去了"(沿路径方向越过了
+滑条末端,正在赶往下一个物件)。几何已核对无误 —— 见下方"已核实的公式"。
+
+**#501**(spans 3):repeat 时刻距离只有 **44.4 < 87.59**,按位置**应该判中**。
+按键序列是 `10`(K2)→ `15`(双键)→ `5`(K1) —— **玩家中途换手**,正好撞在
+"有效键"规则上。所以这一个几乎确定是 `acceptAnyKeyAfter` 的实现与源码有偏差。
+
+#### 已核实的公式(不必再查)
+
+`SliderEventGenerator.Generate` 的 `PathProgress`(2026-08-23 核 master):
+
+| 事件 | `PathProgress` |
+|---|---|
+| Head | `0` |
+| Tick | `d / length`(从**整条路径**起点量,不是当前 span) |
+| Repeat | `(span + 1) % 2` |
+| LegacyLastTick | `(tickTime − finalSpanStartTime) / spanDuration`,`spanCount % 2 == 0` 时取 `1 − p` |
+| Tail | `spanCount % 2` |
+
+⚠️ 我原本怀疑"末端刻度的位置该取 span 末端(progress 1)而不是按时间插值"。
+**核完源码证明不是** —— `LegacyLastTick` 的 progress 确实是按时间算的,与我的
+`timeProgressToPathProgress` 在这两个滑条上结果一致。**这条排除掉了。**
+
+#### 一次失败的尝试(记下来,别再走同一条路)
+
+`SliderInputManager.PostProcessHeadJudgement` 结尾是:
+
+```csharp
+if (!head.Judged || !head.Result.IsHit) return;
+if (!IsMouseInFollowArea(true)) return;          // ← 闸门用扩大圈
+...
+updateTracking(allTicksInRange || IsMouseInFollowArea(false));
+```
+
+读起来就是"**头一命中,只要光标在扩大圈内,tracking 立刻为 true**"。而我的实现是
+`tracking = false` 起步、必须先落进小圈才咬得上。看着是个明显的偏差,于是加了个
+`seedFromHeadHit()`。
+
+**结果指标大幅变差**:`stable` 断连 2 → **39** 次,`lazer-moonlight` 4 → **22** 次,
+`stable-hdfl` maxCombo 260 → 173。已回退。
+
+原因分析:`seedFromHeadHit` 顺手把 `lastKeys` 初始化成了头命中帧的按键。而
+`acceptAnyKeyAfter` 的解锁条件是"**上一帧**另一个键没被按住" —— 预置 `lastKeys`
+让"限制只用头的那个键"的状态**持续得更久**,于是大量正常跟踪被按键规则拒掉。
+
+**教训**:`PostProcessHeadJudgement` 与 `updateTracking` 是**耦合**的 ——
+`lastPressedActions` 在 `updateTracking` 内部先读后清,`resetState` 又会清空它。
+只照抄其中一段而不同时把 `lastPressedActions` 的生命周期搬对,会让规则变严而不是变准。
+下一次要动这块,**必须先把 `lastPressedActions` 的读/清/重置时序完整对照一遍**。
+
+> 更一般的教训:**单独看一段源码判断"更忠实"是不够的**。判据只能是真值指标 ——
+> 一个让 ground-truth 变差的改动必须回退,哪怕它看起来更贴源码。
+
+诊断入口:`npx vitest run src/core/sim/comboBreakReport` —— 直接列出每次 combo 归零的物件。
+要摊开某个滑条的逐帧数据,改 `sliderTrackingReport.test.ts` 的 `TARGETS` 再跑。
+
+**下一步该做的**(按顺序):
+
+1. 把 `sliderTrackingReport` 的时间窗口扩到**滑条头**(现在只打部件时刻 ±40ms,
+   头不在 `parts` 里所以看不到),确认 #501 的头是用哪个键命中的。
+2. 照 `SliderInputManager.updateTracking` **完整**重写 `acceptAnyKeyAfter` 与
+   `lastKeys` 的时序 —— 特别是 `lastPressedActions` 的"先读后清"和 `resetState`。
+   不要只改一半。
+3. #225 那种"光标越过滑条末端"的情形单独查:它距离 109.5 明显超界,但 stable 判中了。
+   怀疑与 stable 的**末端宽容**有关(stable 的滑条末端判定比 lazer 松),
+   要核 `OsuLegacyScoreSimulator` 或 stable 的滑条末端处理。
 
 ---
 
