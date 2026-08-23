@@ -132,6 +132,7 @@ function rebuildTimeline(): void {
           judge: createCircleJudgement({
             // stable 与 lazer 的滑条计数口径不同,见 judgement.ts 的 SliderScoring
             sliderScoring: currentReplay.info.isLazer ? 'lazer' : 'stable',
+            rawMods: currentReplay.info.rawMods,
           }),
         }
       : {},

@@ -4,6 +4,13 @@ import { MISS_WINDOW, hitWindowsFromOD, radiusFromCS, type HitWindows } from './
 import { TAIL_LENIENCY, type SliderPart } from './sliderParts';
 import { SliderTracker } from './sliderTracking';
 import { judgeSpinner } from './spinner';
+import {
+  SLIDER_END_SCORE,
+  SLIDER_TICK_SCORE,
+  scoreIncrementFor,
+  stableScoringFor,
+  type StableScoringOptions,
+} from './stableScoring';
 import type { JudgementPass } from './timeline';
 import {
   HitResult,
@@ -211,6 +218,13 @@ export interface CircleJudgementOptions {
    * 载入回放时应按 `info.isLazer` 传入 —— 两者规则不同,见 {@link SliderScoring}。
    */
   readonly sliderScoring?: SliderScoring;
+
+  /**
+   * 回放的 legacy mod 位掩码。影响**分数**的 mod 系数(HD ×1.06、DT ×1.12…)。
+   *
+   * 省略则按无 mod 算 —— 分数会偏低但判定不受影响。
+   */
+  readonly rawMods?: number;
 }
 
 /**
@@ -401,7 +415,10 @@ function judgeCircles(
     });
   }
 
-  return { events: accumulate(raw), objectResults };
+  return {
+    events: accumulate(raw, stableScoringFor(beatmap, options.rawMods ?? 0)),
+    objectResults,
+  };
 }
 
 /**
@@ -676,7 +693,10 @@ function withinCircle(
  * `buildTimeline` 要求事件按时间升序,且每个事件的 `cum` 是该事件**生效后**的
  * 累积状态 —— 这是 `stateAt` 能 O(log n) 的全部原因。
  */
-function accumulate(raw: readonly RawJudgement[]): JudgementEvent[] {
+function accumulate(
+  raw: readonly RawJudgement[],
+  scoring: StableScoringOptions,
+): JudgementEvent[] {
   // 同一时刻的多个判定按物件下标稳定排序,保证可复现
   const sorted = [...raw].sort((a, b) => a.time - b.time || a.objectIndex - b.objectIndex);
 
@@ -684,7 +704,7 @@ function accumulate(raw: readonly RawJudgement[]): JudgementEvent[] {
   let cum: CumulativeState = ZERO_CUMULATIVE;
 
   for (const r of sorted) {
-    cum = applyToCumulative(cum, r.result, r.counted);
+    cum = applyToCumulative(cum, r.result, r.counted, r.part, scoring);
     events.push({
       time: r.time,
       objectIndex: r.objectIndex,
@@ -715,12 +735,24 @@ function applyToCumulative(
   previous: CumulativeState,
   result: HitResult,
   counted: HitResult | undefined,
+  part: JudgementPart,
+  scoring: StableScoringOptions,
 ): CumulativeState {
   const isMiss = result === HitResult.Miss;
   const combo = isMiss ? 0 : previous.combo + 1;
 
+  // 分数用**这次判定之前**的 combo,且 miss 不加分
+  const increment = isMiss
+    ? 0
+    : scoreIncrementFor(
+        baseScoreOf(result, part, counted),
+        previous.combo,
+        affectsComboMultiplier(part, counted),
+        scoring,
+      );
+
   return {
-    score: previous.score + baseScoreOf(result),
+    score: previous.score + increment,
     combo,
     maxCombo: Math.max(previous.maxCombo, combo),
     countGreat: previous.countGreat + (counted === HitResult.Great ? 1 : 0),
@@ -732,8 +764,35 @@ function applyToCumulative(
   };
 }
 
-/** 判定的基础分。stable:300 / 100 / 50 / 0。 */
-function baseScoreOf(result: HitResult): number {
+/**
+ * 该部件的基础分。
+ *
+ * | 部件 | 基础分 |
+ * |---|---|
+ * | circle / spinner | 判定值 300/100/50 |
+ * | 滑条的**计数**部件(带 `counted`) | 该聚合判定值 |
+ * | 滑条头 / repeat / 末端(非计数) | 30 |
+ * | 滑条刻度 | 10 |
+ *
+ * ⚠️ 滑条的整体判定值挂在**带 `counted` 的那个事件**上(stable 是末端、
+ * lazer 是头),所以那个事件既算 30 的部件分**也**算整体分 —— 这与
+ * `OsuLegacyScoreSimulator` 一致:它对 Slider 本身加 300,对嵌套部件另外加。
+ */
+function baseScoreOf(
+  result: HitResult,
+  part: JudgementPart,
+  counted: HitResult | undefined,
+): number {
+  if (part === 'circle' || part === 'spinner') return judgementValue(result);
+
+  // 滑条:计数事件用聚合判定值,其余按部件类型
+  if (counted !== undefined) return judgementValue(counted);
+  if (part === 'sliderTick') return SLIDER_TICK_SCORE;
+  return SLIDER_END_SCORE;
+}
+
+/** 判定 → 分值。stable:300 / 100 / 50 / 0。 */
+function judgementValue(result: HitResult): number {
   switch (result) {
     case HitResult.Great:
       return 300;
@@ -744,4 +803,19 @@ function baseScoreOf(result: HitResult): number {
     default:
       return 0;
   }
+}
+
+/**
+ * 该部件是否吃 combo 加成。
+ *
+ * `OsuLegacyScoreSimulator`:只有 HitCircle / Slider / Spinner 吃 ——
+ * 滑条的嵌套部件(刻度 / repeat / 末端)只进 accuracyScore。
+ *
+ * 我们把"滑条整体"挂在带 `counted` 的那个事件上(stable 是末端、lazer 是头),
+ * 所以判据就是"有没有 counted" —— 而不是看 part 名字。同一个 part 名在两种
+ * 口径下含义不同,按名字判会错。
+ */
+function affectsComboMultiplier(part: JudgementPart, counted: HitResult | undefined): boolean {
+  if (part === 'circle' || part === 'spinner') return true;
+  return counted !== undefined;
 }

@@ -6,6 +6,7 @@ import { describe, it } from 'vitest';
 import { loadBeatmap } from '../load/beatmapLoader';
 import { loadReplay } from '../load/replayLoader';
 import { createCircleJudgement } from './judgement';
+import { drainLengthSeconds, stableScoringFor } from './stableScoring';
 import { buildTimeline } from './timeline';
 import { HitResult } from './types';
 
@@ -43,6 +44,7 @@ describe.skipIf(AVAILABLE.length === 0)('判定复现差距报告', () => {
         judge: createCircleJudgement({
           // 两种记分的滑条计数口径不同,见 judgement.ts 的 SliderScoring
           sliderScoring: rp.info.isLazer ? 'lazer' : 'stable',
+          rawMods: rp.info.rawMods,
         }),
       });
 
@@ -95,6 +97,14 @@ describe.skipIf(AVAILABLE.length === 0)('判定复现差距报告', () => {
         `  ${real.maxCombo === cum?.maxCombo ? '✅ 一致' : `(差 ${real.maxCombo - (cum?.maxCombo ?? 0)})`}`);
       lines.push(`  准确率: .osr ${(real.accuracy * 100).toFixed(2)}%` +
         `  vs  我们 ${(accuracyOf(cum) * 100).toFixed(2)}%`);
+
+      const sc = stableScoringFor(bm.beatmap, real.rawMods);
+      lines.push(`  分数: .osr ${real.totalScore.toLocaleString()}` +
+        `  vs  我们 ${(cum?.score ?? 0).toLocaleString()}` +
+        `  (比 ${((cum?.score ?? 0) / real.totalScore).toFixed(3)})`);
+      lines.push(`    难度系数 ${sc.difficultyMultiplier}  mod 系数 ${sc.modMultiplier.toFixed(3)}` +
+        `  drain ${drainLengthSeconds(bm.beatmap)}s` +
+        `${real.isLazer ? '  ⚠️ lazer 用 standardised 记分,与 stable 公式不可比' : ''}`);
     }
 
     console.log(lines.join('\n'));

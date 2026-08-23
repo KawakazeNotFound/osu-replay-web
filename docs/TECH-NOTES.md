@@ -287,7 +287,7 @@ AR 9.15 下 preempt:lazer 得 **577**,该包得 **577.5**。而堆叠阈值是
 ⚠️ 若将来要用它的**滑条 tick 生成**(M2 的 maxCombo 精确计算需要),同样要先核
 它的 tick 间隔算法是否与 master 一致,不能直接信。
 
-### B14. stable 分数公式的难度系数 —— `已确认`(2026-08-23,已核源码但**尚未实现**)
+### B14. stable 分数公式的难度系数 —— `已实现`(2026-08-23,`src/core/sim/stableScoring.ts`)
 
 公式在 `LegacyRulesetExtensions.CalculateDifficultyPeppyStars(difficulty, objectCount, drainLength)`:
 
@@ -314,9 +314,34 @@ difficultyPeppyStars = (int)round(
 
 JS 里没有 `decimal`,只有 float64 —— 这是一处**已知的潜在偏差来源**,实现时要留意。
 
-**为什么还没实现**:分数公式是 `基础分 + 基础分 × (combo-1) × 难度系数 × mod 系数 / 25`,
-而**每个滑条刻度都加分**。刻度判定还没做,所以算出的分数无法与 `.osr` 的 `totalScore`
-比对 —— 写一个验不了的公式等于埋雷。故刻意排在滑条刻度判定之后。
+**实现后补充的三条**(实现时才浮出水面,记下来免得下次重新踩):
+
+3. **`基础分 / 25` 是整数除法。** lazer 在那一行标了
+   `PossibleLossOfFraction (intentional to match osu-stable)` —— 是刻意保留 stable 的
+   行为,不是笔误。300/25=12、100/25=4、50/25=2 都恰好整除,所以**用这三个值测不出来**;
+   测试里要拿一个不整除的基础分(比如 60)才能卡住。
+4. **`drainLength` 用末物件的 `startTime`,不是 `endTime`。** 而且每个时间戳
+   **先各自 `round` 再相减**,最后那次除以 1000 是整数除法:
+   ```
+   drainLength = (round(末物件.startTime) - round(首物件.startTime) - Σbreak) / 1000
+   ```
+   若谱面以长转盘结尾,用 `endTime` 会让 drainLength 明显偏大 → 物件密度偏小 → 难度系数可能少 1。
+5. **只有 HitCircle / Slider / Spinner 吃 combo 加成。** 滑条的嵌套部件(刻度 10 分、
+   头/repeat/末端 30 分)只进 accuracyScore。我们把"滑条整体判定"挂在带 `counted` 的
+   那个事件上(stable 是末端、lazer 是头),所以代码里的判据是"有没有 `counted`",
+   **不是看 part 名字** —— 同一个 part 名在两种记分口径下含义不同,按名字判会错。
+
+**验证结果**(2026-08-23):
+
+| 样本 | `.osr` 分数 | 我们 | 比值 | 说明 |
+|---|---|---|---|---|
+| `stable-hdfl` | 1,316,450 | 1,368,465 | **1.040** | 公式基本正确;4% 的差来自 combo 差 7 |
+| `stable` | 20,931,102 | 7,078,362 | 0.338 | maxCombo 412 vs 1151 —— 见 D13 |
+| `lazer` / `lazer-moonlight` | — | — | — | lazer 用 standardised 记分,与 ScoreV1 **不可比** |
+
+⚠️ **分数被 combo 加成主导**,所以它不是一个独立的正确性指标:combo 差多少,分数就
+成比例地差。测试因此只在 `maxCombo` 精确对上时才断言分数精确相等,否则只检查量级
+(比值 0.2~2,能抓住"漏乘难度系数"这类整体性错误)。真正的把关点仍是 combo。
 
 ### B15. 滑条跟踪(tracking)的确切规则 —— `已核源码,待实现`(2026-08-23)
 
@@ -600,6 +625,36 @@ Chrome 不加 `--dump-dom` 直接开页面,拿到文件后再 kill。
 所以"只传 `.osr` 能不能自动播起来"这件事可以无人值守验收。
 
 ⚠️ 读文件时要显式指定 UTF-8(PowerShell 默认按 ANSI 读会变乱码)。
+
+### D13. `stable` 样本的 combo 缺口 —— 🔴 `未解决`(2026-08-23,当前最大偏差)
+
+四个样本里三个的 combo 已经很接近了,只有 `stable.osr` 差得离谱:
+
+| 样本 | `.osr` maxCombo | 我们 | 差 |
+|---|---|---|---|
+| `lazer` | 346 | 346 | ✅ 0 |
+| `lazer-moonlight` | 755 | 756 | -1 |
+| `stable-hdfl` | 253 | 260 | -7 |
+| **`stable`** | **1151** | **412** | **739** |
+
+同时它的判定计数只差 1(747/17/2/0 vs 746/17/3/0),准确率差 0.11%。
+**判定几乎全对,但 combo 断了** —— 说明有极少数几个滑条部件被误判成 miss,
+而每一次都会把 combo 归零。1151 → 412 只需要**两三次**位置合适的误判。
+
+已排除的解释:
+- 不是判定窗口 —— 主判定计数只差 1
+- 不是物件解析 —— L1 断言(物件数 == 判定总数)四个样本全精确通过
+- 不是 stacking —— 该图 `stackLeniency` 会产生偏移,但偏移错了会同时影响判定计数
+
+下一步该查的方向(按可疑度排序):
+1. **滑条跟踪的按键有效性规则**(B15 的 `acceptAnyKeyAfter`)。这条最复杂也最可能实现错。
+   具体查:`stable.osr` 里 combo 断掉的那几个时刻,玩家是不是换了按键。
+2. **`legacyLastTick` 的时刻**(`max(start + totalDuration/2, finalSpanStart + spanDuration - 36)`)。
+   若这个时刻算偏了,末端会落在跟踪范围外。
+3. **重复滑条(repeat)的时间反转**。反向 span 的刻度顺序若错了,刻度位置就全错。
+
+诊断入口:`npx vitest run src/core/sim/judgementReport` 会打印每个样本的滑条部件命中率。
+要定位到具体物件,得再加一个"列出所有 combo 归零时刻 + 对应物件下标"的诊断输出。
 
 ---
 
