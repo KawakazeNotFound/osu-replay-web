@@ -3,6 +3,17 @@ import { firstIndexAtOrAfter, lastIndexAtOrBefore } from '../util/search';
 import { MISS_WINDOW, hitWindowsFromOD, radiusFromCS, type HitWindows } from './difficulty';
 import { TAIL_LENIENCY, type SliderPart } from './sliderParts';
 import { SliderTracker } from './sliderTracking';
+import {
+  applyJudgement,
+  breaksCombo,
+  emptyAccumulator,
+  increasesCombo,
+  lazerJudgementFor,
+  lazerMaxima,
+  lazerTotalScore,
+  type LazerAccumulator,
+  type LazerMaxima,
+} from './lazerScoring';
 import { judgeSpinner } from './spinner';
 import {
   SLIDER_END_SCORE,
@@ -416,9 +427,29 @@ function judgeCircles(
   }
 
   return {
-    events: accumulate(raw, stableScoringFor(beatmap, options.rawMods ?? 0)),
+    events: accumulate(raw, scoreModelFor(beatmap, options)),
     objectResults,
   };
+}
+
+/**
+ * 按记分口径建模型。
+ *
+ * `sliderScoring` 同时决定了判定计数口径**和**记分体系 —— 这两件事在 osu 里
+ * 本来就是绑定的(同一个 `ClassicSliderBehaviour` 开关)。
+ */
+function scoreModelFor(beatmap: SimBeatmap, options: CircleJudgementOptions): ScoreModel {
+  if (options.sliderScoring === 'lazer') {
+    return {
+      kind: 'lazer',
+      maxima: lazerMaxima(beatmap),
+      acc: emptyAccumulator(),
+      // TODO lazer 的 mod 系数与 stable 不同(每个 mod 自带 ScoreMultiplier),见 M5
+      modMultiplier: 1,
+    };
+  }
+
+  return { kind: 'stable', options: stableScoringFor(beatmap, options.rawMods ?? 0) };
 }
 
 /**
@@ -693,10 +724,26 @@ function withinCircle(
  * `buildTimeline` 要求事件按时间升序,且每个事件的 `cum` 是该事件**生效后**的
  * 累积状态 —— 这是 `stateAt` 能 O(log n) 的全部原因。
  */
-function accumulate(
-  raw: readonly RawJudgement[],
-  scoring: StableScoringOptions,
-): JudgementEvent[] {
+/**
+ * 记分模型。两套记分体系的差别不只是公式,连 **combo 规则**都不同 ——
+ * 所以不能只换一个"算分函数",得整体分支。
+ *
+ * | | stable(ScoreV1) | lazer(standardised) |
+ * |---|---|---|
+ * | 分数 | 累加,combo **线性**放大,无上限 | 每步重算,combo 开**平方**后归一化,≤ 100 万 |
+ * | 漏掉滑条末端 | `LargeTickMiss` → **断 combo** | `IgnoreMiss` → **不断 combo** |
+ * | 滑条末端权重 | 30(与 repeat 同) | **150**(刻意高一档) |
+ */
+type ScoreModel =
+  | { readonly kind: 'stable'; readonly options: StableScoringOptions }
+  | {
+      readonly kind: 'lazer';
+      readonly maxima: LazerMaxima;
+      readonly acc: LazerAccumulator;
+      readonly modMultiplier: number;
+    };
+
+function accumulate(raw: readonly RawJudgement[], model: ScoreModel): JudgementEvent[] {
   // 同一时刻的多个判定按物件下标稳定排序,保证可复现
   const sorted = [...raw].sort((a, b) => a.time - b.time || a.objectIndex - b.objectIndex);
 
@@ -704,7 +751,7 @@ function accumulate(
   let cum: CumulativeState = ZERO_CUMULATIVE;
 
   for (const r of sorted) {
-    cum = applyToCumulative(cum, r.result, r.counted, r.part, scoring);
+    cum = applyToCumulative(cum, r.result, r.counted, r.part, model);
     events.push({
       time: r.time,
       objectIndex: r.objectIndex,
@@ -720,39 +767,29 @@ function accumulate(
 /**
  * 单条判定对累积状态的影响。
  *
- * **combo** 由**每个部件**驱动(circle、滑条头、每个刻度 / repeat / 末端)——
- * osu 里命中滑条头 +1、每个刻度 +1、末端 +1;miss 任何一个都断连。
+ * **combo** 由**每个部件**驱动(circle、滑条头、每个刻度 / repeat / 末端)。
+ * 但"什么算断连"两套体系不同 —— 见 {@link ScoreModel}:lazer 里漏掉滑条末端
+ * 是 `IgnoreMiss`,**不断 combo**。
  *
  * **300/100/50 计数**只由带 `counted` 的事件驱动,**一个物件只有一个** ——
  * 口径见 {@link SliderScoring}。
  *
- * ⚠️ `score` 是**占位实现**(基础分之和,无 combo 加成、无难度系数)。
- * 真实公式见 TECH-NOTES B14。
- *
- * HP 变化也未实现,见 TECH-NOTES D1。
+ * HP 变化仍未实现,见 TECH-NOTES D1。
  */
 function applyToCumulative(
   previous: CumulativeState,
   result: HitResult,
   counted: HitResult | undefined,
   part: JudgementPart,
-  scoring: StableScoringOptions,
+  model: ScoreModel,
 ): CumulativeState {
-  const isMiss = result === HitResult.Miss;
-  const combo = isMiss ? 0 : previous.combo + 1;
-
-  // 分数用**这次判定之前**的 combo,且 miss 不加分
-  const increment = isMiss
-    ? 0
-    : scoreIncrementFor(
-        baseScoreOf(result, part, counted),
-        previous.combo,
-        affectsComboMultiplier(part, counted),
-        scoring,
-      );
+  const { combo, score } =
+    model.kind === 'lazer'
+      ? lazerStep(previous, result, part, model)
+      : stableStep(previous, result, counted, part, model.options);
 
   return {
-    score: previous.score + increment,
+    score,
     combo,
     maxCombo: Math.max(previous.maxCombo, combo),
     countGreat: previous.countGreat + (counted === HitResult.Great ? 1 : 0),
@@ -762,6 +799,65 @@ function applyToCumulative(
     // HP 变化尚未实现(见 TECH-NOTES D1),先原样带过
     hp: previous.hp,
   };
+}
+
+/**
+ * stable(ScoreV1)的一步:combo 与**累加**的分数。
+ *
+ * 任何 miss 都断连;分数用**这次判定之前**的 combo。
+ */
+function stableStep(
+  previous: CumulativeState,
+  result: HitResult,
+  counted: HitResult | undefined,
+  part: JudgementPart,
+  scoring: StableScoringOptions,
+): { combo: number; score: number } {
+  const isMiss = result === HitResult.Miss;
+  const combo = isMiss ? 0 : previous.combo + 1;
+
+  const increment = isMiss
+    ? 0
+    : scoreIncrementFor(
+        baseScoreOf(result, part, counted),
+        previous.combo,
+        affectsComboMultiplier(part, counted),
+        scoring,
+      );
+
+  return { combo, score: previous.score + increment };
+}
+
+/**
+ * lazer(standardised)的一步:combo 与**重算**的分数。
+ *
+ * 两处与 stable 不同,都是源码明确规定的:
+ *
+ * 1. **combo 规则走 lazer 的谓词** —— `breaksCombo` 只对 `Miss` 与
+ *    `LargeTickMiss` 为真。漏掉滑条末端是 `IgnoreMiss`,**既不断也不加** combo。
+ * 2. **分数不是累加而是每步重算** —— 它是
+ *    `500000·acc·comboProgress + 500000·acc⁵·accProgress + bonus`,
+ *    两个比值的分母(上限)固定,分子随判定增长,所以只能整体重算。
+ *
+ * ⚠️ `model.acc` 是**可变**累加器,靠调用顺序推进。`accumulate` 是单向顺序
+ * 扫描,满足这个前提;别在别处复用同一个 model。
+ */
+function lazerStep(
+  previous: CumulativeState,
+  result: HitResult,
+  part: JudgementPart,
+  model: { readonly maxima: LazerMaxima; readonly acc: LazerAccumulator; readonly modMultiplier: number },
+): { combo: number; score: number } {
+  const judgement = lazerJudgementFor(part, result);
+
+  const combo =
+    breaksCombo(judgement.type) ? 0
+    : increasesCombo(judgement.type) ? previous.combo + 1
+    : previous.combo; // ignoreMiss / ignoreHit:combo 原样保持
+
+  applyJudgement(model.acc, judgement, combo);
+
+  return { combo, score: lazerTotalScore(model.acc, model.maxima, model.modMultiplier) };
 }
 
 /**

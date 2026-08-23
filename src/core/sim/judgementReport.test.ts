@@ -6,6 +6,13 @@ import { describe, it } from 'vitest';
 import { loadBeatmap } from '../load/beatmapLoader';
 import { loadReplay } from '../load/replayLoader';
 import { createCircleJudgement } from './judgement';
+import {
+  applyJudgement,
+  emptyAccumulator,
+  lazerJudgementFor,
+  lazerMaxima,
+  lazerTotalScore,
+} from './lazerScoring';
 import { drainLengthSeconds, stableScoringFor } from './stableScoring';
 import { buildTimeline } from './timeline';
 import { HitResult } from './types';
@@ -100,11 +107,25 @@ describe.skipIf(AVAILABLE.length === 0)('判定复现差距报告', () => {
 
       const sc = stableScoringFor(bm.beatmap, real.rawMods);
       lines.push(`  分数: .osr ${real.totalScore.toLocaleString()}` +
-        `  vs  我们 ${(cum?.score ?? 0).toLocaleString()}` +
+        `  vs  ScoreV1 ${(cum?.score ?? 0).toLocaleString()}` +
         `  (比 ${((cum?.score ?? 0) / real.totalScore).toFixed(3)})`);
       lines.push(`    难度系数 ${sc.difficultyMultiplier}  mod 系数 ${sc.modMultiplier.toFixed(3)}` +
-        `  drain ${drainLengthSeconds(bm.beatmap)}s` +
-        `${real.isLazer ? '  ⚠️ lazer 用 standardised 记分,与 stable 公式不可比' : ''}`);
+        `  drain ${drainLengthSeconds(bm.beatmap)}s`);
+
+      // lazer 的 standardised 记分 —— 拿时间线上的每个事件重放一遍
+      const acc = emptyAccumulator();
+      for (const e of timeline.events) {
+        applyJudgement(acc, lazerJudgementFor(e.part, e.result), e.cum.combo);
+      }
+      const maxima = lazerMaxima(bm.beatmap);
+      const v2 = lazerTotalScore(acc, maxima);
+      lines.push(`  ScoreV2(lazer): ${v2.toLocaleString()}` +
+        `  vs  .osr ${real.totalScore.toLocaleString()}` +
+        `  ${real.isLazer ? `(差 ${v2 - real.totalScore})` : '(该回放是 stable 录的,V2 仅供参考)'}`);
+      lines.push(`    准确率 ${(acc.currentBaseScore / acc.currentMaximumBaseScore * 100).toFixed(2)}%` +
+        `  comboPortion ${acc.currentComboPortion.toFixed(0)}/${maxima.maximumComboPortion.toFixed(0)}` +
+        `  accCount ${acc.currentAccuracyJudgementCount}/${maxima.maximumAccuracyJudgementCount}` +
+        `  bonus ${acc.currentBonusPortion}`);
     }
 
     console.log(lines.join('\n'));

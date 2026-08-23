@@ -6,17 +6,30 @@ import { describe, expect, it } from 'vitest';
 import { loadBeatmap } from '../load/beatmapLoader';
 import { loadReplay } from '../load/replayLoader';
 import { createCircleJudgement } from './judgement';
+import { MAX_SCORE } from './lazerScoring';
 import { stableScoringFor } from './stableScoring';
 import { theoreticalMaxCombo } from './sliderParts';
 import { buildTimeline } from './timeline';
-import { ZERO_CUMULATIVE, type CumulativeState } from './types';
+import { ZERO_CUMULATIVE, HitResult, type CumulativeState } from './types';
 
 /** 判定已能**精确**复现的样本。与 `judgement.test.ts` 的同名常量保持一致。 */
 const EXACT_SAMPLES = new Set(['lazer']);
 
+/** 判定档位计数是否与 `.osr` 头部完全一致。分数精确断言的前提。 */
+function sameCounts(
+  cum: CumulativeState,
+  info: { count300: number; count100: number; count50: number; countMiss: number },
+): boolean {
+  return (
+    cum.countGreat === info.count300 &&
+    cum.countOk === info.count100 &&
+    cum.countMeh === info.count50 &&
+    cum.countMiss === info.countMiss
+  );
+}
+
 /** stable 的经典准确率公式。 */
-function accuracyOf(cum: CumulativeState): number {
-  const hits = cum.countGreat + cum.countOk + cum.countMeh + cum.countMiss;
+function accuracyOf(cum: CumulativeState): number {  const hits = cum.countGreat + cum.countOk + cum.countMeh + cum.countMiss;
   if (hits === 0) return 1;
   return (300 * cum.countGreat + 100 * cum.countOk + 50 * cum.countMeh) / (300 * hits);
 }
@@ -222,14 +235,23 @@ describe.skipIf(PAIRS.length === 0)('A2 判定复现', () => {
         });
       }
 
-      it('L3 分数符合 stable ScoreV1 的量级(lazer 回放跳过)', async () => {
+      it('L3 分数与 .osr 头部一致(lazer 精确 / stable 查量级)', async () => {
         const { beatmap, replay, judged } = await load();
 
-        // lazer 用 standardised 记分(上限 100 万,与 combo 的关系完全不同),
-        // 拿 ScoreV1 去比毫无意义 —— 留到 M5 实现 standardised 时再断言。
-        // 这里在测试内部分支而不是注册两套测试:isLazer 要读文件才知道,
-        // 而 describe 的注册是同步的
-        if (replay.info.isLazer) return;
+        if (replay.info.isLazer) {
+          // lazer 的 standardised 记分已实现,且 `lazer.osr` 上**精确**吻合。
+          // 分数由 combo 与准确率共同决定,所以只有两者都对上才可能精确相等
+          if (judged.maxCombo === replay.info.maxCombo && sameCounts(judged, replay.info)) {
+            expect(judged.score).toBe(replay.info.totalScore);
+          } else {
+            // 判定还有偏差时只查量级 —— 但 lazer 恒 ≤ 100 万,这条上界必须成立
+            expect(judged.score).toBeLessThanOrEqual(MAX_SCORE);
+            expect(Math.abs(judged.score - replay.info.totalScore)).toBeLessThan(
+              replay.info.totalScore * 0.02,
+            );
+          }
+          return;
+        }
 
         const scoring = stableScoringFor(beatmap.beatmap, replay.info.rawMods);
 
@@ -250,32 +272,51 @@ describe.skipIf(PAIRS.length === 0)('A2 判定复现', () => {
         }
       });
 
-      it('L3 分数随 combo 单调增长,且首个判定无 combo 加成', async () => {
-        const { timeline, judged } = await load();
+      it('L3 分数的单调性(stable 只增 / lazer 可回跌但只在准确率下降时)', async () => {
+        const { timeline, replay } = await load();
         const events = timeline.events;
         expect(events.length).toBeGreaterThan(10);
 
-        // 首个判定拿不到 combo 加成 —— 分数就是它的基础分,必然 ≤ 300
-        expect(events[0]!.cum.score).toBeLessThanOrEqual(300);
+        if (replay.info.isLazer) {
+          // ⚠️ lazer 的分数**会下降** —— 这不是 bug,是 standardised 记分的性质:
+          // Accuracy 是个 running 比值(currentBaseScore / currentMaximumBaseScore),
+          // 一次 miss 让分母增长而分子不变,准确率就掉;而分数里 acc 与 acc⁵
+          // 都是乘性因子,所以即使 comboProgress 在涨,总分也可能净减少。
+          // 真实 lazer 里 miss 的瞬间显示分数确实会回跌。
+          //
+          // 能断言的是:**回跌只发生在拿不到满档的判定上**。
+          for (let i = 1; i < events.length; i++) {
+            if (events[i]!.cum.score >= events[i - 1]!.cum.score) continue;
 
-        // 分数只增不减
+            const e = events[i]!;
+            const perfect =
+              e.part === 'sliderTick' || e.part === 'sliderRepeat' || e.part === 'sliderTail'
+                ? e.result !== HitResult.Miss
+                : e.result === HitResult.Great;
+
+            expect(
+              perfect,
+              `分数在 ${e.time.toFixed(0)}ms 回跌,但该判定(${e.part})是满档的`,
+            ).toBe(false);
+          }
+
+          // 恒 ≤ 100 万(该图无转盘 bonus)。这条上界是 standardised 记分的定义
+          expect(events.at(-1)!.cum.score).toBeLessThanOrEqual(MAX_SCORE);
+          return;
+        }
+
+        // ScoreV1 是纯累加,只增不减
         for (let i = 1; i < events.length; i++) {
           expect(events[i]!.cum.score).toBeGreaterThanOrEqual(events[i - 1]!.cum.score);
         }
 
+        // 首个判定拿不到 combo 加成 —— 分数就是它的基础分,必然 ≤ 300
+        expect(events[0]!.cum.score).toBeLessThanOrEqual(300);
+
         // combo 加成必须占分数的绝大部分。基础分之和上界是 300 × 事件数
         // (实际远小于此,因为滑条部件只值 10/30),所以总分若显著超过这个上界,
         // 就证明 combo 加成真的在累积 —— 而不是只把基础分加起来
-        const baseScoreCeiling = 300 * events.length;
-        expect(judged.score).toBeGreaterThan(baseScoreCeiling);
-
-        // 不能拿"末尾增量 > 开头增量"来验:末尾很可能是不吃 combo 加成的
-        // 滑条部件(固定 30 分)。实测 lazer 样本的最后两个事件正是如此
-        const maxIncrement = events.reduce(
-          (best, e, i) => (i === 0 ? best : Math.max(best, e.cum.score - events[i - 1]!.cum.score)),
-          0,
-        );
-        expect(maxIncrement).toBeGreaterThan(events[0]!.cum.score);
+        expect(events.at(-1)!.cum.score).toBeGreaterThan(300 * events.length);
       });
     });
   }
