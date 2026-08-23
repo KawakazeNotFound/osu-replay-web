@@ -14,7 +14,8 @@
 下一步是**判定器本身** —— `JudgementPass` 的插桩接口早就留好了,现在有谱面可以填了。
 
 > ⚠️ **本仓库出现过多会话并行编辑**(2026-08-23):`timeline.test.ts` 由另一次会话写入。
-> 若同时开着多个 agent,注意改同一文件会互相覆盖 —— 目录尚未 `git init`,没有版本兜底。
+> 现已纳入 git(见下方「版本控制约定」),多会话并行编辑至少有了退回点。
+> 但 git 不解决**同时**写同一文件互相覆盖的问题 —— 并行开多个 agent 时仍需分工避开同一文件。
 
 ---
 
@@ -224,10 +225,56 @@ npm run dev       # 然后开:
 
 ---
 
+## 版本控制约定
+
+2026-08-23 起纳入 git(此前无版本控制)。分支 `main`,无远端。
+
+### 每个 commit 都必须是绿的
+
+`.githooks/pre-commit` 会在提交前跑 `tsc --noEmit` + `vitest run`,不通过就中止。
+理由:「保管好每个 checkpoint」的前提是每个 checkpoint 都能编译、测试都绿 ——
+否则 `git bisect` 会踩到一堆坏提交,历史就失去排查价值。
+
+**新 clone 需要执行一次**(hook 路径是 per-clone 配置,不随仓库自动生效):
+
+```bash
+git config core.hooksPath .githooks
+```
+
+临时跳过(存 WIP、实验性提交):`git commit --no-verify`。
+
+> ⚠️ hook 校验的是**工作区**而非暂存区。单人项目按全量提交时无碍;若开始做
+> 部分提交(`git add -p`),需要改成先 stash 未暂存内容再校验。
+
+### 什么时候切一个 checkpoint
+
+- 一个可独立描述的能力做完并验证通过(如"`.osu` 解析层落地")
+- 一个 bug 修掉并加了回归测试
+- 一批文档更新落定
+- 动手改高风险代码**之前**(留一个已知良好的退回点)
+
+不为"写了几行"提交。commit message 用中文,首行是能一眼看懂的结论,正文说
+**为什么**这么做 —— 尤其是那些"看起来能简化、简化了就对不上 stable"的地方。
+
+### 素材与个人配置不入库
+
+`.osu` / `.osr` / `.osz` / `.osk` 全部排除(体积 + 再分发问题)。
+`.claude/settings.local.json` 是个人权限配置,按约定不共享。
+
+依赖真实素材的测试对缺失是**跳过**而非失败,所以 clone 下来即可 `npm test`。
+
+### 换行符
+
+`.gitattributes` 设了 `* text=auto`:仓库内统一存 LF,检出时按平台还原。
+不加这条的后果是 Windows 上写的 CRLF 原样入库,换机器或走 CI 时整仓库显示被改动。
+校验方式:`git ls-files --eol`,应全部为 `i/lf`。
+
+---
+
 ## 待办杂项
 
 - **仓库改名**:目录名 `OSUReplay-Danser` 已不准确(danser 不再是后端),建议改为 `osu-replay-web`(`package.json` 里的 name 已经是这个)。不阻塞。
-- **git**:目录尚未 `git init`。**已经出现过多会话并行编辑同一文件,建议尽快补上。**
+- **git**:✅ 已纳入版本控制(2026-08-23),约定见上一节。**无远端** —— 若要备份需自己建 GitHub 仓库并 `git remote add`。
 - **`fixtures/` 现有素材**(不入库):
   - 4 组完整配对:`stable` / `stable-hdfl` / `lazer` / `lazer-moonlight`(各含 `.osu` + `.osr`)
   - 1 个只有回放的:`lazer-ap.osr`(谱面 MD5 `43c04b70…` 本机没有,留作降级路径测试)

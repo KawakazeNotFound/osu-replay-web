@@ -1,0 +1,42 @@
+#!/bin/sh
+#
+# 提交前闸门:不让未通过验证的状态进入历史。
+#
+# 因为「保管好每个 checkpoint」的前提是每个 checkpoint 都能编译、测试都绿 ——
+# 否则 git bisect 会踩到一堆坏提交,历史就失去了排查价值。
+#
+# ⚠️ 已知局限:这里校验的是**工作区**,不是暂存区。若你只 stage 了部分改动,
+#    通过的是"工作区全量"而非"这次要提交的快照"。单人项目按全量提交时无碍;
+#    若开始做部分提交,需要改成 stash 未暂存内容后再校验。
+#
+# 需要临时跳过(存 WIP、写实验性提交)时:
+#    git commit --no-verify
+#
+# 本文件是版本化的。新 clone 需要执行一次:
+#    git config core.hooksPath .githooks
+
+set -e
+
+printf '[pre-commit] tsc --noEmit … '
+if npm run --silent typecheck >/tmp/cc-typecheck.log 2>&1; then
+  printf 'ok\n'
+else
+  printf '失败\n\n'
+  cat /tmp/cc-typecheck.log
+  printf '\n[pre-commit] 类型检查未通过,提交已中止。\n'
+  printf '            确实要提交请用:git commit --no-verify\n'
+  exit 1
+fi
+
+printf '[pre-commit] vitest run … '
+if npm run --silent test >/tmp/cc-test.log 2>&1; then
+  # 把测试数量摘出来,让人看到闸门确实跑过(vitest 带 ANSI 色码,要剥掉)
+  summary=$(sed 's/\x1b\[[0-9;]*m//g' /tmp/cc-test.log | grep -E "^ *Tests " | tail -n 1 | sed 's/^ *//')
+  if [ -n "$summary" ]; then printf 'ok — %s\n' "$summary"; else printf 'ok\n'; fi
+else
+  printf '失败\n\n'
+  tail -n 40 /tmp/cc-test.log
+  printf '\n[pre-commit] 单测未通过,提交已中止。\n'
+  printf '            确实要提交请用:git commit --no-verify\n'
+  exit 1
+fi
