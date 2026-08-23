@@ -22,6 +22,7 @@ import {
   type ReplayInfoSummary,
 } from './core/load/replayLoader';
 import { EMPTY_FRAMES, ReplayKey, normalizeKeys } from './core/replay/frames';
+import { createCircleJudgement } from './core/sim/judgement';
 import { stateAt } from './core/sim/query';
 import { buildTimeline, emptyTimeline, placeholderBeatmap } from './core/sim/timeline';
 import { PlaybackController } from './player/PlaybackController';
@@ -79,6 +80,8 @@ function rebuildTimeline(): void {
   controller.timeline = buildTimeline(
     currentBeatmap?.beatmap ?? placeholderBeatmap(),
     currentReplay?.frames ?? EMPTY_FRAMES,
+    // 只有谱面与回放都在时才判定 —— 缺任一方判定无从谈起
+    currentBeatmap && currentReplay ? { judge: createCircleJudgement() } : {},
   );
 
   // 换素材时保持当前时刻,除非它落到了新范围之外
