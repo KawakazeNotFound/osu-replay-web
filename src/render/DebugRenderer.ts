@@ -9,9 +9,37 @@ import {
   type SimHitObject,
 } from '../core/sim/types';
 import { lastIndexAtOrBefore } from '../core/util/search';
+import { approachAlphaAt, approachScaleAt } from './approachCircle';
 import { buildComboPalette, type ComboPalette } from './comboColours';
+import { userSkinLayer } from './skin/defaultSkin';
+import { layoutHitCircleNumber, drawTextLayout } from './skin/numberLayout';
+import { CIRCLE_MAX_DISPLAY, drawSprite, spriteQuad } from './skin/spriteGeometry';
+import { circleComponentName, type SkinLayer } from './skin/skinStack';
 import type { SkinPackage } from './skin/skinFiles';
+import {
+  NO_SPRITES,
+  OSU_STD_COMPONENTS,
+  browserDecoder,
+  fontComponents,
+  loadSkinSprites,
+  type ImageDecoder,
+  type SkinSprites,
+} from './skin/skinTextures';
+import {
+  NO_TINTED,
+  TINTED_COMPONENTS,
+  browserCanvasFactory,
+  buildTintedSprites,
+  type CanvasFactory,
+  type TintedSprites,
+} from './skin/tint';
 import { snakeRangeAt } from './sliderSnaking';
+
+/** {@link DebugRenderer.setSkin} 的注入点 —— 让测试不必有真 canvas / createImageBitmap。 */
+export interface SkinLoadOptions {
+  readonly decode?: ImageDecoder;
+  readonly makeCanvas?: CanvasFactory;
+}
 
 /**
  * osu! 判定区尺寸(固定常量)。
@@ -238,12 +266,17 @@ export class DebugRenderer {
   private paletteFor: SimBeatmap | null = null;
 
   /**
-   * 已加载的皮肤。`null` = 没有皮肤,一切走内置线框画法。
+   * 已加载的皮肤与派生物。
    *
-   * 目前只用它的 `skin.ini` 配色 —— 贴图绘制路径还没做(见 M4)。
-   * 但配色这一层接上之后,「谱面 → 皮肤 → 默认」的链条就是完整的了。
+   * 与 {@link palette} 同一条理由:装好之后**不可变**,所以持有它们不违反
+   * "渲染层不得持有跨帧状态"—— 判据是幂等性,不是"有没有字段"。
    */
   private skin: SkinPackage | null = null;
+  private layers: readonly SkinLayer[] = [];
+  private sprites: SkinSprites = NO_SPRITES;
+  private tinted: TintedSprites = NO_TINTED;
+  private defaultLayer: SkinLayer | null = null;
+  private makeCanvas: CanvasFactory = browserCanvasFactory;
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
@@ -255,21 +288,83 @@ export class DebugRenderer {
   /**
    * 换皮肤。传 `null` 卸载。
    *
-   * 会让配色表失效并在下一帧重建 —— 因为皮肤配色参与优先级链。
+   * ## 为什么是 async
+   *
+   * 贴图必须**在开始渲染之前**全部装好 —— 见 `skin/skinTextures.ts` 头部那段:
+   * 若"画的时候没解码就先画线框",同一个时刻会先后给出两种结果,
+   * 「正放到达 == 直接 seek 到达」这条核心不变式就破了。
+   *
+   * 所以这里 await 装完再一次性换上。装载期间维持旧皮肤(或线框),不会闪。
    */
-  setSkin(skin: SkinPackage | null): void {
+  async setSkin(skin: SkinPackage | null, options: SkinLoadOptions = {}): Promise<void> {
+    const decode = options.decode ?? browserDecoder;
+    const makeCanvas = options.makeCanvas ?? browserCanvasFactory;
+
+    if (skin === null) {
+      this.skin = null;
+      this.layers = [];
+      this.sprites = NO_SPRITES;
+      this.tinted = NO_TINTED;
+      this.invalidatePalette();
+      return;
+    }
+
+    // 皮肤栈:用户皮肤 → 默认皮肤(逐组件回退,见 skin/skinStack.ts)
+    const layers: SkinLayer[] = [userSkinLayer(skin.ini, skin.files)];
+    if (this.defaultLayer !== null) layers.push(this.defaultLayer);
+
+    // 数字字体的前缀是运行期才知道的(来自 skin.ini),所以按前缀展开
+    const names = [
+      ...OSU_STD_COMPONENTS,
+      ...fontComponents(skin.ini.hitCirclePrefix),
+    ];
+
+    const sprites = await loadSkinSprites(layers, names, decode);
+
     this.skin = skin;
-    // 记忆化的键是 beatmap,但值现在还依赖皮肤 —— 所以换皮肤必须显式作废,
-    // 否则会一直用旧皮肤的配色
-    this.palette = null;
-    this.paletteFor = null;
+    this.layers = layers;
+    this.sprites = sprites;
+    this.makeCanvas = makeCanvas;
+    this.invalidatePalette();
   }
 
-  /** 取(或按需重建)该谱面的 combo 配色表。见 {@link palette}。 */
+  /** 装上默认皮肤兜底层。在 {@link setSkin} 之前调用。 */
+  setDefaultSkinLayer(layer: SkinLayer | null): void {
+    this.defaultLayer = layer;
+    this.invalidatePalette();
+  }
+
+  /**
+   * 让配色表与染色表失效。
+   *
+   * 记忆化的键是 `beatmap`,但值还依赖皮肤 —— 所以换皮肤必须显式作废,
+   * 否则会一直用旧皮肤的配色。
+   */
+  private invalidatePalette(): void {
+    this.palette = null;
+    this.paletteFor = null;
+    this.tinted = NO_TINTED;
+  }
+
+  /**
+   * 取(或按需重建)该谱面的 combo 配色表 + 染色表。
+   *
+   * ## 为什么两者一起建
+   *
+   * 染色用的颜色**必须**是走完优先级链之后的最终配色(谱面 → 皮肤 → 默认),
+   * 而那条链依赖 `beatmap`。所以染色表和配色表的有效期完全一致,
+   * 分开维护只会多一个失效点。见 {@link palette}。
+   */
   private paletteOf(beatmap: SimBeatmap): ComboPalette {
     if (this.paletteFor !== beatmap || this.palette === null) {
-      this.palette = buildComboPalette(beatmap, this.skin?.ini.comboColours ?? []);
+      const palette = buildComboPalette(beatmap, this.skin?.ini.comboColours ?? []);
+
+      this.palette = palette;
       this.paletteFor = beatmap;
+      this.tinted =
+        this.sprites === NO_SPRITES
+          ? NO_TINTED
+          : buildTintedSprites(this.sprites, TINTED_COMPONENTS, palette.colours, this.makeCanvas);
     }
     return this.palette;
   }
@@ -311,6 +406,9 @@ export class DebugRenderer {
 
     this.drawPlayfieldBorder();
     this.drawHitObjects(timeline, state);
+    // approach circle 统一画在所有物件之上 —— 见 drawApproachCircles() 的注释
+    this.drawApproachCircles(timeline, state);
+
     this.drawTrail(timeline, state);
     this.drawCursor(state);
   }
@@ -404,16 +502,23 @@ export class DebugRenderer {
       if (head !== null) {
         ctx.globalAlpha = fadeInAlpha * head.alpha;
 
-        ctx.strokeStyle =
-          headMissed ? '#ff4d6d'
-          : object.kind === 'spinner' ? '#7f7fff'
-          : palette.colourOf(object);
-        ctx.lineWidth = Math.max(1.5, 2 * this.scale);
-        ctx.beginPath();
-        ctx.arc(cx, cy, radius * head.grow, 0, Math.PI * 2);
-        ctx.stroke();
+        // 贴图路径优先;皮肤没提供就退回线框。**逐组件降级**,不是"有皮肤就全用贴图"
+        // —— 用户的 test.osk 实测缺 approachcircle 与 reversearrow,而别的皮肤
+        // 可能缺得更多。核过 lazer:回退是逐组件的(SkinProvidingContainer.GetTexture)
+        const circleName = this.drawCirclePiece(object, cx, cy, radius, head.grow, palette);
 
-        // combo 内序号。皮肤系统(M4)会换成 default-N 贴图。
+        if (circleName === null) {
+          ctx.strokeStyle =
+            headMissed ? '#ff4d6d'
+            : object.kind === 'spinner' ? '#7f7fff'
+            : palette.colourOf(object);
+          ctx.lineWidth = Math.max(1.5, 2 * this.scale);
+          ctx.beginPath();
+          ctx.arc(cx, cy, radius * head.grow, 0, Math.PI * 2);
+          ctx.stroke();
+        }
+
+        // combo 内序号。
         //
         // 条件是"还没被判定"(result === null)而不是 hitTime === null ——
         // 后者在 **miss** 时也成立,会让漏掉的圈一直顶着数字不放。
@@ -421,23 +526,206 @@ export class DebugRenderer {
         // 近似:真实行为是新版 legacy 皮肤把数字单独淡出 240/4 = 60ms 且不缩放
         // (`LegacyMainCirclePiece.cs:191`),我们直接让它消失。60ms 内几乎看不出来。
         if (object.kind !== 'spinner' && result === null) {
-          ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
-          ctx.font = `${Math.round(radius * 0.9)}px system-ui, sans-serif`;
-          ctx.textAlign = 'center';
-          ctx.textBaseline = 'middle';
-          ctx.fillText(String(object.indexInCombo), cx, cy);
+          this.drawComboNumber(object.indexInCombo, cx, cy, radius);
         }
 
-        // approach circle:从 4 倍半径按真实 preempt 收缩到 1 倍。
-        // 在 head !== null 分支内 —— approach circle 是头的一部分,头淡完就没了
-        if (untilHit > 0) {
-          const approachRadius = radius * (1 + 3 * Math.min(1, untilHit / preempt));
-          ctx.strokeStyle = 'rgba(255, 255, 255, 0.45)';
-          ctx.lineWidth = Math.max(1, 1.5 * this.scale);
-          ctx.beginPath();
-          ctx.arc(cx, cy, approachRadius, 0, Math.PI * 2);
-          ctx.stroke();
+        // ⚠️ `HitCircleOverlayAboveNumber` 默认 **true**,那时 overlay 要画在数字**之上**
+        // —— 所以它在这里,而不是在 drawCirclePiece 里。
+        // 我第一版把它只放在 drawCirclePiece 的 `!overlayAboveNumber()` 分支里,
+        // 结果**默认情况下 overlay 根本不画**;测试"overlay 也画出来"抓到了这个
+        if (circleName !== null && this.overlayAboveNumber()) {
+          this.drawCircleOverlay(circleName, cx, cy, radius, head.grow);
         }
+
+        // approach circle 刻意**不在这里画** —— osu 把它们全部 proxy 到
+        // 一个独立的顶层容器(`OsuPlayfield.cs:74` 的 approachCircles),
+        // 所以任何 approach circle 都在**所有**物件之上。见 drawApproachCircles()
+      }
+
+      ctx.restore();
+    }
+  }
+
+  /**
+   * 圈体(hitcircle 或 sliderstartcircle)。
+   *
+   * 返回用到的**组件名**,供调用方接着查 `${name}overlay`;
+   * 返回 `null` = 皮肤没提供贴图,调用方该退回线框。
+   *
+   * ## 组件名的决策看单层,取图看全栈
+   *
+   * `circleComponentName` 复现了 `LegacyMainCirclePiece.load()` 那段 ——
+   * 滑条头想用 `sliderstartcircle`,但只有在**提供 `hitcircle` 的那一层**
+   * 也有它时才用。见 `skin/skinStack.ts`。
+   *
+   * ## overlay 只查 `${name}overlay`,查不到就不画
+   *
+   * 源码注释写明:`sliderendcircle.png` 存在但 `sliderendcircleoverlay.png` 不存在时,
+   * 期望行为是**不画 overlay**,而不是退回 `hitcircleoverlay.png`。
+   * 所以调用方拿到这个名字后,overlay 一律用 `${name}overlay` 查,不要另做回退。
+   */
+  private drawCirclePiece(
+    object: SimHitObject,
+    cx: number,
+    cy: number,
+    radius: number,
+    grow: number,
+    palette: ComboPalette,
+  ): string | null {
+    // 转盘不用圈贴图
+    if (object.kind === 'spinner') return null;
+
+    const prefix = object.kind === 'slider' ? 'sliderstartcircle' : null;
+    const name = circleComponentName(this.layers, prefix);
+
+    // 染色版优先:只有圈体染 combo 色,overlay 不染
+    const base = this.tinted.get(name, palette.indexOf(object)) ?? this.sprites.get(name);
+    if (base === null) return null;
+
+    drawSprite(this.ctx, base, spriteQuad(base, cx, cy, radius, CIRCLE_MAX_DISPLAY, grow));
+
+    // overlay 在数字之下的那种情形在这里画;之上的情形由调用方在数字之后画
+    if (!this.overlayAboveNumber()) this.drawCircleOverlay(name, cx, cy, radius, grow);
+
+    return name;
+  }
+
+  /** overlay 那一层。单独抽出来是因为它的绘制**位置**取决于一个 skin.ini 开关。 */
+  private drawCircleOverlay(
+    name: string,
+    cx: number,
+    cy: number,
+    radius: number,
+    grow: number,
+  ): void {
+    const overlay = this.sprites.get(`${name}overlay`);
+    if (overlay === null) return;
+
+    drawSprite(
+      this.ctx,
+      overlay,
+      spriteQuad(overlay, cx, cy, radius, CIRCLE_MAX_DISPLAY, grow),
+    );
+  }
+
+  /**
+   * `HitCircleOverlayAboveNumber` —— **默认 true**。
+   *
+   * ⚠️ lazer **同时认那个拼写错误的键**:
+   * ```csharp
+   * // OsuLegacySkinTransformer.cs:317-321
+   * // HitCircleOverlayAboveNumer (with typo) should still be supported for now.
+   * return base.GetConfig<...>(HitCircleOverlayAboveNumber) ??
+   *        base.GetConfig<...>(HitCircleOverlayAboveNumer);
+   * ```
+   * 用户的真实皮肤设的正是**拼错**那个(`HitCircleOverlayAboveNumer: 1`),
+   * 所以只认正确拼写的实现会在这张皮肤上静默走错分支。
+   *
+   * 值的解析也照 lazer 来:`1`/`0`/`true`/`false` 都吃,非零整数为真
+   * (`LegacySkin.cs:356-365`,注释提到有皮肤写 `2`)。
+   */
+  private overlayAboveNumber(): boolean {
+    const raw = this.skin?.ini.raw;
+    const value =
+      raw?.get('HitCircleOverlayAboveNumber') ?? raw?.get('HitCircleOverlayAboveNumer');
+
+    if (value === undefined) return true;
+
+    const lower = value.trim().toLowerCase();
+    if (lower === 'true') return true;
+    if (lower === 'false') return false;
+
+    const n = Number.parseInt(lower, 10);
+    return Number.isFinite(n) ? n !== 0 : true;
+  }
+
+  /**
+   * 圈内的 combo 序号。
+   *
+   * 有字体贴图就用贴图(排版规则见 `skin/numberLayout.ts`),否则退回 canvas 文字。
+   */
+  private drawComboNumber(indexInCombo: number, cx: number, cy: number, radius: number): void {
+    const { ctx } = this;
+    const prefix = this.skin?.ini.hitCirclePrefix ?? 'default';
+    const overlap = this.skin?.ini.hitCircleOverlap ?? -2;
+
+    const digits = String(indexInCombo).split('');
+    const glyphs = digits.map((d) => this.sprites.get(`${prefix}-${d}`));
+
+    if (!glyphs.includes(null)) {
+      const layout = layoutHitCircleNumber(glyphs, overlap);
+      drawTextLayout(ctx, layout, cx, cy, radius);
+      return;
+    }
+
+    // 没有字体贴图 —— 退回自绘。这不是 osu 行为,只为可读性
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+    ctx.font = `${Math.round(radius * 0.9)}px system-ui, sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(String(indexInCombo), cx, cy);
+  }
+
+  /**
+   * 全部 approach circle —— **画在所有物件之上的独立图层**。
+   *
+   * ## 为什么单独一趟
+   *
+   * 核 `OsuPlayfield.cs:60-74`,自下而上:
+   * ```csharp
+   * Smoke, spinnerProxies, FollowPoints, judgementLayer,
+   * HitObjectContainer,
+   * judgementAboveHitObjectLayer,
+   * approachCircles = new ProxyContainer { ... },
+   * ```
+   * 而 `:122-125` 把每个 hit circle 的 approach circle **proxy 进那个容器**:
+   * ```csharp
+   * case DrawableHitCircle hitCircle:
+   *     approachCircles.Add(hitCircle.ProxiedLayer.CreateProxy());
+   * ```
+   *
+   * 所以**任何** approach circle 都在**所有**物件之上 —— 密集段里这个差别很明显:
+   * 跟着各自物件画时,后一个物件的圈体会盖住前一个物件的 approach circle。
+   */
+  private drawApproachCircles(timeline: ReplayTimeline, state: PlaybackState): void {
+    const { ctx } = this;
+    const radius = radiusFromCS(timeline.beatmap.difficulty.circleSize) * this.scale;
+    const preempt = preemptFromAR(timeline.beatmap.difficulty.approachRate);
+    const palette = this.paletteOf(timeline.beatmap);
+
+    const sprite = this.sprites.get('approachcircle');
+
+    for (let i = state.activeObjects.length - 1; i >= 0; i--) {
+      const { object, result } = state.activeObjects[i]!;
+      if (object.kind === 'spinner') continue;
+
+      const hitTime = result?.hitTime ?? null;
+      const alpha = approachAlphaAt(object.startTime, preempt, state.time, hitTime);
+      if (alpha <= 0) continue;
+
+      const cx = this.toScreenX(object.stackedX);
+      const cy = this.toScreenY(object.stackedY);
+      const scale = approachScaleAt(object.startTime, preempt, state.time);
+
+      ctx.save();
+      ctx.globalAlpha = alpha;
+
+      if (sprite !== null) {
+        // ⚠️ "1 倍"的基准是**贴图自身的显示尺寸**,不是 2×Radius ——
+        // ScaleTo(1) 缩的是那个 Scale=4 的包装容器,里面的 sprite 是原生尺寸。
+        // 也**不要**加 128/118:那是 Argon/Triangles 的补偿,legacy 没有
+        drawSprite(
+          ctx,
+          this.tinted.get('approachcircle', palette.indexOf(object)) ?? sprite,
+          spriteQuad(sprite, cx, cy, radius, CIRCLE_MAX_DISPLAY, scale),
+        );
+      } else {
+        // 线框退化:用 radius × scale 近似(此时没有贴图尺寸可依据)
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.45)';
+        ctx.lineWidth = Math.max(1, 1.5 * this.scale);
+        ctx.beginPath();
+        ctx.arc(cx, cy, radius * scale, 0, Math.PI * 2);
+        ctx.stroke();
       }
 
       ctx.restore();

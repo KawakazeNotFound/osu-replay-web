@@ -87,6 +87,13 @@ export interface ComboPalette {
   readonly source: ComboColourSource;
   /** 该层的颜色表,按取用顺序 */
   readonly colours: readonly Rgb[];
+  /**
+   * 该物件取色用的**已取模下标**(0 .. colours.length-1)。
+   *
+   * 单独暴露是给染色表用的:`TintedSprites.get(name, colourIndex)` 需要下标而不是
+   * 颜色本身,而取模规则依赖颜色来源层 —— 那个逻辑只该有一份。
+   */
+  indexOf(object: SimHitObject): number;
   /** 取某物件的 combo 颜色 —— CSS 字符串,预先算好,不每帧建串 */
   colourOf(object: SimHitObject): string;
   /** 同上但返回 Rgb,供需要算亮度 / 做渐变的调用方(如滑条体 LUT) */
@@ -137,6 +144,7 @@ export function buildComboPalette(
   return {
     source,
     colours,
+    indexOf,
     colourOf: (object) => css[indexOf(object)]!,
     rgbOf: (object) => colours[indexOf(object)]!,
     trackRgbOf: (object) => track ?? colours[indexOf(object)]!,

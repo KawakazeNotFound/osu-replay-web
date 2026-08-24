@@ -6,8 +6,11 @@ import { createCircleJudgement } from '../core/sim/judgement';
 import { stateAt } from '../core/sim/query';
 import { makeHitObject, makeSimBeatmap } from '../core/sim/testFixtures';
 import { buildTimeline } from '../core/sim/timeline';
+import { radiusFromCS } from '../core/sim/difficulty';
 import { DebugRenderer, HIT_FADE_MS } from './DebugRenderer';
 import { unpackSkin } from './skin/skinFiles';
+import type { ImageDecoder } from './skin/skinTextures';
+import type { CanvasFactory } from './skin/tint';
 
 /**
  * # D8:渲染器的回归测试
@@ -60,6 +63,7 @@ function recordingContext(): { calls: Call[]; ctx: CanvasRenderingContext2D } {
     fillRect: (...a: unknown[]) => push('fillRect', ...a),
     strokeRect: (...a: unknown[]) => push('strokeRect', ...a),
     fillText: (...a: unknown[]) => push('fillText', ...a),
+    drawImage: (...a: unknown[]) => push('drawImage', ...a),
     measureText: () => ({ width: 10 }),
   };
 
@@ -565,12 +569,12 @@ describe('皮肤配色接入优先级链', () => {
     return String(found!.args[0]);
   }
 
-  it('谱面没给颜色时,皮肤的颜色生效', () => {
+  it('谱面没给颜色时,皮肤的颜色生效', async () => {
     const timeline = plainTimeline();
     const { canvas, calls } = fakeCanvas(1024, 768);
     const renderer = new DebugRenderer(canvas);
     renderer.resize();
-    renderer.setSkin(skinWith(['Combo1: 11,22,33', 'Combo2: 44,55,66']));
+    await renderer.setSkin(skinWith(['Combo1: 11,22,33', 'Combo2: 44,55,66']));
     renderer.draw(timeline, stateAt(timeline, 900));
 
     // makeHitObject 默认 comboIndex = 1(1-based),皮肤配色用 comboIndex ⇒ 取下标 1
@@ -588,18 +592,18 @@ describe('皮肤配色接入优先级链', () => {
     expect(circleStrokeStyle(calls)).toBe('rgb(0, 202, 0)');
   });
 
-  it('🔒 换皮肤会让配色表失效 —— 记忆化最容易漏的一步', () => {
+  it('🔒 换皮肤会让配色表失效 —— 记忆化最容易漏的一步', async () => {
     const timeline = plainTimeline();
     const { canvas, calls } = fakeCanvas(1024, 768);
     const renderer = new DebugRenderer(canvas);
     renderer.resize();
 
-    renderer.setSkin(skinWith(['Combo1: 1,1,1', 'Combo2: 2,2,2']));
+    await renderer.setSkin(skinWith(['Combo1: 1,1,1', 'Combo2: 2,2,2']));
     renderer.draw(timeline, stateAt(timeline, 900));
     const before = circleStrokeStyle(calls.slice(lastFillRect(calls)));
 
     // 同一个 beatmap 换皮肤:配色表的记忆化键是 beatmap,若不显式作废就会用旧颜色
-    renderer.setSkin(skinWith(['Combo1: 9,9,9', 'Combo2: 8,8,8']));
+    await renderer.setSkin(skinWith(['Combo1: 9,9,9', 'Combo2: 8,8,8']));
     renderer.draw(timeline, stateAt(timeline, 900));
     const after = circleStrokeStyle(calls.slice(lastFillRect(calls)));
 
@@ -607,22 +611,22 @@ describe('皮肤配色接入优先级链', () => {
     expect(after, '换了皮肤但颜色没变 —— 配色表没作废').toBe('rgb(8, 8, 8)');
   });
 
-  it('卸载皮肤后回到默认四色', () => {
+  it('卸载皮肤后回到默认四色', async () => {
     const timeline = plainTimeline();
     const { canvas, calls } = fakeCanvas(1024, 768);
     const renderer = new DebugRenderer(canvas);
     renderer.resize();
 
-    renderer.setSkin(skinWith(['Combo1: 1,1,1', 'Combo2: 2,2,2']));
+    await renderer.setSkin(skinWith(['Combo1: 1,1,1', 'Combo2: 2,2,2']));
     renderer.draw(timeline, stateAt(timeline, 900));
 
-    renderer.setSkin(null);
+    await renderer.setSkin(null);
     renderer.draw(timeline, stateAt(timeline, 900));
 
     expect(circleStrokeStyle(calls.slice(lastFillRect(calls)))).toBe('rgb(0, 202, 0)');
   });
 
-  it('🔒 谱面自带 [Colours] 时压过皮肤', () => {
+  it('🔒 谱面自带 [Colours] 时压过皮肤', async () => {
     // 优先级链:谱面 → 皮肤 → 默认。四张真实 fixture 全都有 [Colours],
     // 所以这条是实际最常走的分支
     const beatmap = makeSimBeatmap([makeHitObject({ startTime: 1000, x: 256, y: 192 })], {
@@ -637,10 +641,240 @@ describe('皮肤配色接入优先级链', () => {
     const { canvas, calls } = fakeCanvas(1024, 768);
     const renderer = new DebugRenderer(canvas);
     renderer.resize();
-    renderer.setSkin(skinWith(['Combo1: 1,1,1', 'Combo2: 2,2,2']));
+    await renderer.setSkin(skinWith(['Combo1: 1,1,1', 'Combo2: 2,2,2']));
     renderer.draw(timeline, stateAt(timeline, 900));
 
     expect(circleStrokeStyle(calls)).toBe('rgb(200, 200, 200)');
+  });
+});
+
+describe('皮肤贴图绘制路径', () => {
+  /**
+   * ## 为什么这一组必须存在
+   *
+   * 贴图路径最容易出的两类错都**不会**报错,只会"看起来有点怪":
+   * 1. 尺寸换算错(整体大 1.6 倍 / 大一倍),容易被当成皮肤风格
+   * 2. 某个组件静默退回线框(名字写错、名单漏加),表现为"那个部件一直是线框"
+   *
+   * 所以这里断言"确实发出了 drawImage"以及"确实用了带贴图的那条分支"。
+   */
+  const START = 1000;
+
+  /** 造一个带贴图的皮肤。`files` 的值只需非空,解码由假解码器负责。 */
+  function skinWithImages(files: readonly string[], ini = '') {
+    const entries: Record<string, Uint8Array> = {
+      'skin.ini': new TextEncoder().encode(ini),
+    };
+    for (const f of files) entries[f] = new Uint8Array([1, 2, 3]);
+
+    const zipped = zipSync(entries);
+    return unpackSkin(
+      zipped.buffer.slice(
+        zipped.byteOffset,
+        zipped.byteOffset + zipped.byteLength,
+      ) as ArrayBuffer,
+    );
+  }
+
+  /** 假解码器:128×128 的 SD 贴图 —— 恰好该画成 2 × Radius。 */
+  const decode: ImageDecoder = async () =>
+    ({ width: 128, height: 128 }) as never;
+
+  /** 假离屏画布:染色不需要真 canvas。 */
+  const makeCanvas: CanvasFactory = (width, height) => ({
+    canvas: { width, height } as unknown as CanvasImageSource & {
+      width: number;
+      height: number;
+    },
+    ctx: new Proxy({} as Record<string, unknown>, {
+      get: (t, k) => t[k as string] ?? (() => undefined),
+      set: (t, k, v) => {
+        t[k as string] = v;
+        return true;
+      },
+    }) as unknown as CanvasRenderingContext2D,
+  });
+
+  function timelineWithCircle() {
+    const beatmap = makeSimBeatmap([makeHitObject({ startTime: START, x: 256, y: 192 })], {
+      difficulty: difficulty(),
+    });
+    return buildTimeline(beatmap, buildReplayFrames([]));
+  }
+
+  async function drawWith(files: readonly string[], t: number, ini = '') {
+    const timeline = timelineWithCircle();
+    const { canvas, calls } = fakeCanvas(1024, 768);
+    const renderer = new DebugRenderer(canvas);
+    renderer.resize();
+    await renderer.setSkin(skinWithImages(files, ini), { decode, makeCanvas });
+    renderer.draw(timeline, stateAt(timeline, t));
+    return calls;
+  }
+
+  it('🔒 有 hitcircle 贴图时改走 drawImage,不再画线框 arc', async () => {
+    const calls = await drawWith(['hitcircle.png'], START - 50);
+    const region = firstObjectCalls(calls);
+
+    expect(region.filter((c) => c.op === 'drawImage').length).toBeGreaterThan(0);
+
+    // 圈体不该再有 arc(approach circle 在另一趟,不在这个区间里)
+    const head = screenOf(256, 192);
+    const atHead = arcs(region).filter(
+      (a) => Math.abs(a.x - head.x) < 0.5 && Math.abs(a.y - head.y) < 0.5,
+    );
+    expect(atHead, '有贴图了还在画线框圈').toHaveLength(0);
+  });
+
+  it('🔒 尺寸 = 2 × Radius —— 128×128 SD 贴图的判据', async () => {
+    const calls = await drawWith(['hitcircle.png'], START - 50);
+    const draw = firstObjectCalls(calls).find((c) => c.op === 'drawImage')!;
+
+    // 9 参数版:第 8、9 个参数是 dw / dh
+    const dw = draw.args[7] as number;
+    const radiusPx = radiusFromCS(CS) * TEST_SCALE;
+
+    expect(dw).toBeCloseTo(2 * radiusPx, 6);
+  });
+
+  it('🔒 皮肤缺某个组件时**只有那个**退回线框', async () => {
+    // 只给 hitcircle,不给 approachcircle。圈用贴图,approach 用线框。
+    // 判据取"物件位置上、半径大于圈半径"的 arc —— 不能只数 arc 总数,
+    // 因为光标也画 arc(这个坑下面那条踩过一次)
+    const calls = await drawWith(['hitcircle.png'], START - 300);
+    const head = screenOf(256, 192);
+    const radiusPx = radiusFromCS(CS) * TEST_SCALE;
+
+    expect(calls.filter((c) => c.op === 'drawImage').length).toBeGreaterThan(0);
+
+    const approachRing = arcs(calls).filter(
+      (a) =>
+        Math.abs(a.x - head.x) < 0.5 && Math.abs(a.y - head.y) < 0.5 && a.r > radiusPx * 1.5,
+    );
+    expect(approachRing.length, '缺 approachcircle 时应有线框 approach 环').toBeGreaterThan(0);
+  });
+
+  it('🔒 approach circle 画在所有物件之后 —— osu 里它是独立顶层', async () => {
+    // OsuPlayfield.cs:74 的 approachCircles ProxyContainer 在 HitObjectContainer 之上。
+    //
+    // ⚠️ 这条第一版是**空洞**的:我用"第一个 arc 出现在最后一个 drawImage 之后"当判据,
+    // 但**光标也画 arc**、且画在物件之后 —— 于是把 drawApproachCircles 整个删掉,
+    // 测试依然全绿。变异检验抓到了。
+    // 现在给 approachcircle 贴图,按"物件位置上尺寸更大的那次 drawImage"定位它。
+    const calls = await drawWith(['hitcircle.png', 'approachcircle.png'], START - 300);
+    const radiusPx = radiusFromCS(CS) * TEST_SCALE;
+
+    const draws = calls
+      .map((c, i) => ({ c, i }))
+      .filter(({ c }) => c.op === 'drawImage')
+      .map(({ c, i }) => ({ i, dw: c.args[7] as number }));
+
+    const circleAt = draws.findIndex((d) => Math.abs(d.dw - 2 * radiusPx) < 1);
+    const approachAt = draws.findIndex((d) => d.dw > 2 * radiusPx * 1.5);
+
+    expect(circleAt, '没找到圈体的 drawImage').toBeGreaterThanOrEqual(0);
+    expect(approachAt, '没找到 approach circle 的 drawImage').toBeGreaterThanOrEqual(0);
+    expect(approachAt, 'approach circle 应在圈体之后').toBeGreaterThan(circleAt);
+  });
+
+  it('overlay 也画出来(两个 drawImage)', async () => {
+    const calls = await drawWith(['hitcircle.png', 'hitcircleoverlay.png'], START - 50);
+    expect(firstObjectCalls(calls).filter((c) => c.op === 'drawImage').length).toBe(2);
+  });
+
+  it('🔒 HitCircleOverlayAboveNumber 默认 true —— overlay 画在数字**之上**', async () => {
+    // 不给字体贴图 ⇒ 数字走 fillText,便于用调用顺序区分两种叠放
+    const calls = await drawWith(
+      ['hitcircle.png', 'hitcircleoverlay.png'],
+      START - 50,
+    );
+    const region = firstObjectCalls(calls);
+
+    const textAt = region.findIndex((c) => c.op === 'fillText');
+    const lastImageAt = region.reduce((acc, c, i) => (c.op === 'drawImage' ? i : acc), -1);
+
+    expect(textAt, '没画数字').toBeGreaterThanOrEqual(0);
+    expect(lastImageAt, 'overlay 应在数字之后').toBeGreaterThan(textAt);
+  });
+
+  it('🔒 显式关掉时 overlay 画在数字**之下**', async () => {
+    const calls = await drawWith(
+      ['hitcircle.png', 'hitcircleoverlay.png'],
+      START - 50,
+      '[General]\nHitCircleOverlayAboveNumber: 0\n',
+    );
+    const region = firstObjectCalls(calls);
+
+    const textAt = region.findIndex((c) => c.op === 'fillText');
+    const lastImageAt = region.reduce((acc, c, i) => (c.op === 'drawImage' ? i : acc), -1);
+
+    expect(textAt, '没画数字').toBeGreaterThanOrEqual(0);
+    expect(lastImageAt, '关掉之后 overlay 应在数字之前').toBeLessThan(textAt);
+  });
+
+  it('🔒 拼写错误的 HitCircleOverlayAboveNumer 同样生效 —— 用户皮肤正是这个', async () => {
+    // OsuLegacySkinTransformer.cs:317-321 —— lazer 把拼错版当 fallback 一起认。
+    // 只认正确拼写的实现会在用户那张皮肤上静默走错分支
+    const calls = await drawWith(
+      ['hitcircle.png', 'hitcircleoverlay.png'],
+      START - 50,
+      '[General]\nHitCircleOverlayAboveNumer: 0\n',
+    );
+    const region = firstObjectCalls(calls);
+
+    const textAt = region.findIndex((c) => c.op === 'fillText');
+    const lastImageAt = region.reduce((acc, c, i) => (c.op === 'drawImage' ? i : acc), -1);
+
+    expect(lastImageAt, '拼错的键没被认出来').toBeLessThan(textAt);
+  });
+
+  it('🔒 数字用字体贴图时不再走 fillText', async () => {
+    const files = ['hitcircle.png', ...Array.from({ length: 10 }, (_, d) => `default-${d}.png`)];
+    const calls = await drawWith(files, START - 50);
+
+    expect(calls.filter((c) => c.op === 'fillText')).toHaveLength(0);
+    // 圈 + 一位数字 = 至少 2 次 drawImage
+    expect(firstObjectCalls(calls).filter((c) => c.op === 'drawImage').length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('没有字体贴图时退回 fillText', async () => {
+    const calls = await drawWith(['hitcircle.png'], START - 50);
+    expect(calls.filter((c) => c.op === 'fillText').length).toBe(1);
+  });
+
+  it('🔒 卸载皮肤后完全回到线框', async () => {
+    const timeline = timelineWithCircle();
+    const { canvas, calls } = fakeCanvas(1024, 768);
+    const renderer = new DebugRenderer(canvas);
+    renderer.resize();
+
+    await renderer.setSkin(skinWithImages(['hitcircle.png']), { decode, makeCanvas });
+    await renderer.setSkin(null);
+    renderer.draw(timeline, stateAt(timeline, START - 50));
+
+    const region = firstObjectCalls(calls.slice(lastFillRect(calls)));
+    expect(region.filter((c) => c.op === 'drawImage')).toHaveLength(0);
+    expect(arcs(region).length).toBeGreaterThan(0);
+  });
+
+  it('🔒 setSkin 未 await 完成时不换皮肤 —— 防止同一时刻两种输出', async () => {
+    // 这是核心不变式的守卫:若"边装边画",第一次画到 t 是线框、装完再 seek 回 t
+    // 是贴图,同一个 t 出两种结果。所以 setSkin 必须**装完才生效**
+    const timeline = timelineWithCircle();
+    const { canvas, calls } = fakeCanvas(1024, 768);
+    const renderer = new DebugRenderer(canvas);
+    renderer.resize();
+
+    const pending = renderer.setSkin(skinWithImages(['hitcircle.png']), {
+      decode,
+      makeCanvas,
+    });
+
+    // 还没 await —— 此刻必须仍是线框
+    renderer.draw(timeline, stateAt(timeline, START - 50));
+    expect(calls.filter((c) => c.op === 'drawImage'), '装载中就换皮肤了').toHaveLength(0);
+
+    await pending;
   });
 });
 
