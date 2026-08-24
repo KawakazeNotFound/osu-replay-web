@@ -1,3 +1,4 @@
+import esbuild from 'esbuild';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
@@ -193,6 +194,92 @@ async function rewriteCapturedAssets(jsAssets) {
 }
 
 /**
+ * Replaces upstream's compiled engine chunk with a build of our own src/.
+ *
+ * The captured app imports 21 named symbols from a hash-named chunk that is upstream's
+ * build of this same engine. Leaving it in place means nothing we implement in src/ ever
+ * reaches the deployed page. The chunk is shared by app-*.js and export-worker-*.js, so
+ * one swap covers playback and video export.
+ *
+ * Fails loudly when the app needs a symbol our engine does not export — better a broken
+ * build than a page that dies at module-eval with an opaque import error.
+ */
+/**
+ * The engine's hitsound cascade falls back to osu!'s 12 default wavs, fetched from
+ * `skins/lazer-defaults/` relative to the page (see loadLazerDefaultSounds). Upstream
+ * serves them but they are not reachable from index.html or the DEFAULT_SKINS list, so
+ * capture never saw them and every lookup 404'd — silently degrading playback to the
+ * synthesized click. This repo already ships the same files, so copy them in rather than
+ * asking upstream for 12 more requests.
+ */
+async function copyLazerDefaults() {
+  const from = path.join(root, 'assets', 'lazer-defaults');
+  const to = path.join(site, 'skins', 'lazer-defaults');
+  let names;
+  try {
+    names = (await fs.readdir(from)).filter(name => name.endsWith('.wav'));
+  } catch {
+    console.warn('WARNING: assets/lazer-defaults/ is missing — fallback hitsounds will 404 '
+      + 'and playback degrades to synthesized clicks');
+    return;
+  }
+  await fs.mkdir(to, { recursive: true });
+  for (const name of names) {
+    await fs.copyFile(path.join(from, name), path.join(to, name));
+  }
+  console.log(`copied ${names.length} lazer default hitsound(s) to skins/lazer-defaults/`);
+}
+
+async function swapEngineChunk(appAsset) {
+  const app = await fs.readFile(path.join(site, appAsset), 'utf8');
+  const match = /import\s*\{([\s\S]*?)\}\s*from\s*["'](?:\.\/)?(chunk-[A-Za-z0-9]+\.js)["']/.exec(app);
+  if (match === null) {
+    throw new Error(
+      `swap: no named chunk import found in ${appAsset} — upstream changed its bundling, `
+      + 'so the engine chunk can no longer be identified',
+    );
+  }
+  const [, symbolList, chunkName] = match;
+  const required = symbolList
+    .split(',')
+    .map(entry => entry.trim().split(/\s+as\s+/)[0])
+    .filter(entry => entry !== '');
+
+  const outfile = path.join(site, chunkName);
+  await esbuild.build({
+    entryPoints: [path.join(root, 'site-engine', 'index.ts')],
+    outfile,
+    bundle: true,
+    format: 'esm',
+    target: 'es2020',
+    sourcemap: true,
+    allowOverwrite: true,
+  });
+
+  const built = await fs.readFile(outfile, 'utf8');
+  const exportBlocks = [...built.matchAll(/export\s*\{([\s\S]*?)\}\s*;/g)];
+  const exported = new Set(
+    exportBlocks.flatMap(block => block[1].split(',').map(entry => {
+      const parts = entry.trim().split(/\s+as\s+/);
+      return (parts[1] ?? parts[0]).trim();
+    })),
+  );
+  const missing = required.filter(symbol => !exported.has(symbol));
+  if (missing.length > 0) {
+    throw new Error(
+      `swap: our engine does not export ${missing.join(', ')} — the app imports them from `
+      + `${chunkName}. Add them to site-engine/index.ts (see the pp-counter shims there).`,
+    );
+  }
+
+  const bytes = (await fs.stat(outfile)).size;
+  console.log(
+    `swapped ${chunkName} for our own engine build (${Math.round(bytes / 1024)} KB, `
+    + `${required.length}/${required.length} imports satisfied)`,
+  );
+}
+
+/**
  * Upstream's captured oauth-config.json carries THEIR client_id, which cannot work from
  * our origin (osu! validates redirect_uri per registered app). Overwrite it with ours.
  *
@@ -252,6 +339,8 @@ const skinNames = extractSkinNames(app);
 for (const skin of skinNames) await captureSkin(skin);
 
 await rewriteCapturedAssets([...captured].filter(a => a.endsWith('.js')));
+await copyLazerDefaults();
+await swapEngineChunk(appAsset);
 await writeOauthConfig();
 
 console.log(`captured replayviewer upstream into ${path.relative(root, site)}/`);

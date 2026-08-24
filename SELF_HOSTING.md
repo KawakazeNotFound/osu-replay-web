@@ -106,6 +106,36 @@ Status and content-type are relayed verbatim: the frontend tells a real auth fai
 (JSON 401/403 → log out) from a Cloudflare block page (HTML 403 → "osu! is having
 issues", keep the session) by content-type alone.
 
+## The engine swap
+
+The captured page ships upstream's *compiled* copy of this same engine as a hash-named
+chunk, which `app-*.js` imports 21 named symbols from. Left alone, nothing implemented in
+`src/` would ever reach the deployed site. So `capture:upstream` overwrites that chunk with
+an esbuild bundle of `site-engine/index.ts` (which re-exports `src/`), and fails the build
+if the app needs a symbol our engine does not export — better a broken build than a page
+that dies at module-eval. The same chunk is imported by `export-worker-*.js`, so one swap
+covers playback and video export.
+
+Diffing upstream's chunk sourcemap (62 sources) against `src/` shows the two engines are
+the same code apart from two files upstream holds back — `app/pp.ts` and `app/ppOverlay.ts`,
+the pp counter. `site-engine/index.ts` stubs its three exported functions: the enabled flag
+round-trips so the UI checkbox reflects what you clicked, but no overlay is installed and no
+numbers are invented. **Known regression: the pp counter option in the deployed UI is
+inert.** Everything else our engine covers natively.
+
+Also copied in: the 12 lazer default hitsounds, to `site/skins/lazer-defaults/`. The engine
+fetches them from there as the bottom of its hitsound cascade, but they are reachable from
+neither `index.html` nor `DEFAULT_SKINS`, so capture never saw them and every lookup 404'd
+— silently degrading playback to a synthesized click. This repo already ships the files.
+
+## Known limitations
+
+- **Storyboards are not implemented.** The engine never reads `.osb`, and `BeatmapParser`
+  consumes only break rows from `[Events]`, discarding every `Sprite`/`Animation`/`Video`
+  event. Static beatmap backgrounds do work, including on maps that have storyboards.
+  Upstream takes the same position — its Nerinyan mirror URL passes `noStoryboard=1`.
+- **The pp counter is inert** — see the engine swap above.
+
 ## Rate limits
 
 Per ppy's documented policy — 60 req/min overall, and **`scores_download` is 10/min per
