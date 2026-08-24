@@ -62,6 +62,70 @@ const TRAIL_MS = 400;
  */
 const HIT_FADE_MS = 240;
 
+/**
+ * 滑条体横截面烘成多少级不透明色。
+ *
+ * 这是"用绘制顺序模拟深度测试"的采样数:每一级一次 `stroke()`。
+ * 32 级在 CS4(屏上半径约 60px)时每级约 2px 宽,肉眼看不出台阶;
+ * 实际会按屏上半径下调(见 `drawSliderBody`),小滑条不浪费描边。
+ */
+const BODY_LEVELS = 32;
+
+/**
+ * 滑条体的横截面配置。三个数都取自 webosu `js/SliderMesh.js` 的实测值。
+ *
+ * - `BORDER_WIDTH = 0.128`:边框占半径的比例(`borderwidth`)
+ * - `EDGE_OPACITY = 0.8`:轨道色在**内边缘**(紧贴边框处)的不透明度
+ * - `CENTER_OPACITY = 0.3`:轨道色在**中心线**的不透明度
+ *
+ * 注意 RGB 是恒定的,只有 alpha 从 0.8 渐到 0.3 —— 也就是说
+ * **中心比边缘更透**,这正是"管道"观感的来源(中心能透出背景)。
+ * 我曾经把它写反(中心画成近乎不透明的深色),观感差得很明显。
+ */
+const BORDER_WIDTH = 0.128;
+const EDGE_OPACITY = 0.8;
+const CENTER_OPACITY = 0.3;
+
+/**
+ * 判定区背景色。滑条体的 alpha ramp 要合成到它上面。
+ *
+ * ⚠️ 这个耦合是**刻意**的,也是本方案唯一的近似:我们用"不透明同心描边"换取
+ * 自相交不叠加,代价是没法真的半透明 —— 于是把 alpha 预先合成到已知的背景色上。
+ * 判定区背景是纯色时逐像素精确;将来渲染谱面背景图 / 故事板后就会失真
+ * (滑条体中心该透出图片,却透出这个纯色)。那时就该上 M2 的 WebGL 方案。
+ */
+const PLAYFIELD_BG = { r: 0x0f, g: 0x0f, b: 0x14 } as const;
+
+/** 同一个颜色的 CSS 形式 —— 清屏用。两处共用一个来源,免得改了一处漂移。 */
+const PLAYFIELD_BG_CSS = `rgb(${PLAYFIELD_BG.r}, ${PLAYFIELD_BG.g}, ${PLAYFIELD_BG.b})`;
+
+/**
+ * 横截面第 t 级的**不透明**颜色。`t`:0 = 轮廓边,1 = 中心线。
+ *
+ * 外侧 {@link BORDER_WIDTH} 一段是边框色,其余是轨道色且 alpha 由
+ * {@link EDGE_OPACITY} 线性降到 {@link CENTER_OPACITY};最后把 alpha
+ * 合成到 {@link PLAYFIELD_BG} 上得到不透明值。
+ */
+function bodyLevelColour(
+  t: number,
+  track: { r: number; g: number; b: number },
+  border: { r: number; g: number; b: number },
+): string {
+  const inBorder = t < BORDER_WIDTH;
+
+  // 边框整体偏实;轨道色按 t 在两个不透明度之间插值
+  const alpha = inBorder
+    ? EDGE_OPACITY
+    : EDGE_OPACITY + (CENTER_OPACITY - EDGE_OPACITY) * ((t - BORDER_WIDTH) / (1 - BORDER_WIDTH));
+
+  const src = inBorder ? border : track;
+
+  // 合成到背景:out = src * a + bg * (1 - a)
+  const mix = (s: number, b: number) => Math.round(s * alpha + b * (1 - alpha));
+
+  return `rgb(${mix(src.r, PLAYFIELD_BG.r)}, ${mix(src.g, PLAYFIELD_BG.g)}, ${mix(src.b, PLAYFIELD_BG.b)})`;
+}
+
 function clamp01(value: number): number {
   return value < 0 ? 0 : value > 1 ? 1 : value;
 }
@@ -150,7 +214,7 @@ export class DebugRenderer {
     ctx.lineJoin = 'miter';
     ctx.globalAlpha = 1;
 
-    ctx.fillStyle = '#0f0f14';
+    ctx.fillStyle = PLAYFIELD_BG_CSS;
     ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
 
     this.drawPlayfieldBorder();
@@ -277,17 +341,35 @@ export class DebugRenderer {
   /**
    * 滑条体 + 滑条球。
    *
-   * ## 这是 canvas2d 的近似,不是正式实现
+   * ## 做法:把深度缓冲的语义翻译成"不透明同心描边"
    *
-   * osu! 真正的滑条体是一根**内淡外浓的管道**:最外圈 `SliderBorder` 色的边框,
-   * 边框往内是轨道色,alpha 从内边缘往中心**递减**(所以中心能透出背景)。
-   * 核 webosu 的 `SliderMesh.js` 用的常数是 `borderwidth = 0.128`、
-   * 内边缘 alpha `0.8`、中心 alpha `0.3`。
+   * osu! 真正的滑条体是 WebGL 三角带 + **每条滑条独立的深度缓冲双 pass**。
+   * 核 webosu 的 `js/SliderMesh.js`:顶点属性带一个 `dist`(中心线 0、轮廓边 1),
+   * `gl_Position.z` 直接取它;pass 1 只写深度求每像素的**最小 dist**,
+   * pass 2 用 `depthFunc(EQUAL)` 只着色那一个 fragment。
    *
-   * 这里只画两道描边近似,**横截面的渐变完全没有** —— 观感与 osu 差得明显。
-   * 正式做法(把渐变烘成 K 级不透明色、由宽到窄描 K 遍)见 TECH-NOTES D14。
+   * 净效果是**一条规则**:每个像素由"它到中心线最小距离处"的颜色着色,且只着一次。
    *
-   * 但"完全不画"比"画得不像"糟糕得多:没有滑条体根本看不出回放在跟什么。
+   * canvas2d 没有深度缓冲,但这条规则可以一比一翻译:
+   *
+   * 1. 把横截面渐变烘成 {@link BODY_LEVELS} 级**纯不透明**色
+   * 2. 对**同一条完整路径**描边 K 次,`lineWidth` 由 `2r` 递减到 ~0
+   * 3. 每遍都不透明 ⇒ 不可能累积;越窄的遍越晚画 ⇒ 每像素赢家就是距中心线最近的那级
+   *
+   * 第 3 点就是深度测试强制的那条规则,只是用绘制顺序替代了深度比较。
+   *
+   * ## 为什么不需要离屏 canvas
+   *
+   * 直接画在主画布上时,K 遍之间会互相混合 —— 但**只有在 `globalAlpha < 1` 时才会**。
+   * 滑条体绝大部分生命周期是全不透明的(`alpha == 1`),那时每遍完全盖住上一遍,
+   * 结果与离屏方案逐像素相同。淡入那 ~400ms 里中心会偏浓一点,是可接受的近似 ——
+   * 换来省掉每帧每滑条一次离屏分配 + `drawImage`。
+   *
+   * ## 一处已修正的认知
+   *
+   * 原先注释里写"canvas2d 单遍粗折线在交叠处会变亮" —— **那是错的**。
+   * canvas2d 把一次 `stroke()` 的整条路径当作**一个区域**填充,自重叠不重复合成。
+   * 所以旧实现真正的毛病不是叠亮,而是横截面完全没有渐变(缺"管道感")。
    *
    * `object.path` 存的是**相对起点的偏移**,要加上堆叠后的起点。
    */
@@ -300,30 +382,38 @@ export class DebugRenderer {
     const { ctx } = this;
     const { path } = object;
 
-    const px = (k: number) => this.toScreenX(object.stackedX + path.x[k]!);
-    const py = (k: number) => this.toScreenY(object.stackedY + path.y[k]!);
-
     const track = palette.trackRgbOf(object);
     const border = palette.borderRgb;
 
     ctx.save();
+    // 圆头 + 圆角是"管道"观感的一半:少了它折点处会出现尖角,首尾是平口
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
 
+    // 路径只建一次,K 遍描边复用 —— 建路径比描边贵,别放进循环
     ctx.beginPath();
-    ctx.moveTo(px(0), py(0));
-    for (let k = 1; k < path.count; k++) ctx.lineTo(px(k), py(k));
+    ctx.moveTo(
+      this.toScreenX(object.stackedX + path.x[0]!),
+      this.toScreenY(object.stackedY + path.y[0]!),
+    );
+    for (let k = 1; k < path.count; k++) {
+      ctx.lineTo(
+        this.toScreenX(object.stackedX + path.x[k]!),
+        this.toScreenY(object.stackedY + path.y[k]!),
+      );
+    }
 
-    // 外圈 = 边框色,内部 = 轨道色。两者都是单遍描边,所以自相交处不会叠亮
-    // (canvas2d 把一次 stroke() 的整条路径当成一个区域填充,自重叠不重复合成)
-    ctx.strokeStyle = `rgba(${border.r}, ${border.g}, ${border.b}, 0.55)`;
-    ctx.lineWidth = radius * 2;
-    ctx.stroke();
+    // 屏上越小的滑条不需要那么多级 —— 半径 10px 时 32 级里大半会落在同一个像素上
+    const levels = Math.max(4, Math.min(BODY_LEVELS, Math.round(radius)));
 
-    // borderwidth = 0.128 × 半径,取自 webosu 实测值
-    ctx.strokeStyle = `rgba(${track.r}, ${track.g}, ${track.b}, 0.55)`;
-    ctx.lineWidth = Math.max(1, radius * 2 * (1 - 0.128));
-    ctx.stroke();
+    for (let i = 0; i < levels; i++) {
+      // t: 0 = 最外圈(轮廓边),1 = 中心线。与 shader 里的 dist 反向,便于由宽到窄循环
+      const t = i / (levels - 1);
+      ctx.strokeStyle = bodyLevelColour(t, track, border);
+      // 最后一级宽度不能到 0,否则 round 线帽会退化成看不见
+      ctx.lineWidth = Math.max(1, radius * 2 * (1 - t));
+      ctx.stroke();
+    }
 
     ctx.restore();
 

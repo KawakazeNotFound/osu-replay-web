@@ -241,7 +241,8 @@ describe('命中后泡泡消失(用户报的 bug #1)', () => {
 });
 
 describe('滑条体渲染(用户报的 bug #2)', () => {
-  it('滑条会画出折线(lineTo),不只是一个圈', () => {
+  /** 一条水平直线滑条,path 手工塞。 */
+  function sliderTimeline() {
     const slider = makeHitObject({
       kind: 'slider',
       startTime: 1000,
@@ -261,12 +262,21 @@ describe('滑条体渲染(用户报的 bug #2)', () => {
     const withPath = { ...slider, path } as typeof slider;
 
     const beatmap = makeSimBeatmap([withPath], { difficulty: difficulty() });
-    const timeline = buildTimeline(beatmap, buildReplayFrames([]));
+    return buildTimeline(beatmap, buildReplayFrames([]));
+  }
 
+  /** 画一帧,返回调用序列。 */
+  function drawSlider(t: number) {
+    const timeline = sliderTimeline();
     const { canvas, calls } = fakeCanvas(1024, 768);
     const renderer = new DebugRenderer(canvas);
     renderer.resize();
-    renderer.draw(timeline, stateAt(timeline, 1200));
+    renderer.draw(timeline, stateAt(timeline, t));
+    return calls;
+  }
+
+  it('滑条会画出折线(lineTo),不只是一个圈', () => {
+    const calls = drawSlider(1200);
 
     // 折线本体
     expect(calls.filter((c) => c.op === 'lineTo').length).toBeGreaterThanOrEqual(2);
@@ -275,7 +285,104 @@ describe('滑条体渲染(用户报的 bug #2)', () => {
     const widths = calls.filter((c) => c.op === 'set:lineWidth').map((c) => c.args[0] as number);
     expect(Math.max(...widths)).toBeGreaterThan(60);
   });
+
+  it('路径只建一次,K 遍描边复用 —— 建路径比描边贵', () => {
+    const calls = drawSlider(1200);
+
+    // 滑条体那一段:第一个 beginPath 之后有很多次 stroke,但 lineTo 只出现一轮
+    const bodyStrokes = countBodyStrokes(calls);
+    expect(bodyStrokes).toBeGreaterThan(4);
+
+    // path.count = 3 ⇒ 恰好 2 个 lineTo。若把 beginPath 放进循环,这里会变成 2×K
+    expect(calls.filter((c) => c.op === 'lineTo')).toHaveLength(2);
+  });
+
+  it('🔒 K 遍描边的 lineWidth 严格递减 —— 这是"用绘制顺序模拟深度测试"的前提', () => {
+    // osu 的滑条体靠深度测试保证"每像素只被距中心线最近的那级着色"。
+    // canvas2d 没有深度缓冲,改用**由宽到窄**的绘制顺序等价替代:
+    // 越窄(越靠中心)的遍越晚画,于是每像素的赢家就是最靠中心的那一级。
+    // 顺序一旦反了或乱了,这个等价立刻失效 —— 而肉眼只会觉得"颜色有点怪"。
+    const calls = drawSlider(1200);
+    const widths = bodyWidths(calls);
+
+    // 非空洞守卫:必须真的有多级,否则下面的单调性断言是空的
+    expect(widths.length, '滑条体没有分级,断言空洞').toBeGreaterThan(4);
+
+    for (let i = 1; i < widths.length; i++) {
+      expect(widths[i]!, `第 ${i} 级不应比第 ${i - 1} 级宽`).toBeLessThan(widths[i - 1]!);
+    }
+  });
+
+  it('🔒 每一级的颜色都是不透明的 —— 否则自相交会叠亮', () => {
+    // 这条是整个方案的核心:levels 之间**不能**靠 alpha 混合,
+    // 否则滑条自己交叉的地方会累积出更亮的一块(osu 里不会)。
+    const calls = drawSlider(1200);
+    const styles = bodyStyles(calls);
+
+    expect(styles.length, '滑条体没有描边,断言空洞').toBeGreaterThan(4);
+
+    for (const s of styles) {
+      expect(s, `滑条体第 N 级用了半透明色:${s}`).not.toMatch(/rgba|hsla/);
+      expect(s).toMatch(/^rgb\(/);
+    }
+  });
+
+  it('横截面从边缘到中心逐渐变淡 —— 中心比边缘更透,这是"管道"观感', () => {
+    // webosu 的实测常数:内边缘 alpha 0.8 → 中心 0.3(RGB 恒定)。
+    // 我们把 alpha 预合成到判定区背景上,所以"更透"表现为**更接近背景色**。
+    // 曾经把它写反(中心近乎不透明的深色),观感差得很明显。
+    const calls = drawSlider(1200);
+    const styles = bodyStyles(calls);
+    const lum = (css: string) => {
+      const m = /^rgb\((\d+), (\d+), (\d+)\)$/.exec(css);
+      expect(m, `解析不出颜色:${css}`).not.toBeNull();
+      return Number(m![1]) + Number(m![2]) + Number(m![3]);
+    };
+
+    // 跳过最外圈的边框段(边框是白色,亮度另算),比较轨道色区间的两端
+    const mid = styles[Math.floor(styles.length * 0.3)]!;
+    const centre = styles[styles.length - 1]!;
+
+    // 背景是极暗的 #0f0f14(亮度 50),所以"更透" ⇒ 亮度更低
+    expect(lum(centre), `中心 ${centre} 应比内侧 ${mid} 更接近背景`).toBeLessThan(lum(mid));
+  });
 });
+
+/** 滑条体那一段的 lineWidth 序列 —— 取"最后一个 lineTo 之后、第一个 arc 之前"。 */
+function bodyWidths(calls: readonly Call[]): number[] {
+  return bodyCalls(calls)
+    .filter((c) => c.op === 'set:lineWidth')
+    .map((c) => c.args[0] as number);
+}
+
+/** 同上,取 strokeStyle 序列。 */
+function bodyStyles(calls: readonly Call[]): string[] {
+  return bodyCalls(calls)
+    .filter((c) => c.op === 'set:strokeStyle')
+    .map((c) => String(c.args[0]));
+}
+
+function countBodyStrokes(calls: readonly Call[]): number {
+  return bodyCalls(calls).filter((c) => c.op === 'stroke').length;
+}
+
+/**
+ * 切出滑条体的绘制区间。
+ *
+ * 滑条体的绘制形状是:`save → beginPath/moveTo/lineTo… → {K 遍 stroke} → restore`,
+ * 之后才是滑条球。所以以**最后一个 `lineTo`** 为起点、**其后第一个 `restore`** 为终点。
+ *
+ * ⚠️ 这里踩过一次:第一版用"其后第一个 `arc`"当终点,结果把滑条球的
+ * `strokeStyle`/`lineWidth` 赋值也划进来了(它们在球自己的 `arc` **之前**),
+ * 于是 `#ffdd55` 混进颜色断言、`3.2` 破坏了宽度单调性。`restore` 才是干净的边界。
+ */
+function bodyCalls(calls: readonly Call[]): Call[] {
+  const lastLineTo = calls.reduce((acc, c, i) => (c.op === 'lineTo' ? i : acc), -1);
+  if (lastLineTo < 0) return [];
+
+  const restoreAfter = calls.findIndex((c, i) => i > lastLineTo && c.op === 'restore');
+  return calls.slice(lastLineTo, restoreAfter < 0 ? calls.length : restoreAfter);
+}
 
 describe('🔒 核心约束:正放到达 == 直接 seek 到达', () => {
   /**
