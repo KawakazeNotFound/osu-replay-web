@@ -52,7 +52,9 @@ export function makeHitObject(overrides: Partial<SimHitObject> = {}): SimHitObje
     parts: overrides.parts ?? [],
     path: overrides.path ?? EMPTY_PATH,
     newCombo: overrides.newCombo ?? false,
-    comboIndex: overrides.comboIndex ?? 0,
+    // 1-based,与 lazer 的 ComboIndex 一致(首个物件是 1)
+    comboIndex: overrides.comboIndex ?? 1,
+    comboIndexWithOffsets: overrides.comboIndexWithOffsets ?? overrides.comboIndex ?? 1,
     indexInCombo: overrides.indexInCombo ?? 1,
   };
 }
@@ -68,6 +70,10 @@ export function makeSimBeatmap(
     difficulty: { ...DEFAULT_DIFFICULTY, ...overrides.difficulty },
     audioLeadIn: 0,
     stackLeniency: 0.7,
+    // 默认"谱面没给颜色" —— 于是走 osu 默认调色板,与多数谱面一致
+    comboColours: [],
+    sliderTrackOverride: null,
+    sliderBorder: null,
     ...overrides,
   };
 }

@@ -8,6 +8,7 @@ import type {
   BreakPeriod,
   Difficulty,
   HitObjectKind,
+  Rgb,
   SimBeatmap,
   SimHitObject,
 } from '../sim/types';
@@ -45,8 +46,19 @@ const HIT_TYPE = {
   Slider: 2,
   NewCombo: 4,
   Spinner: 8,
+  /** 第 4~6 位是 combo-skip 计数(0~7)。osu-classes 的 `HitType.ComboOffset` 同值。 */
+  ComboOffset: 112,
   Hold: 128,
 } as const;
+
+/**
+ * lazer 允许的 combo 色上限。
+ *
+ * 核 `LegacyDecoder`:`public const int MAX_COMBO_COLOUR_COUNT = 8;`,
+ * `HandleColours` 用它做范围校验 —— 编号不在 1~8 的 `ComboN` 不算 combo 色。
+ * 见 {@link SimBeatmap.comboColours} 上关于这处近似的说明。
+ */
+const MAX_COMBO_COLOUR_COUNT = 8;
 
 /**
  * 解析 `.osu`。
@@ -91,7 +103,39 @@ function toSimBeatmap(raw: Beatmap): SimBeatmap {
     difficulty,
     audioLeadIn: raw.general.audioLeadIn,
     stackLeniency: raw.general.stackLeniency,
+    ...toColours(raw),
   };
+}
+
+/**
+ * 谱面 `[Colours]` 段。
+ *
+ * osu-parsers 已经把 `SliderTrackOverride` / `SliderBorder` 拆成具名字段,
+ * 其余 `ComboN` 按文件顺序进 `comboColors` —— 与 lazer 的
+ * `CustomComboColours.Add()` 行为一致(编号只用于校验,不用于定位)。
+ *
+ * 这里只做两件矫正:
+ * 1. **截断到 8 个**,对齐 lazer 的 `MAX_COMBO_COLOUR_COUNT` 范围校验。
+ * 2. **丢弃 alpha**,对齐谱面路径的 `allowAlpha: false`。
+ */
+function toColours(raw: Beatmap): {
+  readonly comboColours: readonly Rgb[];
+  readonly sliderTrackOverride: Rgb | null;
+  readonly sliderBorder: Rgb | null;
+} {
+  const c = raw.colors;
+
+  return {
+    comboColours: (c?.comboColors ?? []).slice(0, MAX_COMBO_COLOUR_COUNT).map(toRgb),
+    sliderTrackOverride: c?.sliderTrackColor ? toRgb(c.sliderTrackColor) : null,
+    sliderBorder: c?.sliderBorderColor ? toRgb(c.sliderBorderColor) : null,
+  };
+}
+
+/** osu-parsers 的 `Color4` → 我们的 `Rgb`。alpha 刻意丢弃,见 {@link Rgb}。 */
+function toRgb(colour: { red: number; green: number; blue: number }): Rgb {
+  const clamp = (v: number) => (v < 0 ? 0 : v > 255 ? 255 : Math.round(v));
+  return { r: clamp(colour.red), g: clamp(colour.green), b: clamp(colour.blue) };
 }
 
 /**
@@ -160,18 +204,25 @@ function toSimHitObjects(
   const scale = radiusFromCS(difficulty.circleSize) / OBJECT_RADIUS;
 
   // Pass 3:合成最终物件(combo 递推 + 堆叠偏移)
+  //
+  // 递推式逐字对齐 `IHasComboInformation.UpdateComboInformation`:
+  //   int index = lastObj?.ComboIndex ?? 0;
+  //   int indexWithOffsets = lastObj?.ComboIndexWithOffsets ?? 0;
+  //   if (NewCombo || lastObj == null) { index++; indexWithOffsets += ComboOffset + 1; }
+  // 而 `BeatmapProcessor.PreProcess()` 从 lastObj = null 起遍历,所以**首个物件
+  // 必然走进那个分支** —— 两个 index 都从 0 起 +1,首个 combo 是 1 而不是 0。
   const out: SimHitObject[] = [];
-  let comboIndex = -1;
+  let comboIndex = 0;
+  let comboIndexWithOffsets = 0;
   let indexInCombo = 0;
 
   for (let i = 0; i < flat.length; i++) {
     const f = flat[i]!;
     const newCombo = forced[i]!;
 
-    // lazer `UpdateComboInformation`:新 combo 时 index++ 且 inCombo 归零,
-    // 否则 inCombo 递增。第一个物件必然进入新 combo 分支(见 forceNewCombos)。
     if (newCombo) {
       comboIndex++;
+      comboIndexWithOffsets += comboOffsetOf(sorted[i]!) + 1;
       indexInCombo = 0;
     } else {
       indexInCombo++;
@@ -197,12 +248,60 @@ function toSimHitObjects(
       path: f.path,
       newCombo,
       comboIndex,
+      comboIndexWithOffsets,
       // 圈内数字从 1 开始,而 lazer 的 IndexInCurrentCombo 从 0 开始
       indexInCombo: indexInCombo + 1,
     });
   }
 
   return out;
+}
+
+/**
+ * 物件的 combo-skip 位(`.osu` hitType 的第 4~6 位,0~7)。
+ *
+ * ## ⚠️ 刻意**不用** osu-parsers 的 `comboOffset` 字段
+ *
+ * 它移植的是一个**旧版** lazer。核现在的
+ * `osu.Game/Rulesets/Objects/Legacy/ConvertHitObjectParser.cs`(2026-08-24):
+ *
+ * ```csharp
+ * int comboOffset = (int)(type & LegacyHitObjectType.ComboOffset) >> 4;
+ * bool combo = type.HasFlag(LegacyHitObjectType.NewCombo);
+ * // createHitCircle / createSlider:
+ * ComboOffset = newCombo ? comboOffset : 0
+ * // createSpinner:
+ * NewCombo = newCombo
+ * // Spinners cannot have combo offset.
+ * ```
+ *
+ * `extraComboOffset` / `forceNewCombo` 这两个字段在 master 上**已经不存在了**。
+ * 与 osu-parsers 有两处分歧,都只影响配色:
+ *
+ * | | osu-parsers | 现在的 lazer |
+ * |---|---|---|
+ * | 转盘的 skip 位结转给下一个物件 | 有(`_extraComboOffset`) | **已删除** |
+ * | 物件未标 NewCombo 时的 skip 位 | 保留 | **归零** |
+ *
+ * 所以这里按文件位域自己算,复现 lazer 现在的两条规则。
+ *
+ * ## 注意是"哪个 newCombo"
+ *
+ * 门是**文件里显式标的** NewCombo 位,**不是** `forceNewCombos()` 补出来的那个 ——
+ * lazer 传给 `createHitCircle` 的 `newCombo` 参数就是原始位,而强制开 combo 是在
+ * 同一个构造式里另算的(`NewCombo = firstObject || lastObject is ConvertSpinner || newCombo`)。
+ * 于是"转盘之后被强制开 combo、且自带 skip 位"的物件,offset 仍然是 0。
+ *
+ * 我们的 fixture 里**一个 skip 位都没有**(四张图全为 0),所以这段没有 ground truth
+ * 可验,只能靠合成 `.osu` 的用例锁住 —— 见 `beatmapLoader.test.ts`。
+ */
+function comboOffsetOf(o: HitObject): number {
+  // 转盘没有 combo offset
+  if ((o.hitType & HIT_TYPE.Spinner) !== 0) return 0;
+  // 未显式标 NewCombo ⇒ skip 位丢弃
+  if ((o.hitType & HIT_TYPE.NewCombo) === 0) return 0;
+
+  return (o.hitType & HIT_TYPE.ComboOffset) >> 4;
 }
 
 /**

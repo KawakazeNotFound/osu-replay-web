@@ -5,9 +5,11 @@ import {
   HitResult,
   type PlaybackState,
   type ReplayTimeline,
+  type SimBeatmap,
   type SimHitObject,
 } from '../core/sim/types';
 import { lastIndexAtOrBefore } from '../core/util/search';
+import { buildComboPalette, type ComboPalette } from './comboColours';
 
 /**
  * osu! 判定区尺寸(固定常量)。
@@ -60,27 +62,6 @@ const TRAIL_MS = 400;
  */
 const HIT_FADE_MS = 240;
 
-/**
- * 占位的 combo 配色。
- *
- * ⚠️ **这是硬编码的假数据。** 真实来源有三层优先级:
- * 1. `.osu` 的 `[Colours]` 段(`Combo1:` … `Combo8:`)
- * 2. 皮肤 `skin.ini` 的 `[Colours]`
- * 3. 皮肤没给就用 osu 默认色
- *
- * 而且皮肤可以设 `ComboOverride` 反过来压过谱面。我们**一个都没解析** ——
- * 谱面的 `[Colours]` 目前根本没读进 `SimBeatmap`。皮肤系统是 M4。
- * 所以这里只是让不同 combo 段能看出区别,颜色本身没有任何权威性。
- */
-const PLACEHOLDER_COMBO_COLOURS = [
-  '#5ac8fa', '#ffdd55', '#7fe07f', '#ff8fb1', '#c08fff', '#ffa64d',
-] as const;
-
-function comboColourOf(comboIndex: number): string {
-  const list = PLACEHOLDER_COMBO_COLOURS;
-  return list[((comboIndex % list.length) + list.length) % list.length]!;
-}
-
 function clamp01(value: number): number {
   return value < 0 ? 0 : value > 1 ? 1 : value;
 }
@@ -104,11 +85,37 @@ export class DebugRenderer {
   private offsetX = 0;
   private offsetY = 0;
 
+  /**
+   * combo 配色表的记忆化。
+   *
+   * ## 这为什么不算"跨帧可变状态"
+   *
+   * 本类的核心约束是不得持有跨帧的**游戏**状态(见类注释)。这里是一份
+   * **由不可变输入完全决定的记忆化缓存**:键是 `SimBeatmap` 的对象标识,
+   * 而 timeline 一旦编译出来就不可变。同一个键必然给出同一个值,
+   * 所以它无法让"第 N 帧的输出"依赖"第 N-1 帧画了什么" —— 这正是那条约束
+   * 想禁止的东西。判据是**幂等性**,不是"有没有字段"。
+   *
+   * 反例(不可以):在这里存"上次命中的时刻"来驱动动画。那样倒退就错了。
+   */
+  private palette: ComboPalette | null = null;
+  private paletteFor: SimBeatmap | null = null;
+
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
     const ctx = canvas.getContext('2d');
     if (!ctx) throw new Error('无法获取 canvas 2d context');
     this.ctx = ctx;
+  }
+
+  /** 取(或按需重建)该谱面的 combo 配色表。见 {@link palette}。 */
+  private paletteOf(beatmap: SimBeatmap): ComboPalette {
+    if (this.paletteFor !== beatmap || this.palette === null) {
+      // 皮肤那一层还没有(M4),所以只传谱面 —— 链条会落到 osu 默认四色
+      this.palette = buildComboPalette(beatmap);
+      this.paletteFor = beatmap;
+    }
+    return this.palette;
   }
 
   /** 按容器尺寸与 devicePixelRatio 重算画布分辨率。窗口 resize 时调用。 */
@@ -187,6 +194,7 @@ export class DebugRenderer {
   private drawHitObjects(timeline: ReplayTimeline, state: PlaybackState): void {
     const { ctx } = this;
     const radius = radiusFromCS(timeline.beatmap.difficulty.circleSize) * this.scale;
+    const palette = this.paletteOf(timeline.beatmap);
 
     // ⚠️ 之前这里硬编码 800ms 当 preempt —— 必错:AR 越高 preempt 越短
     // (AR10 只有 450ms),硬编码会让高 AR 的图 approach circle 收缩得过慢。
@@ -231,13 +239,13 @@ export class DebugRenderer {
 
       // 滑条体:画在圈底下
       if (object.kind === 'slider' && object.path.count > 0) {
-        this.drawSliderBody(object, radius, state.time);
+        this.drawSliderBody(object, radius, state.time, palette);
       }
 
       ctx.strokeStyle =
         missed ? '#ff4d6d'
         : object.kind === 'spinner' ? '#7f7fff'
-        : comboColourOf(object.comboIndex);
+        : palette.colourOf(object);
       ctx.lineWidth = Math.max(1.5, 2 * this.scale);
       ctx.beginPath();
       ctx.arc(cx, cy, radius * grow, 0, Math.PI * 2);
@@ -269,22 +277,34 @@ export class DebugRenderer {
   /**
    * 滑条体 + 滑条球。
    *
-   * ## 这是 canvas2d 的近似,不是 M2 的正式实现
+   * ## 这是 canvas2d 的近似,不是正式实现
    *
-   * osu! 真正的滑条体是**带深度测试的 WebGL 三角带**(内亮外暗的渐变管道),
-   * 自相交处不会叠加亮度。这里用 `lineWidth = 直径` 的粗折线近似 ——
-   * 交叠处会变亮,与 osu 观感不同。正式实现是 M2,见 TECH-NOTES D4。
+   * osu! 真正的滑条体是一根**内淡外浓的管道**:最外圈 `SliderBorder` 色的边框,
+   * 边框往内是轨道色,alpha 从内边缘往中心**递减**(所以中心能透出背景)。
+   * 核 webosu 的 `SliderMesh.js` 用的常数是 `borderwidth = 0.128`、
+   * 内边缘 alpha `0.8`、中心 alpha `0.3`。
+   *
+   * 这里只画两道描边近似,**横截面的渐变完全没有** —— 观感与 osu 差得明显。
+   * 正式做法(把渐变烘成 K 级不透明色、由宽到窄描 K 遍)见 TECH-NOTES D14。
    *
    * 但"完全不画"比"画得不像"糟糕得多:没有滑条体根本看不出回放在跟什么。
    *
    * `object.path` 存的是**相对起点的偏移**,要加上堆叠后的起点。
    */
-  private drawSliderBody(object: SimHitObject, radius: number, time: number): void {
+  private drawSliderBody(
+    object: SimHitObject,
+    radius: number,
+    time: number,
+    palette: ComboPalette,
+  ): void {
     const { ctx } = this;
     const { path } = object;
 
     const px = (k: number) => this.toScreenX(object.stackedX + path.x[k]!);
     const py = (k: number) => this.toScreenY(object.stackedY + path.y[k]!);
+
+    const track = palette.trackRgbOf(object);
+    const border = palette.borderRgb;
 
     ctx.save();
     ctx.lineCap = 'round';
@@ -294,13 +314,15 @@ export class DebugRenderer {
     ctx.moveTo(px(0), py(0));
     for (let k = 1; k < path.count; k++) ctx.lineTo(px(k), py(k));
 
-    // 外圈描边(边框)后再画内部填充,近似 osu 的"暗边 + 亮心"
-    ctx.strokeStyle = 'rgba(90, 200, 250, 0.30)';
+    // 外圈 = 边框色,内部 = 轨道色。两者都是单遍描边,所以自相交处不会叠亮
+    // (canvas2d 把一次 stroke() 的整条路径当成一个区域填充,自重叠不重复合成)
+    ctx.strokeStyle = `rgba(${border.r}, ${border.g}, ${border.b}, 0.55)`;
     ctx.lineWidth = radius * 2;
     ctx.stroke();
 
-    ctx.strokeStyle = 'rgba(20, 30, 45, 0.55)';
-    ctx.lineWidth = radius * 2 - Math.max(2, 3 * this.scale);
+    // borderwidth = 0.128 × 半径,取自 webosu 实测值
+    ctx.strokeStyle = `rgba(${track.r}, ${track.g}, ${track.b}, 0.55)`;
+    ctx.lineWidth = Math.max(1, radius * 2 * (1 - 0.128));
     ctx.stroke();
 
     ctx.restore();

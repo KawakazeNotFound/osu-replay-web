@@ -106,10 +106,68 @@ export interface SimHitObject {
   readonly path: SliderPathSamples;
 
   readonly newCombo: boolean;
-  /** 第几个 combo(用于取 combo colour) */
+
+  /**
+   * 第几个 combo。**1-based** —— 首个物件是 1,不是 0。
+   *
+   * ⚠️ 这个起点是核过源码的,别"顺手"改成 0-based。
+   * `IHasComboInformation.UpdateComboInformation`(2026-08-24):
+   *
+   * ```csharp
+   * int index = lastObj?.ComboIndex ?? 0;          // 首个物件:lastObj 为 null → 0
+   * if (NewCombo || lastObj == null) { index++; }   // → 1
+   * ```
+   *
+   * 而 `BeatmapProcessor.PreProcess()` 是从 `lastObj = null` 开始遍历全部物件的,
+   * 所以首个物件必然走进那个分支。曾经这里是 0-based,配 4 色调色板时
+   * **整张图配色错开一格**(lazer 取 `ComboColours[1 % 4]` = 第二色)。
+   *
+   * 用于**皮肤**的 combo 颜色查找;谱面 `[Colours]` 要用
+   * {@link comboIndexWithOffsets}。见 `render/comboColours.ts`。
+   */
   readonly comboIndex: number;
+
+  /**
+   * 第几个 combo,但**累加了 combo-skip 位**(`.osu` hitType 的第 4~6 位)。
+   *
+   * 递推式同样来自 `UpdateComboInformation`:
+   * ```csharp
+   * indexWithOffsets += ComboOffset + 1;   // 只在新 combo 分支里
+   * ```
+   * 即 offset **只在开启新 combo 的物件上生效**,且是**累加**的(不是每次重置)。
+   *
+   * ## 为什么要单独存一个
+   *
+   * 取颜色时用哪个 index **取决于颜色来自哪里** —— 这个不对称是核源码核出来的:
+   *
+   * | 颜色来源 | 索引 |
+   * |---|---|
+   * | 谱面 `[Colours]` | `comboIndexWithOffsets` |
+   * | 皮肤 `skin.ini` / osu 默认色 | `comboIndex` |
+   *
+   * 证据是 `LegacyBeatmapSkin.cs:89`——它覆写 `GetComboColour` 并**丢弃**传入的
+   * `comboIndex` 参数:`=> base.GetComboColour(source, combo.ComboIndexWithOffsets, combo)`。
+   * 而未覆写的 `LegacySkin` 用的就是调用方传进来的 `ComboIndex`
+   * (`IHasComboInformation.cs:70` 传的是 `ComboIndex`)。
+   */
+  readonly comboIndexWithOffsets: number;
+
   /** combo 内的序号,从 1 开始(用于画圈内数字) */
   readonly indexInCombo: number;
+}
+
+/**
+ * 8-bit RGB。
+ *
+ * 刻意**不含 alpha** —— 谱面 `[Colours]` 的 alpha 会被 osu 丢弃:
+ * `LegacyDecoder.ParseLine` 对 `Section.Colours` 传的是 `HandleColours(output, line, false)`,
+ * 而 `allowAlpha == false` 时 `byte alpha = ... : (byte)255`。
+ * 所以写成 4 分量的谱面颜色仍然是全不透明的。
+ */
+export interface Rgb {
+  readonly r: number;
+  readonly g: number;
+  readonly b: number;
 }
 
 export interface BreakPeriod {
@@ -139,6 +197,32 @@ export interface SimBeatmap {
    * ⚠️ 堆叠本身**尚未实现**,见 {@link SimHitObject} 上的说明。
    */
   readonly stackLeniency: number;
+
+  /**
+   * 谱面 `[Colours]` 段的 combo 配色,按**文件出现顺序**。空数组 = 谱面没给。
+   *
+   * ## 顺序就是索引 —— 这不是 bug
+   *
+   * `Combo1:` 后面那个数字**不参与定位**。核 `LegacyDecoder.HandleColours`:
+   * 它 `int.TryParse(pair.Key[5..], out int comboIndex)` 之后只做一次范围校验
+   * (`comboIndex >= 1 && comboIndex <= MAX_COMBO_COLOUR_COUNT`,该常量 = 8),
+   * 通过了就 `CustomComboColours.Add(colour)` —— **数字随即被丢弃**。
+   *
+   * 所以 `Combo3` 写在 `Combo1` 前面,得到的就是"3 在前"的顺序;
+   * `Combo1` 跳到 `Combo5` 也不会留空位。osu-parsers 的行为与此一致。
+   *
+   * ⚠️ 一处**已知的近似**:lazer 会把编号落在 1~8 之外的(如 `Combo9`、`Combo0`)
+   * 判为非 combo 色、丢进 custom-colour 字典;osu-parsers 只判
+   * `key.startsWith('Combo')`,会照收。我们在装载时截断到前 8 个来对齐 ——
+   * 对"按顺序写了超过 8 个"的谱面等价,但对"`Combo9` 写在前面"这种病态排列
+   * 不等价。真实谱面没见过后者。见 `beatmapLoader.ts`。
+   */
+  readonly comboColours: readonly Rgb[];
+
+  /** `[Colours]` 的 `SliderTrackOverride`,null = 未指定(那就用 combo 色) */
+  readonly sliderTrackOverride: Rgb | null;
+  /** `[Colours]` 的 `SliderBorder`,null = 未指定(那就用白色) */
+  readonly sliderBorder: Rgb | null;
 }
 
 /** 某个事件生效**之后**的累积状态。这是 `stateAt` 能做到 O(log n) 的全部原因。 */

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { buildReplayFrames } from '../replay/frames';
 import { HIT_ANIMATION_MS, TIMELINE_PADDING_MS, preemptFromAR } from './difficulty';
-import { makeHitObject } from './testFixtures';
+import { makeHitObject, makeSimBeatmap } from './testFixtures';
 import {
   buildDrainProfile,
   buildTimeline,
@@ -37,21 +37,9 @@ function makeBeatmap(
   breaks: readonly BreakPeriod[] = [],
   overrides: Partial<SimBeatmap> = {},
 ): SimBeatmap {
-  return {
-    hitObjects,
-    breaks,
-    difficulty: {
-      circleSize: 4,
-      approachRate: 9,
-      overallDifficulty: 8,
-      drainRate: 5,
-      sliderMultiplier: 1.4,
-      sliderTickRate: 1,
-    },
-    audioLeadIn: 0,
-    stackLeniency: 0.7,
-    ...overrides,
-  };
+  // 走 makeSimBeatmap 而不是手写字面量 —— 否则 SimBeatmap 每加一个字段
+  // 这里就要跟着改一次(已经因为 comboColours 被打到过)
+  return makeSimBeatmap(hitObjects, { breaks, ...overrides });
 }
 
 /** 把 DrainProfile 摊成好读的形式,便于直接对照期望。 */

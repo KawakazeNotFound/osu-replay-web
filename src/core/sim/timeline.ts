@@ -125,6 +125,9 @@ export function placeholderBeatmap(): SimBeatmap {
     },
     audioLeadIn: 0,
     stackLeniency: 0.7,
+    comboColours: [],
+    sliderTrackOverride: null,
+    sliderBorder: null,
   };
 }
 

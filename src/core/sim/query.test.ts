@@ -44,7 +44,9 @@ function makeBeatmap(overrides: Partial<SimBeatmap> = {}): SimBeatmap {
       x: 100 + i * 20,
       y: 150,
       newCombo: i === 0 || i === 5,
-      comboIndex: i < 5 ? 0 : 1,
+      // comboIndex 是 1-based(核过 lazer 的 UpdateComboInformation),首个 combo 是 1
+      comboIndex: i < 5 ? 1 : 2,
+      comboIndexWithOffsets: i < 5 ? 1 : 2,
       indexInCombo: (i < 5 ? i : i - 5) + 1,
     }),
   );
@@ -62,6 +64,10 @@ function makeBeatmap(overrides: Partial<SimBeatmap> = {}): SimBeatmap {
     },
     audioLeadIn: 0,
     stackLeniency: 0.7,
+    // 本文件不测配色,给空的走默认调色板即可
+    comboColours: [],
+    sliderTrackOverride: null,
+    sliderBorder: null,
     ...overrides,
   };
 }

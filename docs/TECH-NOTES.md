@@ -812,6 +812,170 @@ updateTracking(allTicksInRange || IsMouseInFollowArea(false));
 
 ---
 
+## D14. combo 配色的三处坑 —— ✅ `已解决`(2026-08-24)
+
+调研 webosu 时顺手核 combo 配色,结果连挖出**三个我们自己的 bug**,而且都属于
+"换成真颜色之后才会显形"的那一类 —— 之前配色是硬编码的假色,全部隐形。
+
+### 坑 1:`comboIndex` 应该是 **1-based**
+
+核 `IHasComboInformation.UpdateComboInformation`:
+
+```csharp
+int index = lastObj?.ComboIndex ?? 0;          // 首个物件 lastObj 为 null → 0
+int indexWithOffsets = lastObj?.ComboIndexWithOffsets ?? 0;
+if (NewCombo || lastObj == null) {
+    index++;                                    // → 1
+    indexWithOffsets += ComboOffset + 1;
+}
+```
+
+`BeatmapProcessor.PreProcess()` 从 `lastObj = null` 起遍历全部物件,所以**首个物件
+必然进那个分支** —— `ComboIndex` 从 1 起,不是 0。我们原来从 `-1` 起 `++`,
+首个物件得到 0,配 4 色调色板时 lazer 取 `ComboColours[1 % 4]`(第二色)而我们取第一色,
+**整张图配色错开一格**。
+
+> 教训:两次 WebFetch 对**同一个文件**给出了互相矛盾的说法(一次说 `?? 0` 让 null 时
+> 全部归零、一次说 `index++` 作用在种子为 0 的局部变量上)。这种"小模型转述源码"
+> 的结论不能定案 —— 最后是 `curl` 把文件抓下来自己读才确定的。**核源码就要读原文。**
+
+### 坑 2:取颜色用哪个索引,**取决于颜色来自哪一层**
+
+```
+IHasComboInformation.cs:70   GetComboColour(skin) => GetSkinComboColour(this, skin, ComboIndex)
+LegacySkin.cs                GetComboColour(src, colourIndex, combo)
+                               => src.ComboColours[colourIndex % src.ComboColours.Count]
+LegacyBeatmapSkin.cs:89-90   protected override GetComboColour(src, comboIndex, combo)
+                               => base.GetComboColour(src, combo.ComboIndexWithOffsets, combo)
+                                                          ^^^^ 参数被丢弃,换成含 offset 的
+```
+
+| 颜色来源 | 索引 |
+|---|---|
+| 谱面 `[Colours]` | `ComboIndexWithOffsets` |
+| 皮肤 `skin.ini` / osu 默认色 | `ComboIndex` |
+
+也就是说 **combo-skip 位只对谱面自带的配色生效**;谱面没给颜色时,谱师写的跳色意图
+被完全忽略。听起来像 bug,但这是 lazer 的实际行为。
+
+`LegacyBeatmapSkin` 构造函数里的 `AllowDefaultComboColoursFallback = false` 解释了链条
+怎么接:谱面没有 `[Colours]` 时返回 null 而**不是**兜底成默认色,好让查找继续落到
+用户皮肤那一层。所以顺序是 **谱面 → 用户皮肤 → 默认色**。
+
+实现在 `src/render/comboColours.ts`,两个方向的变异检验各自钉住不同的测试。
+
+### 坑 3:`comboOffset` **不能**用 osu-parsers 的字段
+
+osu-parsers 移植的是一个**旧版** lazer。现在的 `ConvertHitObjectParser`:
+
+```csharp
+ComboOffset = newCombo ? comboOffset : 0        // createHitCircle / createSlider
+NewCombo = newCombo                             // createSpinner
+// Spinners cannot have combo offset.
+```
+
+`extraComboOffset` / `forceNewCombo` 这两个字段在 master 上**已经删除**。分歧:
+
+| | osu-parsers | 现在的 lazer |
+|---|---|---|
+| 转盘的 skip 位结转给下一个物件 | 有(`_extraComboOffset`) | 已删除 |
+| 物件未标 NewCombo 时的 skip 位 | 保留 | 归零 |
+
+> 这里我**先后判断反了两次**:一开始打算自己写 `(hitType >> 4) & 7`,读到
+> osu-parsers 有转盘结转后改成"必须用它的字段"并写下"幸好查了";再核 lazer master
+> 才发现结转已被删除,于是又回到按位域自己算。**参考实现不是权威,只有上游源码是。**
+
+注意门是**文件里显式标的** NewCombo 位,不是 `forceNewCombos()` 补出来的那个 ——
+"转盘之后被强制开 combo、且自带 skip 位"的物件,offset 仍然是 0。
+
+### 验证状况
+
+四张 fixture **一个 combo-skip 位都没有**(实测全为 0),所以 `comboIndexWithOffsets`
+在真实数据上恒等于 `comboIndex` —— ground truth **验不出**这段。和 D-hitPolicy 同一种局面,
+只能靠合成 `.osu`(`beatmapLoader.test.ts` 的「combo-skip 位(合成谱面)」)。
+
+变异检验:改用 osu-parsers 的 `comboOffset` 后,序列从 `[1,4,4,4,5,7]` 变成
+`[1,4,4,4,8,10]` —— 正是测试注释里预言的 `8`。
+
+另一个副产品:四张图**全都有 `[Colours]`**,所以真实运行时永远走"谱面配色"那一层,
+osu 默认四色反而是罕见路径。
+
+---
+
+## D15. webosu 的渲染做法 —— `已调研`(2026-08-24,实施未开始)
+
+用户指向 <https://web-osu.github.io/>,源码 `github.com/BlaNKtext/webosu`(默认分支 `main`)。
+
+### 许可边界(先看这个,它决定其余一切)
+
+- `LICENSE` = **MIT**,`Copyright (c) 2015 Drew DeVault`。无 copyleft,义务只有保留版权声明。
+- ⚠️ `LICENSE-CC-BYNC.md` = CC BY-NC(**禁商用**),`README.md:10` 说部分文件属 ppy,
+  但**仓库里没有清单说明哪个文件归哪个许可证**。所以规则简化为:
+  **只看 `js/*.js`,任何美术/音频资源(`skin.7z`、`img/sprites.png`、`hitsounds/*`、`fonts/*`)一律不碰。**
+- ⚠️ `js/curves/*.js` 每个文件头写着 "Adapted from … opsu!",而 **opsu! 是 GPLv3**,
+  这批文件在这里以 MIT 分发,来源许可存疑。算法思路照用(等弧长重采样这种做法不受版权保护),
+  但**别逐行搬那几个文件**。
+
+### 核心收获:滑条自相交不叠亮 = 每条滑条独立的深度缓冲双 pass
+
+`js/SliderMesh.js`(433 行,全部核心都在这一个文件),PixiJS v5 但绕过 batcher 直接
+`gl.drawElements`:
+
+- 顶点属性 `vec4(x, y, t, dist)`,`dist` 在中心线 = 0、轮廓边 = 1,`gl_Position.z` **直接取 `dist`**
+- 每条滑条画之前 `gl.clear(DEPTH_BUFFER_BIT)` —— **per-slider 清深度**,滑条之间照常混合
+- pass 1:`colorMask` 全关 + 深度测试,只把每像素的**最小 `dist`** 写进深度缓冲
+- pass 2:`depthFunc(EQUAL)` + colorMask 全开,同一个 draw call 再来一遍
+
+净效果一条规则:**每像素只被着色一次,着的是"离中心线最近"的那个 fragment**。
+alpha 不累积、自相交看起来是一根连续的管、边框不横穿交叉区,三件事一条规则解决。
+
+其余常数:渐变是一张 `200 × ncolors` 的 1D LUT(全图共用一个 shader),
+`borderwidth = 0.128`、中心 alpha `0.3` → 内边缘 `0.8`(RGB 恒定,只有 alpha 变),
+`blurrate = 0.015` 在两处边界各做一次 alpha 淡出**用来免费换抗锯齿,不开 MSAA**。
+snaking 完全在顶点着色器里做(`t*dt > ot` 不满足时给 z 加 2.0 把顶点顶出裁剪体),不重建几何。
+
+> 它有个真 bug,抄之前要修:`SliderMesh.js:210,213` 调 `addArc(5*i, ...)` 时漏传第 4 个
+> 参数 `t`,导致转折点楔子的顶点 `t = NaN`,于是那些楔子在 snaking 期间不会被裁掉。
+
+### 落到我们 canvas2d 上
+
+深度缓冲需要深度缓冲,canvas2d 没有。但那条**语义**可以一比一翻译:
+"每像素由它到中心线最小距离处的 LUT 值着色" = **不透明同心描边,由宽到窄**。
+
+1. 把 ramp 烘成 K 级(K ≈ 24~64)**纯不透明** RGB(合成到黑底上 —— 我们判定区背景
+   `#0f0f14` 本就接近黑,这个近似只在将来渲染亮背景/故事板时才失真)
+2. 离屏 canvas 上 `lineJoin = lineCap = 'round'`、`globalAlpha = 1`,对**同一条完整路径**
+   描边 K 次,`lineWidth` 从 `2r` 递减到接近 0,颜色取 `LUT[k]`
+3. 每遍都不透明 ⇒ 自相交**不可能**累积;越窄的遍越晚画 ⇒ 每像素赢家是"距中心线最小"
+   的那一级 —— 与深度测试强制的规则等价
+4. 最后整张离屏以 `globalAlpha = fade` 贴上去,滑条体的淡入淡出也一并解决
+
+⚠️ 一个必须记下的**认知修正**:原来 D4 里写"canvas2d 单遍粗折线在交叠处会变亮"——
+这是错的。canvas2d 把**一次 `stroke()` 的整条路径当成一个区域填充**,自重叠不重复合成。
+所以现在这版滑条体真正的问题不是叠亮,而是**横截面渐变完全没有**(内浓外淡的管道感缺失)。
+K 遍同心描边解决的是后者。
+
+### 两块没有参考价值
+
+- **皮肤:webosu 完全没有 `.osk` 支持。** 全仓库零个 `.ini`、零处 `skin.ini`/`@2x` 引用、
+  无命名回退链。它的"皮肤"是一张烘好的 PIXI 图集,命名甚至跟 osu 不兼容
+  (`disc.png` 而非 `hitcircle.png`)。M4 只能直接照 ppy/osu 的 `LegacySkin` 来。
+- **combo 颜色:它没有优先级链**,只读谱面 `[Colours]`,且谱面无 `[Colours]` 时兜底的
+  四色 `[96,159,159] [192,192,192] [128,255,255] [139,191,222]` **不是 osu 的默认色**,
+  是它自己编的。真实默认见 D14。**参考别人实现时,"看起来很权威的常量"最容易照抄出错。**
+
+playfield 缩放它也用 `0.8`(`js/playback.js:94-107`),算是对我们那次改 `0.9 → 0.8` 的独立交叉验证。
+
+### 另外两条与渲染后端无关、可以直接照用的
+
+- **等弧长重采样 + 每点带 `t`**(`js/curves/EqualDistanceMultiCurve.js`,`CURVE_POINTS_SEPERATION = 5` osu px):
+  一份点表同时喂几何生成、snaking 截断、滑条球定位、reverse arrow 定位。点表让"按 t 截断"变成 O(1) slice。
+- **插入排序的显示列表**(`js/playback.js:1009-1031`):不每帧重排,维护按浮点 `depth` 有序的
+  children 数组、二分插入。`depth = 4.9999 - 0.0001*hitIndex`,靠"早出现的物件 depth 更大"
+  实现 osu 的"先出现的画在上面"。
+
+---
+
 ## E. 待办 / 杂项
 
 - **仓库名**:目录名 `OSUReplay-Danser` 已不准确(danser 不再是后端)。建议改名(如 `osu-replay-web`)。不阻塞,但越早改越好。
