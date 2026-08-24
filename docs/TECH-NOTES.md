@@ -1071,6 +1071,80 @@ SpanCount()   => RepeatCount + 1
 
 ---
 
+### D17. 皮肤系统第一步:解析层 —— ✅ `已实现`(2026-08-24)
+
+用户找到 `daladal/replayviewer-js`(MIT)并要求参照。它的架构与我们**高度一致**
+(`Ruleset.ts:35-40` 对 `draw` 写了契约:*"Must not mutate the session — scrubbing
+calls this at arbitrary times in any order."*),但**零测试**,且带着我们已修掉的
+`SCALE * 0.9` 判定区 bug(`HitObjectRenderer.ts:15-16`)。所以定位是
+**借渲染与 I/O,判定层保持自己的**。
+
+第一块落地:`.osk` / `skin.ini` / 贴图查找。
+
+#### 与参考实现的三处刻意分歧
+
+1. **解析与解码分离。** 它的 `loadSkin` 把 unzip + `createImageBitmap` +
+   `decodeAudioData` 塞在一个 async 函数里 —— 那样整个模块在 Node 下不可测。
+   我们只做"字节 → 结构",浏览器 API 一个不碰,于是这一层 40 个测试全部能跑。
+
+2. **`@2x` 回退集中成一个 resolver。** 它把
+   `images.get(stem+'@2x.png') ?? images.get(stem+'.png')` **复制粘贴到了 8 个渲染文件**。
+   问题不只是重复:那个写法**拿不到"用了哪一档"**,而 @2x 贴图必须按半尺寸画
+   (lazer 的 `Texture.ScaleAdjust = 2`),忘了就整体大一倍。
+   我们的 `resolveTexture` 返回 `{ path, scale }`。
+
+3. **overlap 的默认值按字体不同。** 核 `LegacySkinExtensions.cs:166-185`:
+   `HitCircleOverlap` 默认 **-2**,而 `ScoreOverlap` / `ComboOverlap` 默认 **0**
+   (`ScoreEntry` 是 1)。参考实现只有一个 `hitCircleOverlap: -2`。
+
+#### 从源码核出来的、参考实现没有的两个细节
+
+`LegacySkin.GetTexture`:
+
+```csharp
+// some component names (especially user-controlled ones, like `HitX` in mania)
+// may contain `@2x` scale specifications.
+// stable happens to check for that and strip them, so do the same to match stable behaviour.
+componentName = componentName.Replace(@"@2x", string.Empty);
+string twoTimesFilename = $"{Path.ChangeExtension(componentName, null)}@2x{Path.GetExtension(componentName)}";
+```
+
+1. **请求名里自带的 `@2x` 先剥掉**。不剥的后果很隐蔽:传 `hitcircle@2x` 会拼成
+   `hitcircle@2x@2x.png`(不存在)→ 退回 SD 分支查到 `hitcircle@2x.png` ——
+   **路径碰巧对,但 scale 报成 1**,于是 HD 贴图被画成两倍大。
+   变异检验复现了这个:`{ path: 'hitcircle@2x.png', scale: 1 }`。
+2. **`@2x` 插在扩展名之前**:`foo.png` → `foo@2x.png`。
+
+#### 其他核实项
+
+- **皮肤 `[Colours]` 同样丢弃 alpha。** `LegacySkinDecoder` 对 `Section.Colours`
+  不拦截,落到基类的 `HandleColours(output, line, false)`;只有它亲自处理的
+  `[CatchTheBeat]` 传 `true`。所以 `Rgb`(无 alpha)两条路径通用。
+- **`Version` 缺省是 1.0,不是 latest。** `CreateTemplateObject()` 里
+  `config.LegacyVersion = 1.0m`;`"latest"` → `LATEST_VERSION` = 2.7。
+  这个差别有后果:`LegacyMainCirclePiece.cs:183` 用 `legacyVersion > 1.0m`
+  决定圈内数字是"短淡出 60ms 不缩放"还是"跟其他部件一样淡出并放大"。
+- **combo 色顺序就是索引**(与谱面 `[Colours]` 同一套逻辑),上限 8。
+- `hasFont(prefix)` 的判据是 `GetTexture($"{prefix}-0") != null`(`LSE.cs:137`)。
+- 其余键一律进 `raw` 字典(对应 `ConfigDictionary`),类型转换推迟到读取时 ——
+  这样以后要 `AllowSliderBallTint` / `AnimationFramerate` 不必回来改解析器。
+
+#### 副产品:配色优先级链**接通了**
+
+`buildComboPalette` 早就接受 `skinColours` 且有双向变异检验,但一直没人传。
+现在 `DebugRenderer.setSkin()` 把 `ini.comboColours` 喂进去,「谱面 → 皮肤 → 默认」
+三层全部可达。
+
+⚠️ 一处易漏:配色表的记忆化键是 `beatmap`,但值现在**还依赖皮肤** ——
+所以 `setSkin()` 必须显式作废缓存。变异检验(去掉作废)→ 2 条红。
+
+#### 还没做
+
+贴图**绘制**路径(`drawImage` + combo 色 tint)、动画帧(`hitcircle-0.png` 序列)、
+音效、谱面自带皮肤(优先级高于用户皮肤)。
+
+---
+
 ## E. 待办 / 杂项
 
 - **仓库名**:目录名 `OSUReplay-Danser` 已不准确(danser 不再是后端)。建议改名(如 `osu-replay-web`)。不阻塞,但越早改越好。

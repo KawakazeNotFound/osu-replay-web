@@ -10,6 +10,7 @@ import {
 } from '../core/sim/types';
 import { lastIndexAtOrBefore } from '../core/util/search';
 import { buildComboPalette, type ComboPalette } from './comboColours';
+import type { SkinPackage } from './skin/skinFiles';
 import { snakeRangeAt } from './sliderSnaking';
 
 /**
@@ -236,6 +237,14 @@ export class DebugRenderer {
   private palette: ComboPalette | null = null;
   private paletteFor: SimBeatmap | null = null;
 
+  /**
+   * 已加载的皮肤。`null` = 没有皮肤,一切走内置线框画法。
+   *
+   * 目前只用它的 `skin.ini` 配色 —— 贴图绘制路径还没做(见 M4)。
+   * 但配色这一层接上之后,「谱面 → 皮肤 → 默认」的链条就是完整的了。
+   */
+  private skin: SkinPackage | null = null;
+
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
     const ctx = canvas.getContext('2d');
@@ -243,11 +252,23 @@ export class DebugRenderer {
     this.ctx = ctx;
   }
 
+  /**
+   * 换皮肤。传 `null` 卸载。
+   *
+   * 会让配色表失效并在下一帧重建 —— 因为皮肤配色参与优先级链。
+   */
+  setSkin(skin: SkinPackage | null): void {
+    this.skin = skin;
+    // 记忆化的键是 beatmap,但值现在还依赖皮肤 —— 所以换皮肤必须显式作废,
+    // 否则会一直用旧皮肤的配色
+    this.palette = null;
+    this.paletteFor = null;
+  }
+
   /** 取(或按需重建)该谱面的 combo 配色表。见 {@link palette}。 */
   private paletteOf(beatmap: SimBeatmap): ComboPalette {
     if (this.paletteFor !== beatmap || this.palette === null) {
-      // 皮肤那一层还没有(M4),所以只传谱面 —— 链条会落到 osu 默认四色
-      this.palette = buildComboPalette(beatmap);
+      this.palette = buildComboPalette(beatmap, this.skin?.ini.comboColours ?? []);
       this.paletteFor = beatmap;
     }
     return this.palette;

@@ -9,7 +9,7 @@
 
 ## 一句话现状
 
-**M0 完成,M1 已经能"只丢一个 `.osr` 进来就播"** —— 自动按谱面 MD5 从镜像站取回 `.osz`,解包挑出正确难度,连音乐一起装好(真实浏览器实测 **6 秒**),然后跑完整链路:堆叠 → 判定(circle + 滑条部件 + 转盘) → 记分(ScoreV1 与 ScoreV2 两套) → combo 累积。渲染侧的 combo 配色与滑条体已按 ppy/osu 源码对齐。**604 个单测全绿,0 个 `todo` 占位。**
+**M0 完成,M1 已经能"只丢一个 `.osr` 进来就播"** —— 自动按谱面 MD5 从镜像站取回 `.osz`,解包挑出正确难度,连音乐一起装好(真实浏览器实测 **6 秒**),然后跑完整链路:堆叠 → 判定(circle + 滑条部件 + 转盘) → 记分(ScoreV1 与 ScoreV2 两套) → combo 累积。渲染侧的 combo 配色与滑条体已按 ppy/osu 源码对齐。**680 个单测全绿,0 个 `todo` 占位。**
 
 ## 🎯 lazer 优先
 
@@ -42,7 +42,7 @@
 | **M1** | circle 渲染 + approach circle + combo 数字 + circle 判定 | 🟡 只传 `.osr` 即可播放;判定+记分已完;正式渲染、HP 未做 |
 | M2 | 滑条(路径生成 + WebGL slider body)← 最难 | 🟡 路径采样、部件判定、**canvas2d 滑条体**已完;WebGL 未开始(且**不再是**解决叠亮的前提) |
 | M3 | spinner + 记分/HP/连击 HUD | 🟡 spinner 判定 + ScoreV1 + ScoreV2 已完,HP 与 HUD 未做 |
-| M4 | stable 皮肤系统(.osk,预设 + 用户上传) | ⬜ 未开始(webosu 无 `.osk` 支持,只能照 ppy/osu 的 `LegacySkin`) |
+| M4 | stable 皮肤系统(.osk,预设 + 用户上传) | 🟡 **解析层已完成**(`.osk` / `skin.ini` / `@2x` 查找,见 [D17](./TECH-NOTES.md));贴图绘制路径未做 |
 | M5 | lazer 记分体系 + mod | 🟡 **standardised 记分已完且精确复现**;mod 系数与 hit policy 未做 |
 | M6 | Argon 风格皮肤 + 网页 UI 打磨 | ⬜ 未开始 |
 

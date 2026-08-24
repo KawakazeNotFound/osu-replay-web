@@ -1,3 +1,4 @@
+import { zipSync } from 'fflate';
 import { describe, expect, it } from 'vitest';
 
 import { buildReplayFrames } from '../core/replay/frames';
@@ -6,6 +7,7 @@ import { stateAt } from '../core/sim/query';
 import { makeHitObject, makeSimBeatmap } from '../core/sim/testFixtures';
 import { buildTimeline } from '../core/sim/timeline';
 import { DebugRenderer, HIT_FADE_MS } from './DebugRenderer';
+import { unpackSkin } from './skin/skinFiles';
 
 /**
  * # D8:渲染器的回归测试
@@ -532,6 +534,113 @@ describe('滑条头的命中动画(用户报的 bug #3)', () => {
     expect(grown, `t=0.25 时应已扩散 ~44%(OutQuad)而非 25%(线性),实测 ${grown}`).toBeGreaterThan(
       0.34,
     );
+  });
+});
+
+describe('皮肤配色接入优先级链', () => {
+  /** 造一个只有 skin.ini 的最小 .osk。 */
+  function skinWith(comboLines: readonly string[]) {
+    const text = ['[Colours]', ...comboLines].join('\n');
+    const zipped = zipSync({ 'skin.ini': new TextEncoder().encode(text) });
+    const buf = zipped.buffer.slice(
+      zipped.byteOffset,
+      zipped.byteOffset + zipped.byteLength,
+    ) as ArrayBuffer;
+    return unpackSkin(buf);
+  }
+
+  /** 一张**没有** [Colours] 的谱面 —— 这样皮肤那一层才有机会生效。 */
+  function plainTimeline() {
+    const beatmap = makeSimBeatmap([makeHitObject({ startTime: 1000, x: 256, y: 192 })], {
+      difficulty: difficulty(),
+      comboColours: [],
+    });
+    return buildTimeline(beatmap, buildReplayFrames([]));
+  }
+
+  function circleStrokeStyle(calls: readonly Call[]): string {
+    // 物件区间里第一个 strokeStyle 就是圈的颜色(滑条体在这条用例里不存在)
+    const found = firstObjectCalls(calls).find((c) => c.op === 'set:strokeStyle');
+    expect(found, '没找到圈的 strokeStyle').toBeDefined();
+    return String(found!.args[0]);
+  }
+
+  it('谱面没给颜色时,皮肤的颜色生效', () => {
+    const timeline = plainTimeline();
+    const { canvas, calls } = fakeCanvas(1024, 768);
+    const renderer = new DebugRenderer(canvas);
+    renderer.resize();
+    renderer.setSkin(skinWith(['Combo1: 11,22,33', 'Combo2: 44,55,66']));
+    renderer.draw(timeline, stateAt(timeline, 900));
+
+    // makeHitObject 默认 comboIndex = 1(1-based),皮肤配色用 comboIndex ⇒ 取下标 1
+    expect(circleStrokeStyle(calls)).toBe('rgb(44, 55, 66)');
+  });
+
+  it('没有皮肤时落到 osu 默认四色', () => {
+    const timeline = plainTimeline();
+    const { canvas, calls } = fakeCanvas(1024, 768);
+    const renderer = new DebugRenderer(canvas);
+    renderer.resize();
+    renderer.draw(timeline, stateAt(timeline, 900));
+
+    // DEFAULT_COMBO_COLOURS[1] = (0, 202, 0)
+    expect(circleStrokeStyle(calls)).toBe('rgb(0, 202, 0)');
+  });
+
+  it('🔒 换皮肤会让配色表失效 —— 记忆化最容易漏的一步', () => {
+    const timeline = plainTimeline();
+    const { canvas, calls } = fakeCanvas(1024, 768);
+    const renderer = new DebugRenderer(canvas);
+    renderer.resize();
+
+    renderer.setSkin(skinWith(['Combo1: 1,1,1', 'Combo2: 2,2,2']));
+    renderer.draw(timeline, stateAt(timeline, 900));
+    const before = circleStrokeStyle(calls.slice(lastFillRect(calls)));
+
+    // 同一个 beatmap 换皮肤:配色表的记忆化键是 beatmap,若不显式作废就会用旧颜色
+    renderer.setSkin(skinWith(['Combo1: 9,9,9', 'Combo2: 8,8,8']));
+    renderer.draw(timeline, stateAt(timeline, 900));
+    const after = circleStrokeStyle(calls.slice(lastFillRect(calls)));
+
+    expect(before).toBe('rgb(2, 2, 2)');
+    expect(after, '换了皮肤但颜色没变 —— 配色表没作废').toBe('rgb(8, 8, 8)');
+  });
+
+  it('卸载皮肤后回到默认四色', () => {
+    const timeline = plainTimeline();
+    const { canvas, calls } = fakeCanvas(1024, 768);
+    const renderer = new DebugRenderer(canvas);
+    renderer.resize();
+
+    renderer.setSkin(skinWith(['Combo1: 1,1,1', 'Combo2: 2,2,2']));
+    renderer.draw(timeline, stateAt(timeline, 900));
+
+    renderer.setSkin(null);
+    renderer.draw(timeline, stateAt(timeline, 900));
+
+    expect(circleStrokeStyle(calls.slice(lastFillRect(calls)))).toBe('rgb(0, 202, 0)');
+  });
+
+  it('🔒 谱面自带 [Colours] 时压过皮肤', () => {
+    // 优先级链:谱面 → 皮肤 → 默认。四张真实 fixture 全都有 [Colours],
+    // 所以这条是实际最常走的分支
+    const beatmap = makeSimBeatmap([makeHitObject({ startTime: 1000, x: 256, y: 192 })], {
+      difficulty: difficulty(),
+      comboColours: [
+        { r: 100, g: 100, b: 100 },
+        { r: 200, g: 200, b: 200 },
+      ],
+    });
+    const timeline = buildTimeline(beatmap, buildReplayFrames([]));
+
+    const { canvas, calls } = fakeCanvas(1024, 768);
+    const renderer = new DebugRenderer(canvas);
+    renderer.resize();
+    renderer.setSkin(skinWith(['Combo1: 1,1,1', 'Combo2: 2,2,2']));
+    renderer.draw(timeline, stateAt(timeline, 900));
+
+    expect(circleStrokeStyle(calls)).toBe('rgb(200, 200, 200)');
   });
 });
 

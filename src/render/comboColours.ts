@@ -42,10 +42,10 @@ import type { Rgb, SimBeatmap, SimHitObject } from '../core/sim/types';
  *
  * ## 还没做的
  *
- * - 皮肤那一层(`skinColours` 参数)现在恒为空 —— 皮肤系统是 M4。
  * - lazer 设置里的"Beatmap colours"开关(`SkinProvidingContainer.AllowColourLookup`)
  *   可以整层禁用谱面配色。回放文件里不记这个设置,所以只能当成播放器选项,
  *   将来要做就加个参数。
+ * - 谱面自带皮肤(`.osz` 里的 `skin.ini`)—— 那一层的优先级比用户皮肤更高。
  */
 
 /**
@@ -104,7 +104,10 @@ export function cssOf(colour: Rgb): string {
 /**
  * 建一份 combo 配色表。谱面加载后建一次即可,不要每帧建。
  *
- * @param skinColours 用户皮肤 `skin.ini [Colours]` 的配色。M4 之前恒为空。
+ * @param skinColours 用户皮肤 `skin.ini [Colours]` 的配色。
+ *   由 `skin/skinIni.ts` 解析出的 {@link SkinIni.comboColours} 直接传进来即可 ——
+ *   两边都是"按文件顺序、alpha 已丢弃"的 `Rgb[]`,语义完全对齐。
+ *   没有皮肤时传空数组(或省略),链条会落到 osu 默认四色。
  */
 export function buildComboPalette(
   beatmap: SimBeatmap,
