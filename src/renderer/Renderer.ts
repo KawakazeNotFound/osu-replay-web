@@ -16,6 +16,12 @@ import { stdRuleset } from '../rulesets/std/index';
 import { taikoRuleset } from '../rulesets/taiko/index';
 import { maniaRuleset } from '../rulesets/mania/index';
 import { catchRuleset } from '../rulesets/catch/index';
+import {
+  drawStoryboardOver, drawStoryboardUnder, prepareStoryboard, type PreparedStoryboard,
+} from './StoryboardRenderer';
+import { StoryboardAssets } from '../storyboard/assets';
+import { compileDrawable } from '../storyboard/evaluate';
+import type { Storyboard } from '../storyboard/types';
 
 /**
  * Live-mutable draw settings owned by a {@link Renderer} (exposed as `renderer.options`).
@@ -27,6 +33,11 @@ export interface RenderOptions {
   showFollowpoints: boolean;
   showURBar:        boolean;
   showModIcons:     boolean;
+  /**
+   * Draw the beatmap's storyboard, when one was loaded into {@link Renderer.storyboard}.
+   * Ignored when there is none.
+   */
+  showStoryboard:   boolean;
   /**
    * Arbitrary host-supplied HUD overlay, drawn after the built-in HUD each frame
    * (ctx is in logical 1280×720 coords; timeMs is beatmap time). Not structured-clonable —
@@ -102,12 +113,22 @@ export class Renderer {
   private _rafId: number | null = null;
   private _running = false;
 
+  /**
+   * Storyboard to draw, or null for none. A settable field rather than a constructor
+   * parameter: the export path builds a Renderer from {@link ExportRenderBundle}, and
+   * threading this through that signature would change a contract hosts already depend on.
+   * Consequence: a host that does not set this — the video exporter included — renders
+   * without the storyboard.
+   */
+  storyboard: PreparedStoryboard | null = null;
+
   readonly options: RenderOptions = {
     showJudgement:    true,
     showKeyOverlay:   true,
     showFollowpoints: true,
     showURBar:        true,
     showModIcons:     true,
+    showStoryboard:   true,
     backgroundDim:    0.80,
     audioOffsetMs:    0,
     qualityScale:     'auto',
@@ -340,12 +361,45 @@ export class Renderer {
   }
 
   /** Halt the live loop and cancel any pending animation frame. */
+  /**
+   * Installs a storyboard: compiles its drawables, builds the lazy image store, and maps it
+   * into this renderer's logical space. Pass `null` to remove one.
+   *
+   * Called instead of setting {@link Renderer.storyboard} directly so LOGICAL_W/H stay
+   * private — the storyboard's 640×480 authoring space has to be mapped against them.
+   * Replaces (and disposes) any storyboard already installed.
+   */
+  setStoryboard(
+    storyboard: Storyboard | null,
+    images: Map<string, Uint8Array>,
+    widescreen: boolean,
+  ): void {
+    this.storyboard?.assets.destroy();
+    if (storyboard === null || !storyboard.hasContent) {
+      this.storyboard = null;
+      return;
+    }
+    // Eager compile: flattening every drawable costs one pass over its commands, which
+    // measured in the low thousands of segments even for a 577-sprite storyboard, and doing
+    // it up front keeps the frame loop free of first-appearance hitches.
+    const compiled = storyboard.drawables.map(compileDrawable);
+    this.storyboard = prepareStoryboard(compiled, new StoryboardAssets(images), {
+      logicalWidth: LOGICAL_W,
+      logicalHeight: LOGICAL_H,
+      widescreen,
+    });
+  }
+
   stop(): void {
     this._running = false;
     if (this._rafId !== null) {
       cancelAnimationFrame(this._rafId);
       this._rafId = null;
     }
+    // Storyboard bitmaps are this renderer's own (decoded from the set's shared raw bytes),
+    // so they are released here rather than left to the caller like `assets`.
+    this.storyboard?.assets.destroy();
+    this.storyboard = null;
   }
 
   private _tick = (): void => {
@@ -401,7 +455,18 @@ export class Renderer {
       ctx.fillRect(0, 0, LOGICAL_W, LOGICAL_H);
     }
 
+    const sb = this.storyboard;
+    const drawSb = sb !== null && options.showStoryboard;
+    // Storyboard sprites darken with the background, and warm their textures a beat before
+    // they are due so a sprite's first frame is not skipped for want of a decode.
+    const sbOptions = { dim: Math.max(0, Math.min(1, options.backgroundDim)), prefetchMs: 2000 };
+    // Background, Fail, Pass and Foreground sit under the playfield, as in osu!.
+    if (drawSb) drawStoryboardUnder(ctx, sb, timeMs, sbOptions);
+
     this._ruleset.draw(ctx, this._session, timeMs, options);
+
+    // Overlay is the one layer that sits above gameplay.
+    if (drawSb) drawStoryboardOver(ctx, sb, timeMs, sbOptions);
 
     if (options.showJudgement) {
       drawScore(ctx, this._scoreFrames, timeMs, this.skin);

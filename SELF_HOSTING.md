@@ -15,11 +15,15 @@ Replaced with our own Worker (`worker/index.js`):
 Kept, on purpose — shared infrastructure that osu! itself depends on:
 
 - **`osu.direct` / `api.nerinyan.moe`** — `.osz` beatmap sets (audio, real background,
-  per-map hitsounds). Not replaceable by ppy: `/api/v2/beatmapsets/{id}/download` is
-  `lazer`-scoped (needs the `*` wildcard only first-party clients hold), and even for
-  lazer it just 302s to this same mirror infrastructure. ppy does not host `.osz`.
-  The only official audio is a 10-second Ogg clip at `b.ppy.sh/preview/{id}.mp3`, and
-  `assets.ppy.sh` covers are cropped derivatives, not the beatmap background.
+  per-map hitsounds, and the `.osb` storyboard with its sprite images). Not replaceable by
+  ppy: `/api/v2/beatmapsets/{id}/download` is `lazer`-scoped (needs the `*` wildcard only
+  first-party clients hold), and even for lazer it just 302s to this same mirror
+  infrastructure. ppy does not host `.osz`. The only official audio is a 10-second Ogg clip
+  at `b.ppy.sh/preview/{id}.mp3`, and `assets.ppy.sh` covers are cropped derivatives, not
+  the beatmap background.
+
+  Upstream's Nerinyan URL passed `noStoryboard=1`, since its engine ignored storyboards.
+  `capture:upstream` strips that flag so the `.osb` and its images actually arrive.
 - `osu.direct/api/v2/md5/{hash}` — md5 → beatmapset id, keeping the manual-upload path
   login-free. (`/api/v2/beatmaps/lookup?checksum=` is the authenticated equivalent.)
 - `fonts.googleapis.com`, `flagcdn.com` — one font weight and profile-card flags.
@@ -130,10 +134,21 @@ neither `index.html` nor `DEFAULT_SKINS`, so capture never saw them and every lo
 
 ## Known limitations
 
-- **Storyboards are not implemented.** The engine never reads `.osb`, and `BeatmapParser`
-  consumes only break rows from `[Events]`, discarding every `Sprite`/`Animation`/`Video`
-  event. Static beatmap backgrounds do work, including on maps that have storyboards.
-  Upstream takes the same position — its Nerinyan mirror URL passes `noStoryboard=1`.
+- **Storyboards render, but not every part of them.** Sprites and animations from the set's
+  `.osb` merged with the `.osu`'s own `[Events]` are drawn, with the full command set
+  (`F/M/MX/MY/S/V/R/C/P`), `L` loops, all 35 easings, layer ordering, origin anchoring,
+  flips, additive blending, and 4:3 pillarboxing vs widescreen. Not yet:
+  - **`Sample` events are parsed but not played** — storyboard audio is silent.
+  - **`T` triggers are parsed but never fire.** They react to gameplay events
+    (`HitSound*`, `Passing`, `Failing`) and nothing feeds those in yet, so their bodies are
+    counted and skipped rather than mis-timed. None of the storyboards surveyed used one.
+  - **Video events are ignored**, as they were before. Both mirrors are still asked for
+    `noVideo=1`, so the file is not even downloaded.
+  - **Video export does not include the storyboard.** The exporter builds its own Renderer
+    from `ExportRenderBundle` and never calls `setStoryboard`, so exported clips look like
+    playback did before this existed.
+  - There is **no UI toggle** — upstream's options panel has no storyboard checkbox.
+    `RenderOptions.showStoryboard` defaults to on, so storyboards simply appear.
 - **The pp counter is inert** — see the engine swap above.
 
 ## Rate limits

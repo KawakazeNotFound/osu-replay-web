@@ -181,6 +181,8 @@ test('background and video events, and breaks left to BeatmapParser', () => {
 
 test('inside a .osu only [Events] is read', () => {
   const r = parseStoryboardText(sb(
+    'osu file format v14',
+    '',
     '[General]',
     'AudioFilename: a.mp3',
     '[Events]',
@@ -190,7 +192,9 @@ test('inside a .osu only [Events] is read', () => {
     '256,192,1000,1,0,0:0:0:0:',
   ));
   assert.equal(r.drawables.length, 1);
-  assert.equal(r.warnings.length, 0, 'hit objects must not be parsed as events');
+  // The version header sits before any section, where parsing starts enabled for .osb's
+  // sake — it must not be mistaken for a malformed event.
+  assert.equal(r.warnings.length, 0, `unexpected warnings: ${r.warnings.join('; ')}`);
 });
 
 test('unparseable lines are warned about, not fatal', () => {

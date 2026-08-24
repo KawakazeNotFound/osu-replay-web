@@ -14,6 +14,11 @@ const concurrency = 12;
 const UPSTREAM_PROXY = 'https://proxy.replayviewer.com/osu-proxy';
 const OWN_PROXY = '/osu-proxy';
 
+// Upstream's engine ignores storyboards, so its Nerinyan mirror URL strips them to save
+// bandwidth. Ours draws them, so the .osb and its sprite images have to arrive — drop the
+// flag. (Its other mirror, osu.direct, only passes noVideo=1 and already ships the .osb.)
+const MIRROR_FLAG_REMOVALS = ['&noStoryboard=1', 'noStoryboard=1&', '?noStoryboard=1'];
+
 async function fetchBytes(relativePath) {
   const url = new URL(relativePath, `${base}/`);
   const response = await fetch(url);
@@ -163,15 +168,31 @@ async function removeEncodedLeftovers(dir) {
  */
 async function rewriteCapturedAssets(jsAssets) {
   let total = 0;
+  let storyboardFlagsDropped = 0;
   for (const asset of jsAssets) {
     const assetPath = path.join(site, asset);
     const text = await fs.readFile(assetPath, 'utf8').catch(() => null);
     if (text === null) continue;
-    const occurrences = text.split(UPSTREAM_PROXY).length - 1;
-    if (occurrences === 0) continue;
-    await fs.writeFile(assetPath, text.replaceAll(UPSTREAM_PROXY, OWN_PROXY));
-    console.log(`rewrote ${occurrences} proxy reference(s) in ${asset} -> ${OWN_PROXY}`);
-    total += occurrences;
+    let next = text;
+    const occurrences = next.split(UPSTREAM_PROXY).length - 1;
+    if (occurrences > 0) next = next.split(UPSTREAM_PROXY).join(OWN_PROXY);
+    for (const flag of MIRROR_FLAG_REMOVALS) {
+      const hits = next.split(flag).length - 1;
+      if (hits === 0) continue;
+      // Ordered longest-context-first in MIRROR_FLAG_REMOVALS so removing the whole match
+      // leaves a well-formed query string (`?noVideo=1&noStoryboard=1` → `?noVideo=1`).
+      next = next.split(flag).join('');
+      storyboardFlagsDropped += hits;
+    }
+    if (next === text) continue;
+    await fs.writeFile(assetPath, next);
+    if (occurrences > 0) {
+      console.log(`rewrote ${occurrences} proxy reference(s) in ${asset} -> ${OWN_PROXY}`);
+      total += occurrences;
+    }
+  }
+  if (storyboardFlagsDropped > 0) {
+    console.log(`dropped ${storyboardFlagsDropped} noStoryboard flag(s) so mirrors ship the .osb`);
   }
   if (total === 0) {
     throw new Error(

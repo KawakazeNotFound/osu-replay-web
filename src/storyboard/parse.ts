@@ -293,6 +293,10 @@ export function parseStoryboardText(text: string): Storyboard {
     const depth = indentDepth(raw);
     const body = raw.slice(depth).trim();
     if (body === '' || body.startsWith('//')) continue;
+    // A .osu opens with `osu file format vN`, before any section header. Since parsing starts
+    // enabled (for .osb files that omit [Events]), that line would otherwise be read as a
+    // malformed event and warned about on every map that has an inline storyboard.
+    if (/^osu file format v\d+/i.test(body)) continue;
 
     if (body.startsWith('[') && body.endsWith(']')) {
       // Flush first: a section header ends the open sprite, and in a .osu the last sprite

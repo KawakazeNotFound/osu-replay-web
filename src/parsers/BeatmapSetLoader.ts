@@ -21,6 +21,18 @@ export interface BeatmapSetContents {
   audioBuffer: AudioBuffer | null;
   background: ImageBitmap | null;
   beatmapSounds: Map<string, AudioBuffer>;
+  /** Text of the set's `.osb`, or null when it has none. */
+  osbText: string | null;
+  /**
+   * Raw (undecoded) bytes of every image in the archive, keyed by lowercased full path with
+   * `/` separators — the form storyboard references normalise to.
+   *
+   * Full path, not basename like `beatmapSounds`: storyboards organise assets into folders
+   * (`sb/scene1/x.png`) where basenames collide. Left undecoded because a storyboard can
+   * reference many hundreds of images — one surveyed map has 525 — and decoding them all up
+   * front would cost seconds and hundreds of MB of bitmaps for sprites that may never appear.
+   */
+  storyboardImages: Map<string, Uint8Array>;
 }
 
 function extractAudioFilename(osuText: string): string {
@@ -169,7 +181,21 @@ export async function loadBeatmapSet(
     } catch { /* undecodable */ }
   }));
 
-  return { osuBytes, audioBuffer, background, beatmapSounds };
+  // Storyboard inputs: the .osb text plus every image, kept raw for lazy decoding. Keyed by
+  // full path because storyboard folders (`sb/scene1/...`) make basenames ambiguous.
+  let osbText: string | null = null;
+  const storyboardImages = new Map<string, Uint8Array>();
+  for (const [path, bytes] of Object.entries(files)) {
+    const lower = path.toLowerCase().replace(/\\/g, '/');
+    if (lower.endsWith('.osb')) {
+      // A set has one .osb; if several somehow exist, the first is as good a choice as any.
+      if (osbText === null) osbText = new TextDecoder().decode(bytes);
+      continue;
+    }
+    if (/\.(png|jpe?g)$/.test(lower)) storyboardImages.set(lower, bytes);
+  }
+
+  return { osuBytes, audioBuffer, background, beatmapSounds, osbText, storyboardImages };
 }
 
 /**

@@ -212,6 +212,10 @@ export interface BeatmapData {
   // "osu file format vN" header; default 14. v<6 uses the old (forward-walk) stacking
   // algorithm; pre-v5 maps draw visuals 24 ms later (stable-era quirk).
   formatVersion: number;
+  // [General] WidescreenStoryboard; default false. Widescreen storyboards are authored for
+  // an 854×480 view and span the full width; 4:3 ones stay in a 640×480 box and are
+  // pillarboxed.
+  widescreenStoryboard: boolean;
   timingPoints: TimingPoint[];
   hitObjects: HitObject[];
   // Mania-native (mode 3) hold notes (.osu typeFlags bit 7). Empty for std/taiko maps.

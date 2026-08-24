@@ -6,6 +6,8 @@ import { parseReplay } from './parsers/ReplayParser.js';
 import { parseBeatmap } from './parsers/BeatmapParser.js';
 import { mergeSkinAssets, mergeSounds, loadLazerDefaultSounds } from './parsers/SkinLoader.js';
 import { loadBeatmapSet } from './parsers/BeatmapSetLoader.js';
+import { parseStoryboard } from './storyboard/parse.js';
+import type { Storyboard } from './storyboard/types.js';
 import { applyStacking } from './utils/stacking.js';
 import { computeModDifficulty, type ModDifficulty } from './utils/modDifficulty.js';
 import { slideDurationMs } from './utils/sliderDuration.js';
@@ -30,6 +32,16 @@ export interface BeatmapAssets {
   readonly songBuffer: AudioBuffer | null;
   readonly background: ImageBitmap | null;
   readonly beatmapSounds: Map<string, AudioBuffer>;
+  /**
+   * Parsed storyboard (`.osb` merged with the `.osu`'s own `[Events]`), or null when the set
+   * has none. Cheap to share across sessions: it holds no GPU resources.
+   */
+  readonly storyboard: Storyboard | null;
+  /**
+   * Undecoded image bytes from the archive, keyed as `SbDrawable.lookupPath`. Shared, because
+   * each session decodes its own bitmaps from these on demand and releases them on stop.
+   */
+  readonly storyboardImages: Map<string, Uint8Array>;
 }
 
 export interface ReplaySessionInputs {
@@ -216,13 +228,21 @@ export async function createReplaySession(inputs: ReplaySessionInputs): Promise<
   let assets: BeatmapAssets;
   const fresh = inputs.beatmapSet instanceof ArrayBuffer;
   if (inputs.beatmapSet instanceof ArrayBuffer) {
-    const { osuBytes, audioBuffer: songBuffer, background, beatmapSounds } =
+    const { osuBytes, audioBuffer: songBuffer, background, beatmapSounds, osbText, storyboardImages } =
       await loadBeatmapSet(inputs.beatmapSet, replayData.beatmapHash, audioContext, inputs.fetchOsuOverride);
-    const beatmap = parseBeatmap(new TextDecoder('utf-8').decode(osuBytes));
+    const osuText = new TextDecoder('utf-8').decode(osuBytes);
+    const beatmap = parseBeatmap(osuText);
     // Stash the raw .osu on the beatmap: consumers that re-parse it themselves (e.g.
     // difficulty/pp calculators) read it from here, and it survives asset-reuse rebuilds.
     beatmap.rawOsu = osuBytes;
-    assets = { beatmap, songBuffer, background, beatmapSounds };
+    // Both sources are drawn by osu!: the .osb is shared across the set's difficulties and
+    // the .osu's own [Events] adds difficulty-specific sprites on top.
+    const parsedStoryboard = parseStoryboard(osbText, osuText);
+    assets = {
+      beatmap, songBuffer, background, beatmapSounds,
+      storyboard: parsedStoryboard.hasContent ? parsedStoryboard : null,
+      storyboardImages,
+    };
   } else {
     assets = inputs.beatmapSet;
   }
@@ -298,6 +318,12 @@ export async function createReplaySession(inputs: ReplaySessionInputs): Promise<
     canvas, player, replayData, beatmapData, skinAssets, timeMapper, background, modDiff,
     undefined, inputs.pageZoom ?? 1,
   );
+
+  if (assets.storyboard !== null) {
+    renderer.setStoryboard(
+      assets.storyboard, assets.storyboardImages, beatmapData.widescreenStoryboard,
+    );
+  }
 
   const lazerDefaultSounds = await loadLazerDefaultSounds(audioContext, inputs.lazerDefaultsUrl);
 

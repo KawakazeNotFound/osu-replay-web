@@ -36,6 +36,7 @@ export function parseBeatmap(text: string): BeatmapData {
     sliderTickRate: 1,
     stackLeniency: 0.7,
     formatVersion: 14,
+    widescreenStoryboard: false,
     timingPoints: [],
     hitObjects: [],
     maniaHolds: [],
@@ -81,6 +82,7 @@ export function parseBeatmap(text: string): BeatmapData {
           const m = parseInt(val, 10);
           if (m === 0 || m === 1 || m === 2 || m === 3) data.mode = m;
         }
+        else if (key === 'WidescreenStoryboard') data.widescreenStoryboard = val === '1' || val.toLowerCase() === 'true';
         else if (key === 'StackLeniency') {
           // `parseFloat(val) || 0.7` would clobber an explicit 0 (falsy) — maps
           // that disable stacking via `StackLeniency:0` need that to survive.

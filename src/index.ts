@@ -46,6 +46,23 @@ export { generateTaikoAutoReplay } from './rulesets/taiko/autoGenerator';
 export { generateManiaAutoReplay } from './rulesets/mania/autoGenerator';
 export { generateCatchAutoReplay } from './rulesets/catch/autoGenerator';
 
+// ---- Storyboards ----
+// Parsed from the set's `.osb` merged with the `.osu`'s own `[Events]`. `createReplaySession`
+// wires this up on its own; these exports are for hosts driving a Renderer directly.
+export { parseStoryboard, parseStoryboardText, normalisePath } from './storyboard/parse';
+export type {
+  Storyboard, SbDrawable, SbSprite, SbAnimation, SbSample, SbCommand, SbLayer, SbOrigin,
+} from './storyboard/types';
+export {
+  compileDrawable, evaluateSprite, createSpriteState, applyEasing,
+  type CompiledDrawable, type SbSpriteState,
+} from './storyboard/evaluate';
+export { StoryboardAssets, type StoryboardAssetStats } from './storyboard/assets';
+export {
+  prepareStoryboard, drawStoryboardUnder, drawStoryboardOver,
+  type PreparedStoryboard, type StoryboardView, type StoryboardDrawOptions,
+} from './renderer/StoryboardRenderer';
+
 // ---- Rendering / playback ----
 export {
   createReplaySession, buildSkin,
