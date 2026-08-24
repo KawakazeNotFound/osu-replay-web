@@ -1185,6 +1185,102 @@ string twoTimesFilename = $"{Path.ChangeExtension(componentName, null)}@2x{Path.
 
 ---
 
+### D18. 默认皮肤兜底 —— ✅ `已实现`(2026-08-24)
+
+用户裁定:**非盈利项目可以用 ppy 的美术资源,直接拿默认资源兜底**。
+
+我此前说"不能内置 ppy 的美术资源"是**过度保守**。核 `ppy/osu-resources` 的
+`LICENCE.md`:**CC BY-NC 4.0** —— NonCommercial **允许**非商业使用与再分发,
+义务只有署名。所以这个判断是成立的。
+
+两条由此产生的硬约束(已写进 README 与 `public/skins/default/NOTICE.md`):
+
+1. **署名**
+2. **只要素材在仓库里,本项目就不能商用**;要商用得先移除该目录
+
+第三条(与版权无关):该 README 明确许可**不覆盖** "osu!" / "ppy" 的**商标** ——
+贴图可以用,但不能拿 osu! 的名称或 logo 当本项目的标识。
+
+#### 素材
+
+`scripts/fetch-default-skin.mjs` 从 `Skins/Legacy` 抓 **75 个** std 用得到的组件
+到 `public/skins/default/`(5.2 MB)。上游共 286 个文件 / 19.4 MB,含
+catch / mania / taiko 与全部音效 —— 按明确清单取,**不用通配**,免得上游加了什么就被动跟进。
+
+脚本本身就是出处声明:谁都能重跑一遍确认那个目录里的东西确实来自上游。
+
+#### ⚠️ 默认皮肤的配置是**代码里写死的**
+
+上游 `Skins/Legacy` **根本没有 `skin.ini`**,但 `DefaultLegacySkin` 的构造函数
+把配置直接赋上了:
+
+```csharp
+Configuration.CustomColours["SliderBall"] = new Color4(2, 170, 255, 255);
+Configuration.CustomComboColours = DEFAULT_COMBO_COLOURS;
+Configuration.ConfigDictionary[nameof(SkinConfiguration.LegacySetting.AllowSliderBallTint)] = @"true";
+Configuration.LegacyVersion = 2.7m;
+Configuration.IsLatestVersion = true;
+```
+
+所以默认皮肤是 **2.7 / latest**,而不是 D17 里那个"没写 Version ⇒ 1.0"。
+图省事写成 `parseSkinIni('')` 会让它拿到 1.0,而
+`LegacyMainCirclePiece.cs:183` 用 `legacyVersion > 1.0m` 决定圈内数字是
+"短淡出 60ms 不缩放"还是"跟其他部件一样淡出并放大" —— 直接走错分支。
+
+顺带解释了一件事:我们 `comboColours.ts` 里那个"默认四色"兜底层,在 lazer 里
+其实就是**默认皮肤自己的 combo 色**(`DEFAULT_COMBO_COLOURS` 同时挂在
+`DefaultLegacySkin` 与 `SkinConfiguration.DefaultComboColours` 两处)。
+两条路径结果一致,所以我们的三层模型与 lazer 的皮肤栈是行为等价的。
+
+#### 分层查找:逐组件回退
+
+核 `SkinProvidingContainer.GetTexture` —— `foreach` 逐层查,**第一个命中的层胜出**。
+所以"用户皮肤有 `hitcircle` 但缺 `approachcircle`"时,`approachcircle` 从默认皮肤取。
+这正是"兜底"的全部含义,也正是用户 `test.osk` 的实际情况(它缺
+`approachcircle` 与 `reversearrow`)。
+
+`findProvider` 对应 `ISkinSource.FindProvider`,存在的唯一理由是圈类物件的**命名决策**
+(`LegacyMainCirclePiece.load()`):
+
+> - Beatmap provides `hitcircle`
+> - User skin provides `sliderstartcircle`
+> In such a case, the `hitcircle` should be used for slider start circles rather
+> than the user's skin override.
+>
+> Of note, this consideration should only be used to decide whether to continue
+> looking up the prefixed name or not. The final lookups must still run on the
+> full skin hierarchy as per usual in order to correctly handle fallback cases.
+
+即 **决策看单层,取图看全栈**。还有一条推论写在源码后半段:名字定成
+`sliderendcircle` 之后,overlay 只查 `sliderendcircleoverlay`,**查不到就不画 overlay**,
+不会退回 `hitcircleoverlay`。
+
+顺带核到:默认皮肤**没有** `sliderstartcircle` / `sliderendcircle` ——
+所以 std 的滑条头默认就用 `hitcircle`。
+
+#### 测试抓出一个"只在 Linux 上显形"的 bug
+
+写了一条"清单里文件名必须全小写"(因为 `resolveTexture` 按小写索引),结果它红了:
+上游有 **`lightingN@2x.png`**,大写 N。
+
+后果链条很隐蔽:脚本原样落盘 → 清单里带大写 → `loadDefaultSkin` 把清单转小写
+(为了让查找命中)→ 拼出的 URL 是小写 → **Windows 开发机文件系统大小写不敏感,
+一切正常;部署到大小写敏感的 Linux 就 404**。本地永远测不出来。
+
+修法:落盘时就转小写(请求仍用上游原名)。
+
+#### 变异检验
+
+- 命名决策改成"拿整个栈判断" → 1 条红(正是源码那段注释描述的情形)
+- 默认皮肤 ini 不覆盖 version(退回 1.0) → 1 条红
+
+#### 还没做
+
+贴图**绘制**路径(`drawImage` + combo 色 tint + 逐组件降级成自绘线框)、
+动画帧序列(`sliderb0..9` 这种)、音效、谱面自带皮肤那一层。
+
+---
+
 ## E. 待办 / 杂项
 
 - **仓库名**:目录名 `OSUReplay-Danser` 已不准确(danser 不再是后端)。建议改名(如 `osu-replay-web`)。不阻塞,但越早改越好。

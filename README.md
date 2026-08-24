@@ -23,11 +23,19 @@ npm run dev
 # 开 http://localhost:5173,选一个 .osr 即可
 ```
 
-素材不入库(体积 + 再分发问题)。想让测试跑到真实数据,把 `.osr` / `.osu` 放进
-`fixtures/`;缺素材时相关测试会**跳过**而非失败,所以 clone 下来直接 `npm test` 就能跑。
+谱面与回放**不入库**(版权 + 体积)。想让测试跑到真实数据,把 `.osr` / `.osu` 放进
+`fixtures/`(皮肤放 `fixtures/user/*.osk`);缺素材时相关测试会**跳过**而非失败,
+所以 clone 下来直接 `npm test` 就能跑。
+
+默认皮肤的贴图**在仓库里**(`public/skins/default/`,CC BY-NC,见下方"许可")。
+要重新抓取或更新:
 
 ```bash
-npm test        # 477 通过 + 24 todo
+node scripts/fetch-default-skin.mjs   # 已存在的跳过,加 --force 重下
+```
+
+```bash
+npm test        # 722 通过,0 todo
 npm run build   # tsc --noEmit + vite build
 ```
 
@@ -92,5 +100,18 @@ render              canvas2d 调试渲染器(M1 后期换 WebGL)
 
 ## 许可
 
-未定。注意:osu! 的谱面与音频有版权,本项目不再分发任何素材。
-公式实现参考了 MIT 许可的 [ppy/osu](https://github.com/ppy/osu)。
+本项目自身的许可**未定**。但仓库里有第三方内容,它们各自的条件已经生效:
+
+| 内容 | 来源 | 许可 | 实际约束 |
+|---|---|---|---|
+| `public/skins/default/*.png`(75 个) | [`ppy/osu-resources`](https://github.com/ppy/osu-resources) 的 legacy 默认皮肤 | **CC BY-NC 4.0** | 需**署名**;**本项目不得商用** |
+| 判定 / 难度 / 渲染的公式实现 | [`ppy/osu`](https://github.com/ppy/osu) | MIT | 保留版权声明即可 |
+
+⚠️ **CC BY-NC 的 NC 是硬约束:只要 `public/skins/default/` 还在仓库里,本项目就不能
+用于商业用途。** 若将来要商用,必须先移除该目录并改用自有素材,或取得 ppy 的授权。
+署名与细节见 [`public/skins/default/NOTICE.md`](public/skins/default/NOTICE.md)。
+
+另外 `ppy/osu-resources` 明确:该许可**不覆盖** "osu!" / "ppy" 的**商标** ——
+贴图可以用,但不能拿 osu! 的名称或 logo 当本项目的标识。
+
+**谱面与音频**仍然一概不入库(版权 + 体积),见上面的"快速开始"。
