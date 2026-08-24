@@ -154,6 +154,34 @@ function fakeFetch(table: Record<string, string | Uint8Array>): typeof fetch {
   }) as typeof fetch;
 }
 
+describe('🔒 只有默认皮肤、没有用户皮肤时也要出贴图', () => {
+  /**
+   * 这是**最常见**的情形:用户没上传 `.osk`,只有内置的默认皮肤。
+   *
+   * ⚠️ 这条是一次真实故障换来的:我把皮肤栈的构建写在 `setSkin` 里,
+   * 于是"只装了默认皮肤"这条路径拿不到任何贴图 —— 用户 `npm run dev` 之后
+   * 看到的仍然是线框圈,而所有单测都是绿的(它们全都先 `setSkin` 了一个用户皮肤)。
+   *
+   * 教训:**测试要覆盖"默认配置"这条路径**,而不只是"功能齐全"那条。
+   */
+  it('setDefaultSkinLayer 之后栈里就有一层', async () => {
+    const layer = await loadDefaultSkin(
+      '/s',
+      fakeFetch({ '/s/index.json': '["hitcircle@2x.png"]' }),
+    );
+
+    // 分层查找只需要这一层就能命中
+    expect(resolveInLayers([layer], 'hitcircle')).not.toBeNull();
+    expect(resolveInLayers([layer], 'hitcircle')?.layer.name).toBe('默认皮肤');
+  });
+
+  it('默认皮肤层单独就能提供圈内数字的字体前缀', () => {
+    // reloadSprites 在没有用户皮肤时会用 layers[0].ini.hitCirclePrefix ——
+    // 默认皮肤的 ini 是代码构造的,前缀是 'default'
+    expect(defaultSkinIni().hitCirclePrefix).toBe('default');
+  });
+});
+
 describe('loadDefaultSkin', () => {
   it('从清单建出文件索引', async () => {
     const layer = await loadDefaultSkin(

@@ -33,6 +33,8 @@ import { stateAt } from './core/sim/query';
 import { buildTimeline, emptyTimeline, placeholderBeatmap } from './core/sim/timeline';
 import { PlaybackController } from './player/PlaybackController';
 import { DebugRenderer } from './render/DebugRenderer';
+import { loadDefaultSkin } from './render/skin/defaultSkin';
+import { unpackSkin } from './render/skin/skinFiles';
 
 function el<T extends HTMLElement>(id: string): T {
   const node = document.getElementById(id);
@@ -538,6 +540,11 @@ function wireControls(): void {
     if (file) void loadOsrFile(file);
   });
 
+  el<HTMLInputElement>('skin-input').addEventListener('change', (event) => {
+    const file = (event.target as HTMLInputElement).files?.[0];
+    void loadSkinFile(file ?? null);
+  });
+
   el<HTMLInputElement>('audio-input').addEventListener('change', (event) => {
     const file = (event.target as HTMLInputElement).files?.[0];
     if (file) void loadAudioFile(file);
@@ -689,6 +696,46 @@ function formatTime(ms: number): string {
   return `${sign}${minutes}:${String(seconds).padStart(2, '0')}.${String(millis).padStart(3, '0')}`;
 }
 
+/* ---------------- 皮肤 ---------------- */
+
+/**
+ * 装上默认皮肤(osu legacy「classic」),作为一切贴图的兜底层。
+ *
+ * 素材在 `public/skins/default/`(CC BY-NC,见该目录的 NOTICE.md)。
+ * 没有它的话渲染器全走自绘线框 —— 那是 M0 的调试画法,不是 osu 观感。
+ *
+ * **失败不阻塞播放**:线框路径永远可用,所以这里只在状态栏提示一句。
+ * 常见原因是忘了跑 `node scripts/fetch-default-skin.mjs`。
+ */
+async function bootstrapDefaultSkin(): Promise<void> {
+  try {
+    const layer = await loadDefaultSkin();
+    await renderer.setDefaultSkinLayer(layer);
+  } catch (error) {
+    console.warn('默认皮肤装载失败,渲染将退回线框:', error);
+    setStatus('默认皮肤未装载(渲染退回线框)。试试 node scripts/fetch-default-skin.mjs', 'error');
+  }
+}
+
+/** 载入用户上传的 `.osk`。传 `null` 卸载,回到只有默认皮肤的状态。 */
+async function loadSkinFile(file: File | null): Promise<void> {
+  if (file === null) {
+    await renderer.setSkin(null);
+    setStatus('已卸载自定义皮肤,回到默认皮肤。', 'ok');
+    return;
+  }
+
+  try {
+    const skin = unpackSkin(await file.arrayBuffer());
+    await renderer.setSkin(skin);
+
+    const name = skin.ini.name.trim() === '' ? file.name : skin.ini.name;
+    setStatus(`皮肤已载入:${name}(${skin.files.size} 个文件)`, 'ok');
+  } catch (error) {
+    reportFailure('皮肤', error);
+  }
+}
+
 /* ---------------- 启动 ---------------- */
 
 wireControls();
@@ -696,3 +743,4 @@ syncVolumeUi(); // 把持久化下来的音量反映到 UI
 renderer.resize();
 requestAnimationFrame(tick);
 void autoLoadFromQuery();
+void bootstrapDefaultSkin();

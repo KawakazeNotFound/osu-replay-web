@@ -296,7 +296,7 @@ export class DebugRenderer {
   }
 
   /**
-   * 换皮肤。传 `null` 卸载。
+   * 换用户皮肤。传 `null` 卸载(此时若有默认皮肤层,仍然走默认皮肤的贴图)。
    *
    * ## 为什么是 async
    *
@@ -307,40 +307,57 @@ export class DebugRenderer {
    * 所以这里 await 装完再一次性换上。装载期间维持旧皮肤(或线框),不会闪。
    */
   async setSkin(skin: SkinPackage | null, options: SkinLoadOptions = {}): Promise<void> {
-    const decode = options.decode ?? browserDecoder;
-    const makeCanvas = options.makeCanvas ?? browserCanvasFactory;
+    this.skin = skin;
+    await this.reloadSprites(options);
+  }
 
-    if (skin === null) {
-      this.skin = null;
+  /**
+   * 装上默认皮肤兜底层。
+   *
+   * 逐组件回退的**下**一层:用户皮肤缺哪个组件就从这里取
+   * (实测用户皮肤常缺 `approachcircle` / `reversearrow`)。
+   * 没有用户皮肤时它就是唯一一层 —— 这也是绝大多数用户的默认情形。
+   */
+  async setDefaultSkinLayer(
+    layer: SkinLayer | null,
+    options: SkinLoadOptions = {},
+  ): Promise<void> {
+    this.defaultLayer = layer;
+    await this.reloadSprites(options);
+  }
+
+  /**
+   * 按当前的 (用户皮肤, 默认皮肤) 重建皮肤栈与贴图表。
+   *
+   * ⚠️ 两个入口都必须走这里 —— 我最初把栈的构建写在 `setSkin` 里,于是
+   * "只装了默认皮肤、没有用户皮肤"这个**最常见**的情形拿不到任何贴图,
+   * 表现就是"接了一堆皮肤代码但界面还是线框"。
+   */
+  private async reloadSprites(options: SkinLoadOptions): Promise<void> {
+    const decode = options.decode ?? browserDecoder;
+    this.makeCanvas = options.makeCanvas ?? browserCanvasFactory;
+
+    // 皮肤栈:用户皮肤 → 默认皮肤(逐组件回退,见 skin/skinStack.ts)
+    const layers: SkinLayer[] = [];
+    if (this.skin !== null) layers.push(userSkinLayer(this.skin.ini, this.skin.files));
+    if (this.defaultLayer !== null) layers.push(this.defaultLayer);
+
+    if (layers.length === 0) {
       this.layers = [];
       this.sprites = NO_SPRITES;
-      this.tinted = NO_TINTED;
       this.invalidatePalette();
       return;
     }
 
-    // 皮肤栈:用户皮肤 → 默认皮肤(逐组件回退,见 skin/skinStack.ts)
-    const layers: SkinLayer[] = [userSkinLayer(skin.ini, skin.files)];
-    if (this.defaultLayer !== null) layers.push(this.defaultLayer);
-
-    // 数字字体的前缀是运行期才知道的(来自 skin.ini),所以按前缀展开
-    const names = [
-      ...OSU_STD_COMPONENTS,
-      ...fontComponents(skin.ini.hitCirclePrefix),
-    ];
+    // 数字字体的前缀是运行期才知道的(来自 skin.ini),所以按前缀展开。
+    // 用户皮肤没给就用默认皮肤那一层的(它是 'default')
+    const prefix = this.skin?.ini.hitCirclePrefix ?? layers[0]!.ini.hitCirclePrefix;
+    const names = [...OSU_STD_COMPONENTS, ...fontComponents(prefix)];
 
     const sprites = await loadSkinSprites(layers, names, decode);
 
-    this.skin = skin;
     this.layers = layers;
     this.sprites = sprites;
-    this.makeCanvas = makeCanvas;
-    this.invalidatePalette();
-  }
-
-  /** 装上默认皮肤兜底层。在 {@link setSkin} 之前调用。 */
-  setDefaultSkinLayer(layer: SkinLayer | null): void {
-    this.defaultLayer = layer;
     this.invalidatePalette();
   }
 
