@@ -1138,6 +1138,46 @@ string twoTimesFilename = $"{Path.ChangeExtension(componentName, null)}@2x{Path.
 ⚠️ 一处易漏:配色表的记忆化键是 `beatmap`,但值现在**还依赖皮肤** ——
 所以 `setSkin()` 必须显式作废缓存。变异检验(去掉作废)→ 2 条红。
 
+#### 拿真皮肤验出来的四件事
+
+用户提供了 `fixtures/user/test.osk`(382 条目 / 265 png / 109 wav,不入库)。
+合成 zip 能锁语义,锁不住"真皮肤里到底叫什么文件名",所以补了一组条件执行的测试。
+
+1. **`[CatchTheBeat]` 的 `ComboN` 会进 std 的 combo 色列表。** 这皮肤
+   `[Colours]` 只有一个 `Combo1: 74,134,255`,而 `[CatchTheBeat]` 里有
+   `Combo1: 0,0,0` —— std 于是拿到"蓝、黑"两色交替。
+
+   看着像 bug,但它是 lazer 的行为。证据是 `LegacySkinDecoder.ParseLine` 对
+   catch 段调 `HandleColours(skin, line, true)`(注释:*"osu!catch section only
+   has colour settings so no harm in handling the entire section"*),而
+   `LegacyDecoder.HandleColours` **完全不看段落**:
+
+   ```csharp
+   bool isCombo = pair.Key.StartsWith(@"Combo", StringComparison.Ordinal)
+                  && int.TryParse(pair.Key[5..], out int comboIndex)
+                  && comboIndex >= 1 && comboIndex <= MAX_COMBO_COLOUR_COUNT;
+   if (isCombo) { ...; tHasComboColours.CustomComboColours.Add(colour); }
+   ```
+
+   而 `SkinConfiguration` 实现 `IHasComboColours`。**照搬**,因为偏离源码时
+   我们无法判断是自己错还是上游错。
+
+2. **`@2x` 是逐文件混用的,不是皮肤级开关。** 实测这皮肤 `hitcircle` 只有 SD、
+   `hitcircleoverlay` 有 `@2x`(265 个 png 里只 49 个带 `@2x`)。
+   把"是不是 HD 皮肤"当全局开关必错 —— 这也再次说明 `resolveTexture`
+   逐次返回 `scale` 是必要的。
+
+3. **子目录与根目录真的会同名。** 这皮肤同时有 `default-0.png` 与
+   `fonts/hitcircle/default-0.png`。当初决定"保留子目录路径、不压成 basename"
+   在真素材上验证了 —— 压平这两个会撞车。
+
+4. **真皮肤不保证提供所有组件。** 它**缺** `approachcircle` 与 `reversearrow`。
+   lazer 会回退到自带的默认皮肤资源,而我们没有(也不能内置 ppy 的美术资源)。
+   ⇒ **绘制路径必须能对"贴图缺失"逐组件降级成自绘线框**,不能假定皮肤是全的。
+
+另外该皮肤 `HitCircleOverlap: 150`(默认 -2)、`SliderTrackOverride: 0,0,0`(纯黑)
+—— 都是真实值,不是解析错误。
+
 #### 还没做
 
 贴图**绘制**路径(`drawImage` + combo 色 tint)、动画帧(`hitcircle-0.png` 序列)、

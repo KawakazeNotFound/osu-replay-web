@@ -1,3 +1,6 @@
+import { existsSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
+
 import { zipSync } from 'fflate';
 import { describe, expect, it } from 'vitest';
 
@@ -306,7 +309,156 @@ function makeOsk(entries: Record<string, string>): ArrayBuffer {
   return zipped.buffer.slice(zipped.byteOffset, zipped.byteOffset + zipped.byteLength) as ArrayBuffer;
 }
 
+describe('🔒 [CatchTheBeat] 的 ComboN 会进 std 的 combo 色列表', () => {
+  /**
+   * 这条看起来像 bug,但它是 lazer 的行为 —— 依据见 `skinIni.ts` 的
+   * `sectionHasColours` 注释(`HandleColours` 完全不看段落)。
+   *
+   * 用户提供的真实皮肤正好触发它,所以这里必须锁住:哪天有人"顺手修正"成
+   * 只认 `[Colours]`,我们就会与 lazer 分叉,而分叉时无法判断谁错。
+   */
+  it('catch 段的 Combo1 追加在 [Colours] 之后', () => {
+    const ini = parseSkinIni(
+      [
+        '[Colours]',
+        'Combo1: 74,134,255',
+        '[CatchTheBeat]',
+        'HyperDash: 255,247,0',
+        'Combo1: 0,0,0',
+      ].join('\n'),
+    );
+
+    expect(ini.comboColours).toEqual([
+      { r: 74, g: 134, b: 255 },
+      { r: 0, g: 0, b: 0 },
+    ]);
+    // 非 Combo 的键仍进 raw
+    expect(ini.raw.get('HyperDash')).toBe('255,247,0');
+  });
+
+  it('其他段落的 ComboN 不参与', () => {
+    const ini = parseSkinIni(['[General]', 'Combo1: 1,2,3'].join('\n'));
+    expect(ini.comboColours).toHaveLength(0);
+    expect(ini.raw.get('Combo1')).toBe('1,2,3');
+  });
+});
+
+/* ---------------- 真实皮肤(素材缺失则跳过) ---------------- */
+
+const REAL_SKIN = join(process.cwd(), 'fixtures', 'user', 'test.osk');
+const hasRealSkin = existsSync(REAL_SKIN);
+
+describe.skipIf(!hasRealSkin)('真实 .osk', () => {
+  /**
+   * 合成 zip 能锁语义,锁不住"真皮肤里到底叫什么文件名"。这一组用真皮肤验。
+   *
+   * 素材不入库(`.gitignore` 里 `/fixtures/` 与 `*.osk` 双重挡住),
+   * 所以没有素材时整组跳过而不是失败。
+   */
+  function loadReal() {
+    const bytes = readFileSync(REAL_SKIN);
+    return unpackSkin(
+      bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer,
+    );
+  }
+
+  it('解得开,且路径已归一', () => {
+    const skin = loadReal();
+    expect(skin.files.size).toBeGreaterThan(100);
+
+    for (const path of skin.files.keys()) {
+      expect(path, `${path} 应为小写`).toBe(path.toLowerCase());
+      expect(path, `${path} 不该含反斜杠`).not.toContain('\\');
+    }
+  });
+
+  it('skin.ini 解析出关键字段', () => {
+    const { ini } = loadReal();
+
+    // Version: latest
+    expect(ini.isLatestVersion).toBe(true);
+    expect(ini.version).toBe(LATEST_SKIN_VERSION);
+
+    expect(ini.name.length).toBeGreaterThan(0);
+
+    // 该皮肤显式写了这两个,且 SliderTrackOverride 是纯黑 —— 会让轨道变黑,
+    // 这是真实值,不是解析错误
+    expect(ini.sliderBorder).toEqual({ r: 255, g: 255, b: 255 });
+    expect(ini.sliderTrackOverride).toEqual({ r: 0, g: 0, b: 0 });
+
+    // HitCircleOverlap: 150(默认是 -2)—— 真皮肤常用大 overlap 做"单字宽"观感
+    expect(ini.hitCircleOverlap).toBe(150);
+  });
+
+  it('🔒 combo 色确实是 [Colours] + [CatchTheBeat] 两个', () => {
+    const { ini } = loadReal();
+
+    // 该皮肤 [Colours] 只有一个 Combo1,而 [CatchTheBeat] 里也有一个 ——
+    // 按 lazer 的行为两个都算。这是本条的全部意义
+    expect(ini.comboColours).toEqual([
+      { r: 74, g: 134, b: 255 },
+      { r: 0, g: 0, b: 0 },
+    ]);
+  });
+
+  it('非 combo 的颜色键落进 raw,没被误当成 combo 色', () => {
+    const { ini } = loadReal();
+    expect(ini.raw.has('SongSelectActiveText')).toBe(true);
+    expect(ini.raw.has('MenuGlow')).toBe(true);
+    // 它们的值不该出现在 combo 色里
+    expect(ini.comboColours.length).toBeLessThanOrEqual(8);
+  });
+
+  it('能查到常见组件', () => {
+    const { files } = loadReal();
+
+    for (const name of ['hitcircle', 'hitcircleoverlay', 'cursor', 'sliderfollowcircle']) {
+      expect(resolveTexture(files, name), `${name} 应查得到`).not.toBeNull();
+    }
+  });
+
+  it('🔒 同一皮肤里 @2x 是逐文件混用的 —— 所以 scale 必须逐次查', () => {
+    const { files } = loadReal();
+
+    // 实测:hitcircle 只有 SD,hitcircleoverlay 有 @2x。
+    // 若把"这个皮肤是不是 HD"当成全局开关,这里必然出错
+    expect(resolveTexture(files, 'hitcircle')?.scale).toBe(1);
+    expect(resolveTexture(files, 'hitcircleoverlay')?.scale).toBe(2);
+  });
+
+  it('🔒 子目录不会顶掉根目录的同名文件', () => {
+    const { files } = loadReal();
+
+    // 该皮肤同时有 default-0.png 与 fonts/hitcircle/default-0.png。
+    // HitCirclePrefix 是 "default" ⇒ 必须解析到**根目录**那个。
+    // 若当初把路径压成 basename,两者会撞车
+    expect(files.has('default-0.png')).toBe(true);
+    expect(files.has('fonts/hitcircle/default-0.png')).toBe(true);
+    expect(resolveTexture(files, 'default-0')?.path).toBe('default-0.png');
+    expect(resolveTexture(files, 'fonts/hitcircle/default-0')?.path).toBe(
+      'fonts/hitcircle/default-0.png',
+    );
+  });
+
+  it('hasFont 认得该皮肤的数字字体', () => {
+    const { ini, files } = loadReal();
+    expect(hasFont(files, ini.hitCirclePrefix)).toBe(true);
+    expect(hasFont(files, ini.scorePrefix)).toBe(true);
+  });
+
+  it('⚠️ 记录:该皮肤缺 approachcircle 与 reversearrow', () => {
+    const { files } = loadReal();
+
+    // 真皮肤**不保证**提供所有组件 —— lazer 会回退到它自带的默认皮肤资源,
+    // 而我们没有(也不能内置 ppy 的美术资源)。
+    // 所以绘制路径必须能对"贴图缺失"降级成自绘线框,不能假定皮肤是全的。
+    expect(resolveTexture(files, 'approachcircle')).toBeNull();
+    expect(resolveTexture(files, 'reversearrow')).toBeNull();
+  });
+});
+
 describe('unpackSkin', () => {
+
   it('解出文件并解析根目录的 skin.ini', () => {
     const osk = makeOsk({
       'skin.ini': '[General]\nName: My Skin\n[Colours]\nCombo1: 9,8,7\n',

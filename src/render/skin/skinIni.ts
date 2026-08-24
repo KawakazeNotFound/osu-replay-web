@@ -159,7 +159,7 @@ export function parseSkinIni(text: string): SkinIni {
     const value = line.slice(colon + 1).trim();
     if (key === '') continue;
 
-    if (section === 'colours') {
+    if (sectionHasColours(section)) {
       const colour = parseColour(value);
       if (colour === null) continue;
 
@@ -220,6 +220,48 @@ function isComboKey(key: string): boolean {
 
   const n = Number.parseInt(key.slice(5), 10);
   return Number.isInteger(n) && n >= 1 && n <= MAX_COMBO_COLOUR_COUNT;
+}
+
+/**
+ * 哪些段落的键值会走颜色解析。
+ *
+ * ## ⚠️ `[CatchTheBeat]` 的 `ComboN` **会进 std 的 combo 色列表**
+ *
+ * 这不是我们的选择,是 lazer 的行为,而且很可能是上游的意外后果。证据链:
+ *
+ * `LegacySkinDecoder.ParseLine`:
+ * ```csharp
+ * // osu!catch section only has colour settings
+ * // so no harm in handling the entire section
+ * case Section.CatchTheBeat:
+ *     HandleColours(skin, line, true);
+ *     return;
+ * ```
+ *
+ * 而 `LegacyDecoder.HandleColours`(2026-08-24 核原文)**完全不看段落**:
+ * ```csharp
+ * bool isCombo = pair.Key.StartsWith(@"Combo", StringComparison.Ordinal)
+ *                && int.TryParse(pair.Key[5..], out int comboIndex)
+ *                && comboIndex >= 1 && comboIndex <= MAX_COMBO_COLOUR_COUNT;
+ * if (isCombo) { ...; tHasComboColours.CustomComboColours.Add(colour); }
+ * else        { ...; tHasCustomColours.CustomColours[pair.Key] = colour; }
+ * ```
+ *
+ * 而 `SkinConfiguration` 实现 `IHasComboColours`。所以 catch 段里的 `Combo1`
+ * 会被 `Add` 进同一个列表,osu!std 照样会用到它。
+ *
+ * **实测**:用户提供的真实皮肤(`fixtures/user/test.osk`)正好触发这一条 ——
+ * `[Colours]` 只有一个 `Combo1: 74,134,255`,而 `[CatchTheBeat]` 里有
+ * `Combo1: 0,0,0`,于是 std 得到"蓝、黑"两个 combo 色交替。
+ * 那大概不是皮肤作者的本意,但我们照搬,因为**偏离源码更危险**:
+ * 我们对不上时无法判断是自己错还是上游错。
+ *
+ * 另一处已知偏差:catch 段传的是 `allowAlpha: true`,而 `[Colours]` 是 `false`。
+ * 我们的 `Rgb` 不带 alpha,所以 catch 段里写四分量时会丢掉 alpha。
+ * 这是"边缘情况的边缘情况",不为它单独建模。
+ */
+function sectionHasColours(section: string): boolean {
+  return section === 'colours' || section === 'catchthebeat';
 }
 
 /**
