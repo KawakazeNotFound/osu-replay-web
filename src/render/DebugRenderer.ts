@@ -1,5 +1,6 @@
 import { ReplayKey, normalizeKeys } from '../core/replay/frames';
 import { preemptFromAR, radiusFromCS } from '../core/sim/difficulty';
+import { pathOffsetAt, pathRangeBounds } from '../core/sim/sliderPath';
 import { sliderBallAt } from '../core/sim/sliderTracking';
 import {
   HitResult,
@@ -10,6 +11,7 @@ import {
 } from '../core/sim/types';
 import { lastIndexAtOrBefore } from '../core/util/search';
 import { buildComboPalette, type ComboPalette } from './comboColours';
+import { snakeRangeAt } from './sliderSnaking';
 
 /**
  * osu! 判定区尺寸(固定常量)。
@@ -303,7 +305,7 @@ export class DebugRenderer {
 
       // 滑条体:画在圈底下
       if (object.kind === 'slider' && object.path.count > 0) {
-        this.drawSliderBody(object, radius, state.time, palette);
+        this.drawSliderBody(object, radius, state.time, preempt, palette);
       }
 
       ctx.strokeStyle =
@@ -341,7 +343,12 @@ export class DebugRenderer {
   /**
    * 滑条体 + 滑条球。
    *
-   * ## 做法:把深度缓冲的语义翻译成"不透明同心描边"
+   * ## snaking:只画路径的一段
+   *
+   * 滑条不是一出现就整条画出来的:先从头部**伸展**到尾部(`preempt / 3` 内完成),
+   * 球划过之后再在球后面**收缩**掉。规则与三个易错点见 `sliderSnaking.ts`。
+   *
+   * ## 横截面:把深度缓冲的语义翻译成"不透明同心描边"
    *
    * osu! 真正的滑条体是 WebGL 三角带 + **每条滑条独立的深度缓冲双 pass**。
    * 核 webosu 的 `js/SliderMesh.js`:顶点属性带一个 `dist`(中心线 0、轮廓边 1),
@@ -377,45 +384,40 @@ export class DebugRenderer {
     object: SimHitObject,
     radius: number,
     time: number,
+    preempt: number,
     palette: ComboPalette,
   ): void {
     const { ctx } = this;
-    const { path } = object;
 
-    const track = palette.trackRgbOf(object);
-    const border = palette.borderRgb;
+    const snake = snakeRangeAt(object, time, preempt);
 
-    ctx.save();
-    // 圆头 + 圆角是"管道"观感的一半:少了它折点处会出现尖角,首尾是平口
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
+    // 收缩完毕 —— 整条都不画。滑条球那段仍要走(球在 endTime 之前一直存在)
+    if (snake.visible) {
+      const track = palette.trackRgbOf(object);
+      const border = palette.borderRgb;
 
-    // 路径只建一次,K 遍描边复用 —— 建路径比描边贵,别放进循环
-    ctx.beginPath();
-    ctx.moveTo(
-      this.toScreenX(object.stackedX + path.x[0]!),
-      this.toScreenY(object.stackedY + path.y[0]!),
-    );
-    for (let k = 1; k < path.count; k++) {
-      ctx.lineTo(
-        this.toScreenX(object.stackedX + path.x[k]!),
-        this.toScreenY(object.stackedY + path.y[k]!),
-      );
+      ctx.save();
+      // 圆头 + 圆角是"管道"观感的一半:少了它折点处会出现尖角,首尾是平口
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+
+      // 路径只建一次,K 遍描边复用 —— 建路径比描边贵,别放进循环
+      this.tracePathRange(object, snake.from, snake.to);
+
+      // 屏上越小的滑条不需要那么多级 —— 半径 10px 时 32 级里大半会落在同一个像素上
+      const levels = Math.max(4, Math.min(BODY_LEVELS, Math.round(radius)));
+
+      for (let i = 0; i < levels; i++) {
+        // t: 0 = 最外圈(轮廓边),1 = 中心线。与 shader 里的 dist 反向,便于由宽到窄循环
+        const t = i / (levels - 1);
+        ctx.strokeStyle = bodyLevelColour(t, track, border);
+        // 最后一级宽度不能到 0,否则 round 线帽会退化成看不见
+        ctx.lineWidth = Math.max(1, radius * 2 * (1 - t));
+        ctx.stroke();
+      }
+
+      ctx.restore();
     }
-
-    // 屏上越小的滑条不需要那么多级 —— 半径 10px 时 32 级里大半会落在同一个像素上
-    const levels = Math.max(4, Math.min(BODY_LEVELS, Math.round(radius)));
-
-    for (let i = 0; i < levels; i++) {
-      // t: 0 = 最外圈(轮廓边),1 = 中心线。与 shader 里的 dist 反向,便于由宽到窄循环
-      const t = i / (levels - 1);
-      ctx.strokeStyle = bodyLevelColour(t, track, border);
-      // 最后一级宽度不能到 0,否则 round 线帽会退化成看不见
-      ctx.lineWidth = Math.max(1, radius * 2 * (1 - t));
-      ctx.stroke();
-    }
-
-    ctx.restore();
 
     // 滑条球:只在滑条进行中画
     if (time < object.startTime || time > object.endTime) return;
@@ -426,6 +428,31 @@ export class DebugRenderer {
     ctx.beginPath();
     ctx.arc(this.toScreenX(ball.x), this.toScreenY(ball.y), radius, 0, Math.PI * 2);
     ctx.stroke();
+  }
+
+  /**
+   * 把路径的 `[from, to]` 段建成当前 path。
+   *
+   * 两个端点用 {@link pathOffsetAt} **精确插值**,中间才用原始采样点 ——
+   * 若把端点也吸附到最近的采样点,伸展与收缩会以采样间距(2 osu 单位)为步长跳动,
+   * 肉眼能看出来"一格一格地长"。
+   */
+  private tracePathRange(object: SimHitObject, from: number, to: number): void {
+    const { ctx } = this;
+    const { path } = object;
+
+    const sx = (dx: number) => this.toScreenX(object.stackedX + dx);
+    const sy = (dy: number) => this.toScreenY(object.stackedY + dy);
+
+    const head = pathOffsetAt(path, from);
+    ctx.beginPath();
+    ctx.moveTo(sx(head.x), sy(head.y));
+
+    const { first, last } = pathRangeBounds(path, from, to);
+    for (let k = first; k <= last; k++) ctx.lineTo(sx(path.x[k]!), sy(path.y[k]!));
+
+    const tail = pathOffsetAt(path, to);
+    ctx.lineTo(sx(tail.x), sy(tail.y));
   }
 
   /**

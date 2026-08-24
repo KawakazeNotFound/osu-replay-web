@@ -241,33 +241,37 @@ describe('命中后泡泡消失(用户报的 bug #1)', () => {
 });
 
 describe('滑条体渲染(用户报的 bug #2)', () => {
+  // AR9 → preempt 600,伸展窗口 200ms(preempt/3),起点在 1000-600 = 400
+  const SLIDER_START = 1000;
+  const SLIDER_END = 1400;
+  /** 伸展完成、但滑条还没开始 —— 此刻应该是完整的一条 */
+  const FULLY_SNAKED_IN = 700;
+
   /** 一条水平直线滑条,path 手工塞。 */
-  function sliderTimeline() {
+  function sliderTimeline(spans = 1) {
     const slider = makeHitObject({
       kind: 'slider',
-      startTime: 1000,
-      endTime: 1400,
-      x: 100,
-      y: 100,
+      startTime: SLIDER_START,
+      endTime: SLIDER_START + (SLIDER_END - SLIDER_START) * spans,
+      spans,
     });
 
-    // path 是相对起点的偏移。makeHitObject 默认给空路径,这里手工塞一条直线
+    // path 是相对起点的偏移。makeHitObject 默认给空路径,这里手工塞一条水平直线。
+    // 5 个采样点 ⇒ 进度步长 0.25,足以让 snaking 的子路径里含有内部采样点
     const path = {
-      count: 3,
-      x: Float32Array.from([0, 50, 100]),
-      y: Float32Array.from([0, 0, 0]),
-      cumulative: Float32Array.from([0, 50, 100]),
-      length: 100,
+      count: 5,
+      x: Float32Array.from([0, 25, 50, 75, 100]),
+      y: Float32Array.from([0, 0, 0, 0, 0]),
     };
-    const withPath = { ...slider, path } as typeof slider;
+    const withPath = { ...slider, path, x: 100, y: 100, stackedX: 100, stackedY: 100 };
 
     const beatmap = makeSimBeatmap([withPath], { difficulty: difficulty() });
     return buildTimeline(beatmap, buildReplayFrames([]));
   }
 
   /** 画一帧,返回调用序列。 */
-  function drawSlider(t: number) {
-    const timeline = sliderTimeline();
+  function drawSlider(t: number, spans = 1) {
+    const timeline = sliderTimeline(spans);
     const { canvas, calls } = fakeCanvas(1024, 768);
     const renderer = new DebugRenderer(canvas);
     renderer.resize();
@@ -276,7 +280,7 @@ describe('滑条体渲染(用户报的 bug #2)', () => {
   }
 
   it('滑条会画出折线(lineTo),不只是一个圈', () => {
-    const calls = drawSlider(1200);
+    const calls = drawSlider(FULLY_SNAKED_IN);
 
     // 折线本体
     expect(calls.filter((c) => c.op === 'lineTo').length).toBeGreaterThanOrEqual(2);
@@ -287,14 +291,77 @@ describe('滑条体渲染(用户报的 bug #2)', () => {
   });
 
   it('路径只建一次,K 遍描边复用 —— 建路径比描边贵', () => {
-    const calls = drawSlider(1200);
+    const calls = drawSlider(FULLY_SNAKED_IN);
 
-    // 滑条体那一段:第一个 beginPath 之后有很多次 stroke,但 lineTo 只出现一轮
-    const bodyStrokes = countBodyStrokes(calls);
-    expect(bodyStrokes).toBeGreaterThan(4);
+    // 滑条体那一段:很多次 stroke,但 lineTo 只出现一轮
+    expect(countBodyStrokes(calls)).toBeGreaterThan(4);
 
-    // path.count = 3 ⇒ 恰好 2 个 lineTo。若把 beginPath 放进循环,这里会变成 2×K
-    expect(calls.filter((c) => c.op === 'lineTo')).toHaveLength(2);
+    // 5 个采样点(进度 0/.25/.5/.75/1)、整条可见。两个端点由 pathOffsetAt 精确给出,
+    // 中间只取**严格落在开区间内**的下标 1/2/3 —— 所以是 moveTo + 3 个内部点
+    // + 1 个精确末端 = **4** 个 lineTo。若把 beginPath 放进循环,这里会变成 4×K
+    expect(calls.filter((c) => c.op === 'lineTo')).toHaveLength(4);
+  });
+
+  /* ---------- snaking:用户报的第二轮问题 ---------- */
+
+  it('伸展中:画出的路径比整条短', () => {
+    // 伸展窗口 400~600。t=500 恰好一半
+    const half = pathExtent(drawSlider(500));
+    const full = pathExtent(drawSlider(FULLY_SNAKED_IN));
+
+    expect(half, '伸展到一半时应比整条短').toBeLessThan(full * 0.75);
+    expect(half).toBeGreaterThan(0);
+  });
+
+  it('伸展是从头部往外长 —— 起点不动,终点前进', () => {
+    const early = pathEnds(drawSlider(450));
+    const later = pathEnds(drawSlider(550));
+
+    // 起点钉在滑条头
+    expect(later.startX).toBeCloseTo(early.startX, 6);
+    // 终点往前推
+    expect(later.endX).toBeGreaterThan(early.endX);
+  });
+
+  it('🔒 收缩:球划过之后头部那一段消失 —— 起点跟着球前进', () => {
+    // 单向滑条 1000→1400。取 1100 与 1300 两个时刻
+    const earlier = pathEnds(drawSlider(1100));
+    const later = pathEnds(drawSlider(1300));
+
+    // 终点钉在滑条尾
+    expect(later.endX).toBeCloseTo(earlier.endX, 6);
+    // 起点前进 —— 这就是"划过的路径被抹除"
+    expect(later.startX).toBeGreaterThan(earlier.startX);
+  });
+
+  it('🔒 走到末尾时滑条体不再画出 —— 只剩滑条球那个圈', () => {
+    const atEnd = drawSlider(SLIDER_END);
+
+    // 非空洞守卫:这一刻物件必须还在视觉窗口里,否则测的是上游过滤而不是 snaking
+    const timeline = sliderTimeline();
+    expect(stateAt(timeline, SLIDER_END).activeObjects.length).toBeGreaterThan(0);
+
+    // 滑条体是唯一会产生 lineTo 的东西(圈与球都是 arc)
+    expect(atEnd.filter((c) => c.op === 'lineTo')).toHaveLength(0);
+  });
+
+  it('🔒 repeat 滑条:中间那一段不收缩(整条常驻)', () => {
+    // 两段滑条 1000→1800。第一段进行中(t=1200)应当是整条
+    const midFirstSpan = pathExtent(drawSlider(1200, 2));
+    const reference = pathExtent(drawSlider(FULLY_SNAKED_IN, 2));
+
+    expect(midFirstSpan, '第一段进行中不该收缩').toBeCloseTo(reference, 4);
+  });
+
+  it('🔒 repeat 滑条:最后一段才收缩,且方向朝头部', () => {
+    // 两段滑条,最后一段(奇数 span)→ 区间 [0, spanProgress],终点往回缩
+    const earlier = pathEnds(drawSlider(1500, 2));
+    const later = pathEnds(drawSlider(1700, 2));
+
+    // 起点钉在滑条头(不是尾)
+    expect(later.startX).toBeCloseTo(earlier.startX, 6);
+    // 终点往头部方向退
+    expect(later.endX).toBeLessThan(earlier.endX);
   });
 
   it('🔒 K 遍描边的 lineWidth 严格递减 —— 这是"用绘制顺序模拟深度测试"的前提', () => {
@@ -302,7 +369,7 @@ describe('滑条体渲染(用户报的 bug #2)', () => {
     // canvas2d 没有深度缓冲,改用**由宽到窄**的绘制顺序等价替代:
     // 越窄(越靠中心)的遍越晚画,于是每像素的赢家就是最靠中心的那一级。
     // 顺序一旦反了或乱了,这个等价立刻失效 —— 而肉眼只会觉得"颜色有点怪"。
-    const calls = drawSlider(1200);
+    const calls = drawSlider(FULLY_SNAKED_IN);
     const widths = bodyWidths(calls);
 
     // 非空洞守卫:必须真的有多级,否则下面的单调性断言是空的
@@ -316,7 +383,7 @@ describe('滑条体渲染(用户报的 bug #2)', () => {
   it('🔒 每一级的颜色都是不透明的 —— 否则自相交会叠亮', () => {
     // 这条是整个方案的核心:levels 之间**不能**靠 alpha 混合,
     // 否则滑条自己交叉的地方会累积出更亮的一块(osu 里不会)。
-    const calls = drawSlider(1200);
+    const calls = drawSlider(FULLY_SNAKED_IN);
     const styles = bodyStyles(calls);
 
     expect(styles.length, '滑条体没有描边,断言空洞').toBeGreaterThan(4);
@@ -331,7 +398,7 @@ describe('滑条体渲染(用户报的 bug #2)', () => {
     // webosu 的实测常数:内边缘 alpha 0.8 → 中心 0.3(RGB 恒定)。
     // 我们把 alpha 预合成到判定区背景上,所以"更透"表现为**更接近背景色**。
     // 曾经把它写反(中心近乎不透明的深色),观感差得很明显。
-    const calls = drawSlider(1200);
+    const calls = drawSlider(FULLY_SNAKED_IN);
     const styles = bodyStyles(calls);
     const lum = (css: string) => {
       const m = /^rgb\((\d+), (\d+), (\d+)\)$/.exec(css);
@@ -348,7 +415,26 @@ describe('滑条体渲染(用户报的 bug #2)', () => {
   });
 });
 
-/** 滑条体那一段的 lineWidth 序列 —— 取"最后一个 lineTo 之后、第一个 arc 之前"。 */
+/** 滑条体折线的两端 x(屏幕坐标)。 */
+function pathEnds(calls: readonly Call[]): { startX: number; endX: number } {
+  const move = calls.find((c) => c.op === 'moveTo');
+  const lineTos = calls.filter((c) => c.op === 'lineTo');
+  expect(move, '没有找到滑条体的 moveTo').toBeDefined();
+  expect(lineTos.length, '没有找到滑条体的 lineTo').toBeGreaterThan(0);
+
+  return {
+    startX: move!.args[0] as number,
+    endX: lineTos[lineTos.length - 1]!.args[0] as number,
+  };
+}
+
+/** 滑条体折线的水平跨度 —— 测试用的是水平直线滑条,所以这就是可见长度。 */
+function pathExtent(calls: readonly Call[]): number {
+  const { startX, endX } = pathEnds(calls);
+  return Math.abs(endX - startX);
+}
+
+/** 滑条体那一段的 lineWidth 序列。 */
 function bodyWidths(calls: readonly Call[]): number[] {
   return bodyCalls(calls)
     .filter((c) => c.op === 'set:lineWidth')

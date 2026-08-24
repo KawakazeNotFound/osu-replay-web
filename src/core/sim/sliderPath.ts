@@ -114,11 +114,17 @@ export function pathOffsetAt(
 /**
  * 时间进度 → 路径进度,处理 repeat 的往复。
  *
- * 对应 osu-classes 的 `SliderPath.progressAt(progress, spans)`:
+ * 对应 osu-classes 的 `SliderPath.progressAt(progress, spans)`,也对应 lazer 的
+ * `IHasPathWithRepeats.ProgressAt`(2026-08-24 核):
+ * ```csharp
+ * double p = progress * obj.SpanCount() % 1;
+ * if (obj.SpanAt(progress) % 2 == 1)
+ *     p = 1 - p;
  * ```
- * p = progress * spans % 1
- * 若 floor(progress * spans) 是奇数 → p = 1 - p   // 反向 span
- * ```
+ *
+ * ⚠️ 注意那个 `p = 1 - p`:**反向 span 上返回值是从 1 递减到 0 的**。
+ * 滑条 snaking 依赖这一点(见 `render/sliderSnaking.ts`)—— 自己实现时若漏了
+ * 这次反转,repeat 滑条的收缩方向就会反。
  *
  * 边界:`progress === 1` 时 `p` 会算成 0,但此时应取该 span 的末端。
  * 偶数 spans 结束于起点(0),奇数 spans 结束于末端(1) —— 与
@@ -134,4 +140,35 @@ export function timeProgressToPathProgress(progress: number, spans: number): num
   const within = scaled % 1;
 
   return Math.floor(scaled) % 2 === 1 ? 1 - within : within;
+}
+
+/**
+ * 落在开区间 `(from, to)` 内的采样点下标范围。
+ *
+ * 给滑条 snaking 用:只画路径的一段时,需要"两个精确插值端点 + 中间的原始采样点"。
+ * 端点单独用 {@link pathOffsetAt} 求,这个函数负责中间那一段。
+ *
+ * 返回 `first > last` 表示区间内**没有**采样点(极短的一段),此时调用方只连两个端点。
+ *
+ * ⚠️ 刻意返回下标而不是新建数组:snaking 每帧都在变,每条滑条每帧建一个数组
+ * 会造出大量短命对象。调用方直接按下标读 SoA 即可。
+ */
+export function pathRangeBounds(
+  samples: SliderPathSamples,
+  from: number,
+  to: number,
+): { readonly first: number; readonly last: number } {
+  const n = samples.count;
+  if (n < 2) return { first: 1, last: 0 };
+
+  // 采样点 i 位于进度 i * step —— 采样是按均匀 progress 取的,见 samplePath()
+  const step = 1 / (n - 1);
+
+  // 严格大于 from 的最小下标 / 严格小于 to 的最大下标。
+  // 用 floor(x)+1 与 ceil(x)-1 而不是 ceil/floor,是为了在 x 恰为整数时也保持严格
+  // (端点本身由 pathOffsetAt 精确给出,重复连一次会产生零长度线段)
+  const first = Math.max(0, Math.floor(from / step) + 1);
+  const last = Math.min(n - 1, Math.ceil(to / step) - 1);
+
+  return { first, last };
 }

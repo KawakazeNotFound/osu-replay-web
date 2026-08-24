@@ -1,6 +1,6 @@
 # 技术问题与决策记录
 
-> 最后更新:2026-08-23
+> 最后更新:2026-08-24
 
 本文档记录已确认的事实、待验证的风险、以及做过的技术决策及其理由。
 新增条目请标注日期与状态。状态取值:`待验证` / `已确认` / `已解决` / `已否决` / `搁置`。
@@ -812,7 +812,7 @@ updateTracking(allTicksInRange || IsMouseInFollowArea(false));
 
 ---
 
-## D14. combo 配色的三处坑 —— ✅ `已解决`(2026-08-24)
+### D14. combo 配色的三处坑 —— ✅ `已解决`(2026-08-24)
 
 调研 webosu 时顺手核 combo 配色,结果连挖出**三个我们自己的 bug**,而且都属于
 "换成真颜色之后才会显形"的那一类 —— 之前配色是硬编码的假色,全部隐形。
@@ -902,7 +902,7 @@ osu 默认四色反而是罕见路径。
 
 ---
 
-## D15. webosu 的渲染做法 —— `已调研`(2026-08-24),滑条体做法**已落地**
+### D15. webosu 的渲染做法 —— `已调研`(2026-08-24),滑条体做法**已落地**
 
 用户指向 <https://web-osu.github.io/>,源码 `github.com/BlaNKtext/webosu`(默认分支 `main`)。
 
@@ -991,6 +991,83 @@ playfield 缩放它也用 `0.8`(`js/playback.js:94-107`),算是对我们那次�
 - **插入排序的显示列表**(`js/playback.js:1009-1031`):不每帧重排,维护按浮点 `depth` 有序的
   children 数组、二分插入。`depth = 4.9999 - 0.0001*hitIndex`,靠"早出现的物件 depth 更大"
   实现 osu 的"先出现的画在上面"。
+
+---
+
+### D16. 滑条 snaking(伸展与收缩)—— ✅ `已实现`(2026-08-24)
+
+用户实测报的两个问题:滑条一出现就把整条路径画出来(应从头部伸展到尾部);
+球划过之后路径不消失(应在球后面收缩,而 repeat 滑条要等最后一次重复之后才抹除)。
+
+两条都对应 `osu.Game.Rulesets.Osu/Skinning/SnakingSliderBody.cs:73-100`:
+
+```csharp
+int span = slider.SpanAt(completionProgress);
+double spanProgress = slider.ProgressAt(completionProgress);
+
+double start = 0;
+double end = SnakingIn.Value
+    ? Math.Clamp((Time.Current - (slider.StartTime - slider.TimePreempt)) / (slider.TimePreempt / 3), 0, 1)
+    : 1;
+
+if (span >= slider.SpanCount() - 1)
+{
+    if (Math.Min(span, slider.SpanCount() - 1) % 2 == 1)
+    {
+        start = 0;
+        end = SnakingOut.Value ? spanProgress : 1;
+    }
+    else
+    {
+        start = SnakingOut.Value ? spanProgress : 0;
+    }
+}
+
+setRange(start, end);   // 内部先做 if (p0 > p1) swap,再 Path.GetPathToProgress(curve, p0, p1)
+```
+
+配合 `IHasPathWithRepeats.cs` / `IHasRepeats.cs`:
+
+```csharp
+SpanAt(p)     => (int)(p * SpanCount())
+ProgressAt(p) => { double q = p * SpanCount() % 1; if (SpanAt(p) % 2 == 1) q = 1 - q; return q; }
+SpanCount()   => RepeatCount + 1
+```
+
+### 三个容易写错的点
+
+1. **伸展窗口是 `preempt / 3`,不是 `preempt`。** 起点在 `startTime - preempt`,
+   所以滑条在出现后的**前三分之一**就伸完,剩下三分之二是完整路径在等着被点。
+   用整个 preempt 会慢三倍,肉眼很明显。webosu 用的也是 `approachTime / 3`,两边一致。
+
+2. **收缩只发生在最后一个 span**(`span >= SpanCount - 1`)。这正是用户说的
+   "repeat 滑条在最后一次重复之后才抹除" —— 中间那些来回是整条常驻的,
+   少了这个门,路径会每走完一段就抹一次再重现。
+
+3. **`ProgressAt` 自带奇偶反转**(`q = 1 - q`),所以反向 span 上 `spanProgress`
+   是从 1 降到 0 的。这让"奇 span → `[0, spanProgress]`"自然表现为**向头部收缩**。
+   自己实现 `ProgressAt` 时漏掉这次反转,repeat 滑条的收缩方向就会反 ——
+   而我们的 `timeProgressToPathProgress` 早就实现了它,所以直接复用。
+
+### 默认开关
+
+`OsuRulesetConfigManager`:`SnakingInSliders` 与 `SnakingOutSliders` **默认都是 `true`**。
+所以这是 lazer 的默认观感,不是可选特效。`SnakingOptions` 留了开关只为将来做播放器设置。
+
+### 实现
+
+- `sim/sliderPath.ts` 加 `pathRangeBounds(samples, from, to)`:返回**严格落在开区间内**
+  的采样点下标范围。刻意返回下标而非新建数组 —— snaking 每帧都在变,每条滑条每帧
+  建一个数组会造出大量短命对象。
+- 两个端点用 `pathOffsetAt` **精确插值**。若把端点吸附到最近采样点,伸展与收缩会以
+  采样间距(2 osu 单位)为步长跳动,肉眼能看出"一格一格地长"。
+- `render/sliderSnaking.ts`:`snakeRangeAt()`,逐行对齐上面那段源码(包括 `setRange`
+  的那次交换 —— 极短滑条上收缩已推进而伸展未完时两者会反)。
+
+### 变异检验
+
+- 去掉 `span >= spans - 1` 这个门 → 3 条红(两处 repeat 行为 + 渲染器侧)
+- `preempt / 3` 改成 `preempt` → 5 条红,包括专门写来区分这两种写法的那条
 
 ---
 
