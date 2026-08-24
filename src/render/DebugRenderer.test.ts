@@ -5,7 +5,7 @@ import { createCircleJudgement } from '../core/sim/judgement';
 import { stateAt } from '../core/sim/query';
 import { makeHitObject, makeSimBeatmap } from '../core/sim/testFixtures';
 import { buildTimeline } from '../core/sim/timeline';
-import { DebugRenderer } from './DebugRenderer';
+import { DebugRenderer, HIT_FADE_MS } from './DebugRenderer';
 
 /**
  * # D8:渲染器的回归测试
@@ -415,7 +415,176 @@ describe('滑条体渲染(用户报的 bug #2)', () => {
   });
 });
 
-/** 滑条体折线的两端 x(屏幕坐标)。 */
+describe('滑条头的命中动画(用户报的 bug #3)', () => {
+  /**
+   * 用户实测:「原版滑条头部被点击之后也是有被点击的效果的,而不是愣在原地」。
+   *
+   * 核过 `DrawableSliderHead.cs`:它**没有**覆写 `UpdateHitStateTransforms`,
+   * 所以滑条头与普通圈的命中动画**完全一样**(240ms 淡出 + 扩散到 1.4 倍)。
+   * 我们之前用 `object.kind === 'circle'` 把这个动画挡掉了。
+   *
+   * 难点在于滑条头淡出**不能把滑条体一起带走** —— 体的生死由 snaking 决定。
+   */
+  const START = 1000;
+  const END = 1800;
+
+  /** 一条滑条 + 一次精确命中它头部的按下。 */
+  function hitSliderTimeline() {
+    const path = {
+      count: 5,
+      x: Float32Array.from([0, 25, 50, 75, 100]),
+      y: Float32Array.from([0, 0, 0, 0, 0]),
+    };
+    const slider = {
+      ...makeHitObject({ kind: 'slider', startTime: START, endTime: END, spans: 1 }),
+      path,
+      x: 100,
+      y: 100,
+      stackedX: 100,
+      stackedY: 100,
+    };
+
+    const beatmap = makeSimBeatmap([slider], { difficulty: difficulty() });
+    // 光标停在滑条头上并在 startTime 按下 —— 头会被判成 Great
+    const frames = buildReplayFrames([
+      { startTime: 900, x: 100, y: 100, keys: 0 },
+      { startTime: START, x: 100, y: 100, keys: 1 },
+      { startTime: END, x: 100, y: 100, keys: 1 },
+      { startTime: END + 200, x: 100, y: 100, keys: 0 },
+    ]);
+    return buildTimeline(beatmap, frames, { judge: createCircleJudgement() });
+  }
+
+  function draw(t: number) {
+    const timeline = hitSliderTimeline();
+    const { canvas, calls } = fakeCanvas(1024, 768);
+    const renderer = new DebugRenderer(canvas);
+    renderer.resize();
+    renderer.draw(timeline, stateAt(timeline, t));
+    return calls;
+  }
+
+  it('头确实被判成命中了 —— 非空洞前提', () => {
+    const timeline = hitSliderTimeline();
+    // 滑条的 objectResults.hitTime 保留的是**头**的命中时刻(judgement.ts:573)
+    expect(timeline.objectResults[0]?.hitTime).not.toBeNull();
+    expect(timeline.objectResults[0]?.hitTime).toBeCloseTo(START, 0);
+  });
+
+  it('🔒 头命中后圈会扩散 —— 半径超过静止半径', () => {
+    const head = screenOf(100, 100);
+    const before = headArcRadius(draw(START - 50), head);
+    const during = headArcRadius(draw(START + 120), head);
+
+    expect(during, '命中后头圈应比静止时大').toBeGreaterThan(before);
+    // ScaleTo(1.4) ⇒ 上限是 1.4 倍
+    expect(during).toBeLessThanOrEqual(before * 1.4 + 0.01);
+  });
+
+  it('🔒 头命中后 240ms 内不再画头圈,但滑条体仍在', () => {
+    const after = draw(START + HIT_FADE_MS + 10);
+
+    // 非空洞守卫:物件必须还在视觉窗口里
+    const timeline = hitSliderTimeline();
+    expect(stateAt(timeline, START + HIT_FADE_MS + 10).activeObjects.length).toBeGreaterThan(0);
+
+    const region = firstObjectCalls(after);
+    // 滑条体还在画(有 lineTo)—— 这是本次改动的关键:头淡完不能把体带走
+    expect(region.filter((c) => c.op === 'lineTo').length, '滑条体被头的淡出带走了').toBeGreaterThan(
+      0,
+    );
+
+    // 而头圈不该再画:物件位置上没有 arc(球在别处,approach 早过了)
+    const head = screenOf(100, 100);
+    const atHead = arcs(region).filter(
+      (a) => Math.abs(a.x - head.x) < 0.5 && Math.abs(a.y - head.y) < 0.5,
+    );
+    expect(atHead, '头淡完之后还在画头圈').toHaveLength(0);
+  });
+
+  it('🔒 滑条体的 alpha 不跟着头一起淡出', () => {
+    // 头淡出到一半时(t=0.5 ⇒ head.alpha=0.5),滑条体用的 alpha 应该仍是 1
+    const region = firstObjectCalls(draw(START + 120));
+
+    const lastLineTo = region.reduce((acc, c, i) => (c.op === 'lineTo' ? i : acc), -1);
+    expect(lastLineTo, '没画滑条体').toBeGreaterThan(0);
+
+    // ⚠️ 这里踩过一次:原先在**整帧**里找最后一个 lineTo,但**光标拖尾也用 lineTo**
+    // 且画在物件之后,于是把头的 globalAlpha = 0.5 也划进来了,测出 0.5。
+    // (之前的 snaking 测试没踩到,是因为它们用空帧序列,drawTrail 直接 return 了)
+    const bodyAlpha = region
+      .slice(0, lastLineTo)
+      .filter((c) => c.op === 'set:globalAlpha')
+      .pop();
+
+    expect(bodyAlpha, '滑条体没设 globalAlpha').toBeDefined();
+    expect(bodyAlpha!.args[0] as number, '滑条体的 alpha 被头的淡出污染了').toBeCloseTo(1, 6);
+  });
+
+  it('扩散用 Easing.Out(先快后慢),不是线性', () => {
+    const head = screenOf(100, 100);
+    const base = headArcRadius(draw(START - 50), head);
+    const at25 = headArcRadius(draw(START + HIT_FADE_MS * 0.25), head);
+
+    // OutQuad:t=0.25 → 0.25*(2-0.25) = 0.4375,已经走完 43.75%
+    // 线性只会走 25%。取中间值 0.34 做判据,足以区分两种曲线
+    const grown = (at25 - base) / (base * (1.4 - 1));
+    expect(grown, `t=0.25 时应已扩散 ~44%(OutQuad)而非 25%(线性),实测 ${grown}`).toBeGreaterThan(
+      0.34,
+    );
+  });
+});
+
+/** 测试画布尺寸,以及由它推出的判定区变换 —— 与 DebugRenderer.resize() 同一套公式。 */
+const CANVAS_W = 1024;
+const CANVAS_H = 768;
+const TEST_SCALE = Math.min(CANVAS_W / 512, CANVAS_H / 384) * 0.8;
+
+function screenOf(x: number, y: number): { x: number; y: number } {
+  return {
+    x: (CANVAS_W - 512 * TEST_SCALE) / 2 + x * TEST_SCALE,
+    y: (CANVAS_H - 384 * TEST_SCALE) / 2 + y * TEST_SCALE,
+  };
+}
+
+/**
+ * 切出**第一个物件**的绘制区间。
+ *
+ * `drawHitObjects` 给每个物件包了一层 `save`/`restore`,而 `drawSliderBody` 内部
+ * 还有一层嵌套的 save/restore —— 所以要**按深度配对**,不能取"第一个 restore"。
+ *
+ * 起点锚在判定区边框(`strokeRect`)之后的第一个 `save`:边框之前只有清屏。
+ */
+function firstObjectCalls(calls: readonly Call[]): Call[] {
+  const border = calls.findIndex((c) => c.op === 'strokeRect');
+  const start = calls.findIndex((c, i) => i > border && c.op === 'save');
+  if (start < 0) return [];
+
+  let depth = 0;
+  for (let i = start; i < calls.length; i++) {
+    if (calls[i]!.op === 'save') depth++;
+    else if (calls[i]!.op === 'restore' && --depth === 0) return calls.slice(start, i + 1);
+  }
+  return calls.slice(start);
+}
+
+/**
+ * 头圈的 arc 半径。
+ *
+ * ⚠️ 不能取"第一个 arc" —— **滑条球的 arc 画在头圈之前**,而球半径不随命中缩放,
+ * 于是不同时刻测出来完全一样(第一版就是这么假通过的:两个时刻都是 58.39)。
+ *
+ * 改成按**屏幕位置**筛:头圈画在物件的堆叠位置上。同位置的另一个 arc 是
+ * approach circle,它恒 ≥ 头圈半径,且只在未命中时出现(那时 grow == 1),
+ * 所以取最小值即为头圈。
+ */
+function headArcRadius(calls: readonly Call[], at: { x: number; y: number }): number {
+  const found = arcs(firstObjectCalls(calls)).filter(
+    (a) => Math.abs(a.x - at.x) < 0.5 && Math.abs(a.y - at.y) < 0.5,
+  );
+  expect(found.length, '没找到画在物件位置上的 arc').toBeGreaterThan(0);
+  return Math.min(...found.map((a) => a.r));
+}
 function pathEnds(calls: readonly Call[]): { startX: number; endX: number } {
   const move = calls.find((c) => c.op === 'moveTo');
   const lineTos = calls.filter((c) => c.op === 'lineTo');

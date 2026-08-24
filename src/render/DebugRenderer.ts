@@ -3,7 +3,6 @@ import { preemptFromAR, radiusFromCS } from '../core/sim/difficulty';
 import { pathOffsetAt, pathRangeBounds } from '../core/sim/sliderPath';
 import { sliderBallAt } from '../core/sim/sliderTracking';
 import {
-  HitResult,
   type PlaybackState,
   type ReplayTimeline,
   type SimBeatmap,
@@ -62,7 +61,77 @@ const TRAIL_MS = 400;
  * 之前的实现无条件画出 `activeObjects` 里的每一个物件、完全不看判定结果,
  * 于是圈被点掉之后还会继续画到视觉窗口末尾 —— 表现就是"泡泡点完了不消失"。
  */
-const HIT_FADE_MS = 240;
+export const HIT_FADE_MS = 240;
+
+/**
+ * 命中动画的最终缩放。
+ *
+ * 核 `osu.Game.Rulesets.Osu/Skinning/Legacy/LegacyMainCirclePiece.cs:166-177`:
+ *
+ * ```csharp
+ * const double legacy_fade_duration = 240;
+ * CircleSprite.FadeOut(legacy_fade_duration);                        // 无 easing ⇒ 线性
+ * CircleSprite.ScaleTo(1.4f, legacy_fade_duration, Easing.Out);      // ⚠️ 不是线性
+ * ```
+ *
+ * 动画起点是 `BeginAbsoluteSequence(drawableObject.HitStateUpdateTime)`,
+ * 即**实际命中时刻** —— 所以我们用 `state.time - hitTime` 算进度是对的。
+ */
+const HIT_SCALE = 1.4;
+
+/**
+ * `Easing.Out` —— 核 `ppy/osu-framework` 的 `DefaultEasingFunction.cs:50-52`:
+ *
+ * ```csharp
+ * case Easing.Out:
+ * case Easing.OutQuad:
+ *     return time * (2 - time);
+ * ```
+ *
+ * 即 `2t - t²`,先快后慢。之前这里是线性的 `0.4 * progress`,与 osu 差别肉眼可见。
+ */
+function outQuad(t: number): number {
+  return t * (2 - t);
+}
+
+/** 命中动画不生效时的取值。 */
+const NO_HIT_ANIMATION = { alpha: 1, grow: 1 } as const;
+
+/**
+ * 头部(普通圈 / 滑条头)的命中动画。返回 `null` = 已淡完,不该再画。
+ *
+ * ## 滑条头与普通圈完全一样
+ *
+ * 核过 `DrawableSliderHead.cs`(2026-08-24):它**没有**覆写
+ * `UpdateHitStateTransforms`,所以直接继承 `DrawableHitCircle` 的动画。
+ * 用户实测报的"滑条头点了之后愣在原地"就是因为我们之前把这个动画
+ * 用 `object.kind === 'circle'` 挡掉了。
+ *
+ * ## 转盘刻意不做
+ *
+ * 转盘的命中表现由 `DrawableSpinner` 自己实现,是另一套(不是扩散淡出)。
+ * **没核过,所以不猜** —— 转盘维持原样(不做命中动画)。
+ */
+function headAnimationAt(
+  object: SimHitObject,
+  hitTime: number | null,
+  time: number,
+): { readonly alpha: number; readonly grow: number } | null {
+  if (object.kind === 'spinner') return NO_HIT_ANIMATION;
+  // hitTime === null:还没判定,或者头 miss 了。miss 的淡出是另一条路径
+  // (`ArmedState.Miss`),源码里不在 LegacyMainCirclePiece 处理,我们暂时也不做
+  if (hitTime === null) return NO_HIT_ANIMATION;
+
+  const since = time - hitTime;
+  if (since >= HIT_FADE_MS) return null;
+  if (since < 0) return NO_HIT_ANIMATION;
+
+  const t = since / HIT_FADE_MS;
+  return {
+    alpha: 1 - t, // FadeOut(240):线性
+    grow: 1 + (HIT_SCALE - 1) * outQuad(t), // ScaleTo(1.4, 240, Easing.Out)
+  };
+}
 
 /**
  * 滑条体横截面烘成多少级不透明色。
@@ -246,15 +315,20 @@ export class DebugRenderer {
   }
 
   /**
-   * 物件绘制:滑条体 + 圈 + approach circle + 命中淡出。
+   * 物件绘制:滑条体 + 圈 + approach circle + 命中动画。
    *
-   * ## 命中后的消失
+   * ## 命中动画只作用于"头",不作用于滑条体
    *
-   * 关键是**查 `active.result`**,而不是只按时间窗画。圈一旦被判定,就从
-   * `hitTime` 起走 {@link HIT_FADE_MS} 的淡出(同时轻微扩散),淡完就不画。
-   * miss 的物件用红色标出,不淡出扩散。
+   * 这是用户实测报出来的:滑条头被点中后应该像普通圈一样扩散淡出,而不是
+   * "愣在原地"。核过源码:`DrawableSliderHead` **没有**覆写
+   * `UpdateHitStateTransforms`,所以它继承 `DrawableHitCircle` 的动画 ——
+   * 滑条头与普通圈的命中表现**完全一样**。
    *
-   * ⚠️ 这里仍然**不持有跨帧状态** —— 淡出进度是从 `state.time - hitTime` 算出来的,
+   * 但滑条的**体与球不受影响**:体的生死由 snaking 决定(见 `sliderSnaking.ts`),
+   * 球一直画到 `endTime`。所以两者不能共用一个 alpha —— 之前就是共用的,
+   * 于是要么头不淡出、要么淡出时把整条体一起带走。
+   *
+   * ⚠️ 这里仍然**不持有跨帧状态** —— 动画进度是从 `state.time - hitTime` 算出来的,
    * 所以倒退与任意 seek 都正确。若改成"命中时启动一个动画计时器"就会破坏这一点。
    */
   private drawHitObjects(timeline: ReplayTimeline, state: PlaybackState): void {
@@ -278,62 +352,71 @@ export class DebugRenderer {
 
       // 淡入:物件在 startTime - preempt 出现,over TimeFadeIn 淡到不透明。
       // 少了这个物件会"啪"地凭空出现
-      let alpha = untilHit > 0 ? clamp01((preempt - untilHit) / fadeIn) : 1;
-      let grow = 1;
+      const fadeInAlpha = untilHit > 0 ? clamp01((preempt - untilHit) / fadeIn) : 1;
 
-      // 命中淡出。滑条要等整条走完(endTime)才消失,所以只对非滑条生效
+      // 滑条上,这是**头**的命中时刻 —— judgement.ts 把 result 覆写成聚合结果时
+      // 刻意保留了 head.hitTime。所以"头有没有被点中"就等价于 hitTime !== null
       const hitTime = result?.hitTime ?? null;
-      if (hitTime !== null && object.kind === 'circle') {
-        const since = state.time - hitTime;
-        if (since >= HIT_FADE_MS) continue; // 淡完了,不画
-        if (since >= 0) {
-          const progress = since / HIT_FADE_MS;
-          alpha = 1 - progress;
-          grow = 1 + 0.4 * progress; // 命中瞬间轻微扩散
-        }
-      }
+      const head = headAnimationAt(object, hitTime, state.time);
+
+      // 头淡完之后:circle / spinner 整条不再画;**滑条的体与球还要继续**
+      if (head === null && object.kind !== 'slider') continue;
 
       // 用**堆叠后**的坐标 —— osu 会把位置相近、时间相邻的物件依次错开,
       // 而 lazer 的命中检测也是基于 StackedPosition。见 sim/stacking.ts
       const cx = this.toScreenX(object.stackedX);
       const cy = this.toScreenY(object.stackedY);
 
-      const missed = result !== null && result.result === HitResult.Miss;
+      // ⚠️ 判"头"有没有 miss,不能看 result.result —— 那是**聚合**结果。
+      // 滑条可以"头命中但整体判 miss"(比如刻度全丢),那时头不该画成红的。
+      // hitTime 才是头自己的信号(judgement.ts:325 `result === Miss ? null : time`)
+      const headMissed = result !== null && hitTime === null;
 
       ctx.save();
-      ctx.globalAlpha = alpha;
 
-      // 滑条体:画在圈底下
+      // 滑条体:画在圈底下,用**淡入** alpha —— 不跟着头一起淡出
       if (object.kind === 'slider' && object.path.count > 0) {
+        ctx.globalAlpha = fadeInAlpha;
         this.drawSliderBody(object, radius, state.time, preempt, palette);
       }
 
-      ctx.strokeStyle =
-        missed ? '#ff4d6d'
-        : object.kind === 'spinner' ? '#7f7fff'
-        : palette.colourOf(object);
-      ctx.lineWidth = Math.max(1.5, 2 * this.scale);
-      ctx.beginPath();
-      ctx.arc(cx, cy, radius * grow, 0, Math.PI * 2);
-      ctx.stroke();
+      if (head !== null) {
+        ctx.globalAlpha = fadeInAlpha * head.alpha;
 
-      // combo 内序号。皮肤系统(M4)会换成 default-N 贴图
-      if (object.kind !== 'spinner' && hitTime === null) {
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
-        ctx.font = `${Math.round(radius * 0.9)}px system-ui, sans-serif`;
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText(String(object.indexInCombo), cx, cy);
-      }
-
-      // approach circle:从 4 倍半径按真实 preempt 收缩到 1 倍
-      if (untilHit > 0) {
-        const approachRadius = radius * (1 + 3 * Math.min(1, untilHit / preempt));
-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.45)';
-        ctx.lineWidth = Math.max(1, 1.5 * this.scale);
+        ctx.strokeStyle =
+          headMissed ? '#ff4d6d'
+          : object.kind === 'spinner' ? '#7f7fff'
+          : palette.colourOf(object);
+        ctx.lineWidth = Math.max(1.5, 2 * this.scale);
         ctx.beginPath();
-        ctx.arc(cx, cy, approachRadius, 0, Math.PI * 2);
+        ctx.arc(cx, cy, radius * head.grow, 0, Math.PI * 2);
         ctx.stroke();
+
+        // combo 内序号。皮肤系统(M4)会换成 default-N 贴图。
+        //
+        // 条件是"还没被判定"(result === null)而不是 hitTime === null ——
+        // 后者在 **miss** 时也成立,会让漏掉的圈一直顶着数字不放。
+        //
+        // 近似:真实行为是新版 legacy 皮肤把数字单独淡出 240/4 = 60ms 且不缩放
+        // (`LegacyMainCirclePiece.cs:191`),我们直接让它消失。60ms 内几乎看不出来。
+        if (object.kind !== 'spinner' && result === null) {
+          ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+          ctx.font = `${Math.round(radius * 0.9)}px system-ui, sans-serif`;
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(String(object.indexInCombo), cx, cy);
+        }
+
+        // approach circle:从 4 倍半径按真实 preempt 收缩到 1 倍。
+        // 在 head !== null 分支内 —— approach circle 是头的一部分,头淡完就没了
+        if (untilHit > 0) {
+          const approachRadius = radius * (1 + 3 * Math.min(1, untilHit / preempt));
+          ctx.strokeStyle = 'rgba(255, 255, 255, 0.45)';
+          ctx.lineWidth = Math.max(1, 1.5 * this.scale);
+          ctx.beginPath();
+          ctx.arc(cx, cy, approachRadius, 0, Math.PI * 2);
+          ctx.stroke();
+        }
       }
 
       ctx.restore();
