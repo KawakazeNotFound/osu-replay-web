@@ -1,4 +1,4 @@
-import { ReplayKey, normalizeKeys } from '../core/replay/frames';
+import { ReplayKey, cursorAt, normalizeKeys } from '../core/replay/frames';
 import { preemptFromAR, radiusFromCS } from '../core/sim/difficulty';
 import { pathOffsetAt, pathRangeBounds } from '../core/sim/sliderPath';
 import { sliderBallAt } from '../core/sim/sliderTracking';
@@ -10,12 +10,21 @@ import {
 } from '../core/sim/types';
 import { lastIndexAtOrBefore } from '../core/util/search';
 import { approachAlphaAt, approachScaleAt } from './approachCircle';
+import {
+  STABLE_MAGIC_SCALE_FACTOR,
+  TRAIL_FADE_MS,
+  cursorExpandScaleAt,
+  cursorRotationAt,
+  disjointTrailTimes,
+  trailAlphaAt,
+  type TrailMode,
+} from './cursor';
 import { buildComboPalette, type ComboPalette } from './comboColours';
 import { userSkinLayer } from './skin/defaultSkin';
 import { layoutHitCircleNumber, drawTextLayout } from './skin/numberLayout';
 import { CIRCLE_MAX_DISPLAY, drawSprite, spriteQuad } from './skin/spriteGeometry';
-import { circleComponentName, type SkinLayer } from './skin/skinStack';
-import type { SkinPackage } from './skin/skinFiles';
+import { circleComponentName, findProvider, type SkinLayer } from './skin/skinStack';
+import { resolveTexture, type SkinPackage } from './skin/skinFiles';
 import {
   NO_SPRITES,
   OSU_STD_COMPONENTS,
@@ -23,6 +32,7 @@ import {
   fontComponents,
   loadSkinSprites,
   type ImageDecoder,
+  type SkinSprite,
   type SkinSprites,
 } from './skin/skinTextures';
 import {
@@ -410,7 +420,7 @@ export class DebugRenderer {
     this.drawApproachCircles(timeline, state);
 
     this.drawTrail(timeline, state);
-    this.drawCursor(state);
+    this.drawCursor(timeline, state);
   }
 
   private toScreenX(x: number): number {
@@ -850,11 +860,108 @@ export class DebugRenderer {
   /**
    * 光标拖尾。
    *
-   * 注意实现方式:从 timeline.frames 里按 t 反查区间,**而不是**把每帧的光标位置
-   * 追加进一个数组。后者在倒退时会画出错误的轨迹 —— 这正是「渲染层不得持有
-   * 跨帧状态」这条约束想防的问题。
+   * ## 两种模式,判据是 `FindProvider`
+   *
+   * 核 `LegacyCursorTrail.cs:44-45`:
+   * ```csharp
+   * // Stable always chooses cursor trail disjoint behaviour based on the cursor
+   * // texture lookup source, so we need to fetch where that occurred.
+   * var cursorProvider = skinSource.FindProvider(s => s.GetTexture("cursor") != null);
+   * DisjointTrail = cursorProvider?.GetTexture("cursormiddle") == null;
+   * ```
+   * 判据是「**提供 `cursor` 的那一层**有没有 `cursormiddle`」,不是整个栈 ——
+   * 与圈类命名决策同一个模式。
+   *
+   * - 有 `cursormiddle` → **connected**:按弧长补点、500ms 淡出、**Additive 混合**
+   * - 没有 → **disjoint**:16.667ms 时间网格、150ms 淡出、普通混合
+   *
+   * ## 没有 cursortrail 贴图时退回原来的折线
+   *
+   * 那个折线不是 osu 行为,只是"能看出光标轨迹"的调试画法。
    */
   private drawTrail(timeline: ReplayTimeline, state: PlaybackState): void {
+    const sprite = this.sprites.get('cursortrail');
+    if (sprite === null) {
+      this.drawFallbackTrail(timeline, state);
+      return;
+    }
+
+    const { ctx } = this;
+    const mode = this.trailMode();
+    const fade = TRAIL_FADE_MS[mode];
+
+    // 光标类贴图的尺寸:display 尺寸再除 1.6(见 cursor.ts 里那段说明)
+    const size = (sprite.width / sprite.scale / STABLE_MAGIC_SCALE_FACTOR) * this.scale;
+
+    ctx.save();
+    // connected 模式是加法混合 —— 交叠处更亮,这是 osu 的观感
+    if (mode === 'connected') ctx.globalCompositeOperation = 'lighter';
+
+    for (const t of this.trailPointTimes(timeline, state, mode, fade)) {
+      const at = cursorAt(timeline.frames, t);
+      ctx.globalAlpha = trailAlphaAt(state.time - t, fade);
+      drawSprite(
+        ctx,
+        sprite,
+        {
+          sx: 0, sy: 0, sw: sprite.width, sh: sprite.height,
+          dx: this.toScreenX(at.x) - size / 2,
+          dy: this.toScreenY(at.y) - size / 2,
+          dw: size, dh: size,
+        },
+      );
+    }
+
+    ctx.restore();
+  }
+
+  /**
+   * 拖尾点的时刻表。
+   *
+   * disjoint 是纯网格,**完全的纯函数**(见 `cursor.ts`)。
+   * connected 需要按弧长采样 —— 这里做的是**近似**:直接用回放帧的时刻。
+   *
+   * ⚠️ 这个近似要写清楚:lazer 的 connected 模式沿光标轨迹每
+   * `cursortrail.DisplayWidth / 2.5` 个 osu 单位放一个点,所以**移动快时点更密**;
+   * 我们按帧放点,于是密度取决于回放的采样率。两者在慢速移动时接近,
+   * 急动时我们的点会偏稀。弧长积分是正解,留待需要时再做。
+   */
+  private trailPointTimes(
+    timeline: ReplayTimeline,
+    state: PlaybackState,
+    mode: TrailMode,
+    fade: number,
+  ): number[] {
+    if (mode === 'disjoint') return disjointTrailTimes(state.time, fade);
+
+    const { frames } = timeline;
+    const end = lastIndexAtOrBefore(frames.time, frames.count, state.time);
+    if (end < 0) return [];
+
+    const start = Math.max(0, lastIndexAtOrBefore(frames.time, frames.count, state.time - fade));
+
+    const out: number[] = [];
+    for (let i = end; i >= start; i--) out.push(frames.time[i]!);
+    return out;
+  }
+
+  /**
+   * `DisjointTrail` 的判定 —— 见 {@link drawTrail} 的注释。
+   *
+   * 提供 `cursor` 的那一层里没有 `cursormiddle` ⇒ disjoint。
+   */
+  private trailMode(): TrailMode {
+    const provider = findProvider(
+      this.layers,
+      (layer) => resolveTexture(layer.files, 'cursor') !== null,
+    );
+    if (provider === null) return 'disjoint';
+
+    return resolveTexture(provider.files, 'cursormiddle') === null ? 'disjoint' : 'connected';
+  }
+
+  /** 没有 `cursortrail` 贴图时的调试画法(非 osu 行为)。 */
+  private drawFallbackTrail(timeline: ReplayTimeline, state: PlaybackState): void {
     const { frames } = timeline;
     if (frames.count === 0) return;
 
@@ -883,7 +990,97 @@ export class DebugRenderer {
     ctx.restore();
   }
 
-  private drawCursor(state: PlaybackState): void {
+  /**
+   * 光标。
+   *
+   * ## 只有 `cursor` 会转会缩
+   *
+   * `LegacyCursor.cs:37-51` 里 `ExpandTarget` 是 `cursor` 那一张,`cursormiddle`
+   * 是它的兄弟节点。而 `Expand()` / `Spin()` 都只作用于 `ExpandTarget` ——
+   * 所以 `cursormiddle` 永远不转不缩。
+   *
+   * ## 三个开关都默认 **true**
+   *
+   * `CursorRotate` / `CursorExpand` / `CursorCentre`(`LegacyCursor.cs:34-35`、
+   * `OsuCursor.cs:118`)。用户那张皮肤把前两个设成 0,所以在它上面既不转也不缩 ——
+   * 但别的皮肤会,所以都实现了。
+   */
+  private drawCursor(timeline: ReplayTimeline, state: PlaybackState): void {
+    const base = this.sprites.get('cursor');
+    if (base === null) {
+      this.drawFallbackCursor(state);
+      return;
+    }
+
+    const { ctx } = this;
+    const cx = this.toScreenX(state.cursor.x);
+    const cy = this.toScreenY(state.cursor.y);
+
+    const expand = cursorExpandScaleAt(timeline.frames, state.time, this.iniFlag('CursorExpand'));
+    const spin = this.iniFlag('CursorRotate');
+
+    ctx.save();
+    ctx.translate(cx, cy);
+
+    // 只有 cursor 这一张受旋转与放大影响。
+    // ⚠️ `CursorRotate` 关掉时**完全不发 rotate**,而不是 rotate(0) ——
+    // 后者会让"关掉旋转"的皮肤仍然产生一次多余的变换调用,
+    // 使调用序列与真正无旋转的情形不一致(测试也就分不出两者)
+    ctx.save();
+    if (spin) ctx.rotate((cursorRotationAt(state.time) * Math.PI) / 180);
+    this.drawCursorSprite(base, expand);
+    ctx.restore();
+
+    const middle = this.sprites.get('cursormiddle');
+    if (middle !== null) this.drawCursorSprite(middle, 1);
+
+    ctx.restore();
+  }
+
+  /**
+   * 画一张光标类贴图,**以当前变换原点为中心**。
+   *
+   * 尺寸 = `display 尺寸 / 1.6 × 缩放`。那个 1.6 是 `STABLE_MAGIC_SCALE_FACTOR` ——
+   * 光标贴图是按 1024×768 参考屏幕 1:1 设计的,而判定区在那个屏幕下被放大了 1.6 倍。
+   * 见 `cursor.ts` 头部。
+   *
+   * ⚠️ `CursorCentre` 为 false 时 osu 把贴图**左上角**对准光标位置(`Anchor.TopLeft`)。
+   * 默认是 true(居中)。
+   */
+  private drawCursorSprite(sprite: SkinSprite, scale: number): void {
+    const w = (sprite.width / sprite.scale / STABLE_MAGIC_SCALE_FACTOR) * this.scale * scale;
+    const h = (sprite.height / sprite.scale / STABLE_MAGIC_SCALE_FACTOR) * this.scale * scale;
+
+    const centred = this.iniFlag('CursorCentre');
+    const dx = centred ? -w / 2 : 0;
+    const dy = centred ? -h / 2 : 0;
+
+    drawSprite(this.ctx, sprite, {
+      sx: 0, sy: 0, sw: sprite.width, sh: sprite.height,
+      dx, dy, dw: w, dh: h,
+    });
+  }
+
+  /**
+   * 读一个布尔型 skin.ini 开关,**默认 true**。
+   *
+   * 值的解析照 `LegacySkin.cs:356-365`:`1`/`0`/`true`/`false` 都吃,
+   * 非零整数为真(源码注释提到有皮肤写 `2`)。
+   */
+  private iniFlag(key: string): boolean {
+    const value = this.skin?.ini.raw.get(key);
+    if (value === undefined) return true;
+
+    const lower = value.trim().toLowerCase();
+    if (lower === 'true') return true;
+    if (lower === 'false') return false;
+
+    const n = Number.parseInt(lower, 10);
+    return Number.isFinite(n) ? n !== 0 : true;
+  }
+
+  /** 没有 `cursor` 贴图时的调试画法(非 osu 行为)。 */
+  private drawFallbackCursor(state: PlaybackState): void {
     const { ctx } = this;
     const { cursor } = state;
 

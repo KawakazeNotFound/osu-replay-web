@@ -10,6 +10,7 @@ import { radiusFromCS } from '../core/sim/difficulty';
 import { DebugRenderer, HIT_FADE_MS } from './DebugRenderer';
 import { unpackSkin } from './skin/skinFiles';
 import type { ImageDecoder } from './skin/skinTextures';
+import { STABLE_MAGIC_SCALE_FACTOR } from './cursor';
 import type { CanvasFactory } from './skin/tint';
 
 /**
@@ -64,6 +65,8 @@ function recordingContext(): { calls: Call[]; ctx: CanvasRenderingContext2D } {
     strokeRect: (...a: unknown[]) => push('strokeRect', ...a),
     fillText: (...a: unknown[]) => push('fillText', ...a),
     drawImage: (...a: unknown[]) => push('drawImage', ...a),
+    translate: (...a: unknown[]) => push('translate', ...a),
+    rotate: (...a: unknown[]) => push('rotate', ...a),
     measureText: () => ({ width: 10 }),
   };
 
@@ -875,6 +878,202 @@ describe('皮肤贴图绘制路径', () => {
     expect(calls.filter((c) => c.op === 'drawImage'), '装载中就换皮肤了').toHaveLength(0);
 
     await pending;
+  });
+});
+
+describe('光标与拖尾的贴图路径', () => {
+  /**
+   * ## 为什么这一组值钱
+   *
+   * 光标那个 **1.6 倍分母**是"要么全对要么全错"的一条:漏了光标就大 1.6 倍,
+   * 而"光标偏大"极容易被当成皮肤风格,不会有人怀疑是换算错了。
+   * 所以这里断言确切像素尺寸。
+   */
+  const decode: ImageDecoder = async () => ({ width: 128, height: 128 }) as never;
+  const makeCanvas: CanvasFactory = (width, height) => ({
+    canvas: { width, height } as unknown as CanvasImageSource & {
+      width: number;
+      height: number;
+    },
+    ctx: new Proxy({} as Record<string, unknown>, {
+      get: (t, k) => t[k as string] ?? (() => undefined),
+      set: (t, k, v) => {
+        t[k as string] = v;
+        return true;
+      },
+    }) as unknown as CanvasRenderingContext2D,
+  });
+
+  function skinWithImages(files: readonly string[], ini = '') {
+    const entries: Record<string, Uint8Array> = {
+      'skin.ini': new TextEncoder().encode(ini),
+    };
+    for (const f of files) entries[f] = new Uint8Array([1, 2, 3]);
+    const zipped = zipSync(entries);
+    return unpackSkin(
+      zipped.buffer.slice(
+        zipped.byteOffset,
+        zipped.byteOffset + zipped.byteLength,
+      ) as ArrayBuffer,
+    );
+  }
+
+  /** 一条有光标移动与按键的回放。 */
+  function cursorTimeline() {
+    const beatmap = makeSimBeatmap([], { difficulty: difficulty() });
+    const frames = buildReplayFrames([
+      { startTime: 900, x: 100, y: 100, keys: 0 },
+      { startTime: 1000, x: 200, y: 150, keys: 1 },
+      { startTime: 1100, x: 256, y: 192, keys: 0 },
+    ]);
+    return buildTimeline(beatmap, frames);
+  }
+
+  async function drawCursorWith(files: readonly string[], t: number, ini = '') {
+    const timeline = cursorTimeline();
+    const { canvas, calls } = fakeCanvas(1024, 768);
+    const renderer = new DebugRenderer(canvas);
+    renderer.resize();
+    await renderer.setSkin(skinWithImages(files, ini), { decode, makeCanvas });
+    renderer.draw(timeline, stateAt(timeline, t));
+    return calls;
+  }
+
+  /** 最后一次 drawImage 的目标宽度 —— 光标画在最后。 */
+  function lastDrawWidth(calls: readonly Call[]): number {
+    const draws = calls.filter((c) => c.op === 'drawImage');
+    expect(draws.length, '没有任何 drawImage').toBeGreaterThan(0);
+    return draws[draws.length - 1]!.args[7] as number;
+  }
+
+  it('🔒 光标尺寸 = display 尺寸 / 1.6 × playfieldScale', async () => {
+    // 128px SD 贴图 ⇒ display 128 ⇒ 128 / 1.6 = 80 osu 单位
+    // ⚠️ 取 900(还没按键)—— 1100 是松手瞬间,缩放仍停在 1.3,量的就不是裸尺寸了
+    const calls = await drawCursorWith(['cursor.png'], 900);
+    const expected = (128 / STABLE_MAGIC_SCALE_FACTOR) * TEST_SCALE;
+
+    expect(lastDrawWidth(calls)).toBeCloseTo(expected, 6);
+  });
+
+  it('🔒 漏掉 1.6 会大 1.6 倍 —— 明确把两种可能区分开', async () => {
+    const calls = await drawCursorWith(['cursor.png'], 900);
+    const withFactor = (128 / STABLE_MAGIC_SCALE_FACTOR) * TEST_SCALE;
+    const withoutFactor = 128 * TEST_SCALE;
+
+    expect(lastDrawWidth(calls)).toBeCloseTo(withFactor, 6);
+    expect(lastDrawWidth(calls)).not.toBeCloseTo(withoutFactor, 1);
+  });
+
+  it('cursormiddle 也画,且叠在 cursor 之上', async () => {
+    const calls = await drawCursorWith(['cursor.png', 'cursormiddle.png'], 1100);
+    // 光标那一段应有两次 drawImage
+    const draws = calls.filter((c) => c.op === 'drawImage');
+    expect(draws.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('🔒 只有 cursor 受旋转影响,cursormiddle 不转', async () => {
+    // LegacyCursor.cs:37-51 —— ExpandTarget 是 cursor,cursormiddle 是兄弟节点。
+    // 表现:rotate 调用应恰好被一次 save/restore 包住,且在第一张贴图之前
+    const calls = await drawCursorWith(['cursor.png', 'cursormiddle.png'], 1100);
+
+    const rotateAt = calls.findIndex((c) => c.op === 'rotate');
+    expect(rotateAt, '默认 CursorRotate 为 true,应有 rotate').toBeGreaterThanOrEqual(0);
+
+    const draws = calls
+      .map((c, i) => ({ c, i }))
+      .filter(({ c }) => c.op === 'drawImage')
+      .map(({ i }) => i);
+
+    // rotate 之后紧跟第一张(cursor),而 restore 之后才画第二张(cursormiddle)
+    const restoreAfterRotate = calls.findIndex((c, i) => i > rotateAt && c.op === 'restore');
+    const cursorDraw = draws.find((i) => i > rotateAt)!;
+    const middleDraw = draws.find((i) => i > restoreAfterRotate)!;
+
+    expect(cursorDraw).toBeLessThan(restoreAfterRotate);
+    expect(middleDraw).toBeGreaterThan(restoreAfterRotate);
+  });
+
+  it('🔒 CursorRotate: 0 时不发 rotate', async () => {
+    const calls = await drawCursorWith(
+      ['cursor.png'],
+      1100,
+      '[General]\nCursorRotate: 0\n',
+    );
+    expect(calls.filter((c) => c.op === 'rotate')).toHaveLength(0);
+  });
+
+  it('🔒 CursorExpand 生效:按下时比松开时大', async () => {
+    // 帧:1000 按下、1100 松开。取 1000+100(涨满)与 1100+100(缩回)
+    const pressed = lastDrawWidth(await drawCursorWith(['cursor.png'], 1100));
+    const released = lastDrawWidth(await drawCursorWith(['cursor.png'], 1200));
+
+    expect(pressed, '按住 100ms 后应到 1.3 倍').toBeGreaterThan(released * 1.25);
+  });
+
+  it('CursorExpand: 0 时按下也不放大', async () => {
+    const ini = '[General]\nCursorExpand: 0\n';
+    const pressed = lastDrawWidth(await drawCursorWith(['cursor.png'], 1100, ini));
+    const released = lastDrawWidth(await drawCursorWith(['cursor.png'], 1200, ini));
+
+    expect(pressed).toBeCloseTo(released, 6);
+  });
+
+  it('没有 cursor 贴图时退回自绘圆点', async () => {
+    const calls = await drawCursorWith(['hitcircle.png'], 1100);
+    // 光标那个 fill 是自绘路径的特征
+    expect(calls.filter((c) => c.op === 'fill').length).toBeGreaterThan(0);
+  });
+
+  it('🔒 拖尾模式的判据是"提供 cursor 的那层有没有 cursormiddle"', async () => {
+    // 有 cursormiddle ⇒ connected ⇒ 加法混合
+    const connected = await drawCursorWith(
+      ['cursor.png', 'cursormiddle.png', 'cursortrail.png'],
+      1100,
+    );
+    expect(
+      connected.some((c) => c.op === 'set:globalCompositeOperation' && c.args[0] === 'lighter'),
+      'connected 模式应用加法混合',
+    ).toBe(true);
+
+    // 没有 cursormiddle ⇒ disjoint ⇒ 普通混合
+    const disjoint = await drawCursorWith(['cursor.png', 'cursortrail.png'], 1100);
+    expect(
+      disjoint.some((c) => c.op === 'set:globalCompositeOperation' && c.args[0] === 'lighter'),
+      'disjoint 模式不该用加法混合',
+    ).toBe(false);
+  });
+
+  it('拖尾贴图也吃 1.6 分母', async () => {
+    const calls = await drawCursorWith(['cursor.png', 'cursortrail.png'], 900);
+    const draws = calls.filter((c) => c.op === 'drawImage');
+    const expected = (128 / STABLE_MAGIC_SCALE_FACTOR) * TEST_SCALE;
+
+    // 拖尾点与光标都是 128px 贴图 ⇒ 全部同宽
+    for (const d of draws) expect(d.args[7] as number).toBeCloseTo(expected, 6);
+  });
+
+  it('🔒 同一时刻两次绘制的调用序列逐项相同(含拖尾)', async () => {
+    // 拖尾是这条不变式最容易被破坏的地方 —— 若改成"累积数组",倒退就错
+    const timeline = cursorTimeline();
+    const skin = skinWithImages(['cursor.png', 'cursortrail.png']);
+
+    const a = fakeCanvas(1024, 768);
+    const ra = new DebugRenderer(a.canvas);
+    ra.resize();
+    await ra.setSkin(skin, { decode, makeCanvas });
+    for (let t = 900; t <= 1100; t += 20) ra.draw(timeline, stateAt(timeline, t));
+    const lastA = a.calls.slice(lastFillRect(a.calls));
+
+    const b = fakeCanvas(1024, 768);
+    const rb = new DebugRenderer(b.canvas);
+    rb.resize();
+    await rb.setSkin(skin, { decode, makeCanvas });
+    rb.draw(timeline, stateAt(timeline, 3000));
+    rb.draw(timeline, stateAt(timeline, 500));
+    rb.draw(timeline, stateAt(timeline, 1100));
+    const lastB = b.calls.slice(lastFillRect(b.calls));
+
+    expect(lastB).toEqual(lastA);
   });
 });
 
