@@ -1,0 +1,14 @@
+# Copy to `.dev.vars` (gitignored) to test osu! login against `wrangler dev`.
+#
+# This is the SAME OAuth app as production — the client id lives in wrangler.jsonc
+# (vars.OSU_CLIENT_ID) and covers both origins, so only the secret goes here. Register
+# both redirect URIs on that one app, whitespace- or comma-separated:
+#
+#   https://<your-worker>.workers.dev/auth/osu/
+#   http://localhost:8787/auth/osu/
+#
+# Everything except login works without this file: .osu proxying and api/v2 relaying
+# authenticate with the caller's own bearer token, and the token endpoint answers 503
+# with an actionable message when the secret is absent.
+
+OSU_CLIENT_SECRET=your-client-secret-here

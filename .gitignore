@@ -1,5 +1,15 @@
 # Dependencies
 node_modules/
+.wrangler/
 
 # Build output — run `npm run build` to regenerate
 dist/
+
+# Captured upstream site (~67 MB) — run `npm run capture:upstream` to regenerate
+site/
+
+# Local secrets for `wrangler dev` (OSU_CLIENT_SECRET). Deployed secrets live in
+# Cloudflare via `wrangler secret put` — never commit either.
+.dev.vars
+.dev.vars.*
+!.dev.vars.example

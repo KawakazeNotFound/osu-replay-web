@@ -9,7 +9,17 @@
   },
   "homepage": "https://github.com/daladal/replayviewer-js#readme",
   "bugs": "https://github.com/daladal/replayviewer-js/issues",
-  "keywords": ["osu", "replay", "osr", "beatmap", "taiko", "mania", "catch", "canvas", "renderer"],
+  "keywords": [
+    "osu",
+    "replay",
+    "osr",
+    "beatmap",
+    "taiko",
+    "mania",
+    "catch",
+    "canvas",
+    "renderer"
+  ],
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -25,13 +35,18 @@
   ],
   "scripts": {
     "build": "node scripts/build.mjs",
-    "check": "node scripts/check-imports.mjs"
+    "build:site": "npm run build && npm run capture:upstream",
+    "capture:upstream": "node scripts/capture-upstream.mjs",
+    "check": "node scripts/check-imports.mjs",
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy"
   },
   "devDependencies": {
     "@soundtouchjs/core": "^2.0.4",
     "esbuild": "^0.20.2",
     "fflate": "^0.8.2",
     "lzma": "^2.3.2",
-    "typescript": "^5.4.5"
+    "typescript": "^5.4.5",
+    "wrangler": "^4.125.0"
   }
 }

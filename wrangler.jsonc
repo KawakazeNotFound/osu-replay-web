@@ -1,0 +1,27 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "osu-replayviewer",
+  "compatibility_date": "2026-08-24",
+  "main": "./worker/index.js",
+  "assets": {
+    "directory": "./site",
+    "binding": "ASSETS",
+    // "none", not "single-page-application": the frontend routes via hash (#auto=, #score=)
+    // and /auth/osu/ is a real file, so SPA fallback buys nothing — and it actively hides
+    // bugs, serving index.html with HTTP 200 for a missing asset. That masked three
+    // uncaptured code-split chunks as "200 text/html", which the browser refused as module
+    // scripts, killing the whole app silently. Real 404s fail loudly instead.
+    "not_found_handling": "none",
+    // Only the proxy paths hit the Worker; every other request is served from site/
+    // by the asset worker without invoking our code.
+    "run_worker_first": ["/osu-proxy/*", "/auth-ping"]
+  },
+  "vars": {
+    // Your osu! OAuth app's numeric id. Single source of truth: scripts/capture-upstream.mjs
+    // reads it from here to write site/oauth-config.json, and the Worker pins it server-side
+    // so the frontend and the token exchange cannot drift apart. Public by design.
+    // The secret is NOT here: npx wrangler secret put OSU_CLIENT_SECRET
+    // For `wrangler dev`, put OSU_CLIENT_SECRET in .dev.vars (gitignored).
+    "OSU_CLIENT_ID": "66616"
+  }
+}
