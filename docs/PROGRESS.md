@@ -1,7 +1,7 @@
 # 工作进度
 
-> 最后更新:2026-08-23
-> 当前阶段:**M1 —— 只传 .osr 即可播放;分数与正式渲染未做**
+> 最后更新:2026-08-24
+> 当前阶段:**M1 —— 只传 .osr 即可播放;combo 配色与滑条体已对齐源码,HUD/皮肤未做**
 
 关联文档:[架构设计](./ARCHITECTURE.md) · [技术问题记录](./TECH-NOTES.md)
 
@@ -9,7 +9,7 @@
 
 ## 一句话现状
 
-**M0 完成,M1 已经能"只丢一个 `.osr` 进来就播"** —— 自动按谱面 MD5 从镜像站取回 `.osz`,解包挑出正确难度,连音乐一起装好(真实浏览器实测 **6 秒**),然后跑完整链路:堆叠 → 判定(circle + 滑条部件 + 转盘) → 记分(ScoreV1 与 ScoreV2 两套) → combo 累积。**560 个单测全绿,0 个 `todo` 占位。**
+**M0 完成,M1 已经能"只丢一个 `.osr` 进来就播"** —— 自动按谱面 MD5 从镜像站取回 `.osz`,解包挑出正确难度,连音乐一起装好(真实浏览器实测 **6 秒**),然后跑完整链路:堆叠 → 判定(circle + 滑条部件 + 转盘) → 记分(ScoreV1 与 ScoreV2 两套) → combo 累积。渲染侧的 combo 配色与滑条体已按 ppy/osu 源码对齐。**604 个单测全绿,0 个 `todo` 占位。**
 
 ## 🎯 lazer 优先
 
@@ -40,9 +40,9 @@
 |---|---|---|
 | **M0** | 地基:解析 + 时钟 + timeline + `stateAt` + 调试渲染器 | ✅ **完成** |
 | **M1** | circle 渲染 + approach circle + combo 数字 + circle 判定 | 🟡 只传 `.osr` 即可播放;判定+记分已完;正式渲染、HP 未做 |
-| M2 | 滑条(路径生成 + WebGL slider body)← 最难 | 🟡 路径采样与部件判定已完,渲染未开始 |
+| M2 | 滑条(路径生成 + WebGL slider body)← 最难 | 🟡 路径采样、部件判定、**canvas2d 滑条体**已完;WebGL 未开始(且**不再是**解决叠亮的前提) |
 | M3 | spinner + 记分/HP/连击 HUD | 🟡 spinner 判定 + ScoreV1 + ScoreV2 已完,HP 与 HUD 未做 |
-| M4 | stable 皮肤系统(.osk,预设 + 用户上传) | ⬜ 未开始 |
+| M4 | stable 皮肤系统(.osk,预设 + 用户上传) | ⬜ 未开始(webosu 无 `.osk` 支持,只能照 ppy/osu 的 `LegacySkin`) |
 | M5 | lazer 记分体系 + mod | 🟡 **standardised 记分已完且精确复现**;mod 系数与 hit policy 未做 |
 | M6 | Argon 风格皮肤 + 网页 UI 打磨 | ⬜ 未开始 |
 
@@ -151,7 +151,13 @@ circle miss 都是铁证。
 - [ ] *(降级)* **[D13](./TECH-NOTES.md):`stable.osr` 的 combo 缺口(412 vs 1151)** ——
       已定位到**具体 2 个滑条部件**(#225 末端、#501 repeat)。按"优先 lazer"降级
 - [ ] **HP drain** —— `drainPerMs` 仍是占位值(D1)
-- [ ] circle 的正式渲染(combo 数字、combo 颜色、命中/miss 动画)
+- [x] ~~**combo 颜色**~~ ✅ 已接入真实来源。连带修掉三个"换真颜色才显形"的 bug:
+      `comboIndex` 应为 1-based、取色索引随来源层不同(`comboIndexWithOffsets` vs `comboIndex`)、
+      `comboOffset` 不能用 osu-parsers 的字段(它是旧版 lazer)。见 [TECH-NOTES D14](./TECH-NOTES.md)
+- [x] ~~**滑条体渲染**~~ ✅ K 遍不透明同心描边,把 osu 深度缓冲双 pass 的语义搬到 canvas2d。
+      **顺带纠正了一个错误认知**:canvas2d 单遍 `stroke()` 自重叠**不会**叠亮 ——
+      所以 M2 的 WebGL 重写不是解决叠亮的前提。见 [TECH-NOTES D15](./TECH-NOTES.md)
+- [ ] circle 的正式渲染剩余部分(命中/miss 动画的观感、combo 数字换贴图)
 - [x] ~~接线 D7:DT/HT 的播放倍率补偿~~ ✅
 - [x] ~~L3 的 24 个 `todo` 逐条填绿~~ ✅ **0 个 todo 剩余**(532 测试全绿)
 
