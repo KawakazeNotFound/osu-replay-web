@@ -38,6 +38,7 @@
     "build:site": "npm run build && npm run capture:upstream",
     "capture:upstream": "node scripts/capture-upstream.mjs",
     "check": "node scripts/check-imports.mjs",
+    "test": "node scripts/test.mjs",
     "dev": "wrangler dev",
     "deploy": "wrangler deploy"
   },

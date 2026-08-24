@@ -16,3 +16,4 @@ jobs:
       # build = import-boundary check + tsc typecheck/d.ts emit + esbuild bundles
       # + bundle self-containment guard
       - run: npm run build
+      - run: npm test
