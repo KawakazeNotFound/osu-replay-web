@@ -300,6 +300,105 @@ async function swapEngineChunk(appAsset) {
   );
 }
 
+/** End index of the element opening at `openIdx`, matching `<tag`/`</tag` by depth. */
+function matchingClose(html, openIdx, tag) {
+  const re = new RegExp(`<(/?)${tag}\\b`, 'g');
+  re.lastIndex = openIdx;
+  let depth = 0;
+  let m;
+  while ((m = re.exec(html)) !== null) {
+    depth += m[1] === '/' ? -1 : 1;
+    if (depth === 0) return html.indexOf('>', m.index) + 1;
+  }
+  return -1;
+}
+
+/**
+ * Collapses the left panel's credits block into a disclosure and lists what this build adds
+ * on top of upstream.
+ *
+ * The "not affiliated with osu!/ppy" line stays *outside* the disclosure on purpose: a
+ * disclaimer that exists to prevent confusion is the one thing that should not be a click
+ * away. Attribution (author, danser/osu!/mirror credits, issue links) moves inside — still
+ * in the DOM and one click off, which keeps the MIT notice retained.
+ *
+ * Styles are injected into index.html rather than the hashed stylesheet, so an upstream CSS
+ * rebuild cannot silently drop them.
+ */
+async function addCreditsDisclosure() {
+  const pagePath = path.join(site, 'index.html');
+  const text = await fs.readFile(pagePath, 'utf8');
+
+  const bodyOpen = text.indexOf('<div class="info-body">');
+  if (bodyOpen === -1) {
+    throw new Error('credits: <div class="info-body"> not found — upstream restructured the '
+      + 'left panel; update addCreditsDisclosure before deploying');
+  }
+  const bodyClose = matchingClose(text, bodyOpen, 'div');
+  if (bodyClose === -1) throw new Error('credits: info-body has no matching close tag');
+
+  const openTagEnd = text.indexOf('>', bodyOpen) + 1;
+  let inner = text.slice(openTagEnd, bodyClose - '</div>'.length);
+
+  // Lift the disclaimer out so it stays visible.
+  const disclaimerStart = inner.indexOf('<p class="info-unsupported">');
+  if (disclaimerStart === -1) {
+    throw new Error('credits: info-unsupported paragraph not found — it must stay visible, so '
+      + 'the transform refuses to guess');
+  }
+  const disclaimerEnd = matchingClose(inner, disclaimerStart, 'p');
+  const disclaimer = inner.slice(disclaimerStart, disclaimerEnd);
+  inner = inner.slice(0, disclaimerStart) + inner.slice(disclaimerEnd);
+
+  const added = `
+              <p class="info-added-label">added in this build:</p>
+              <ul class="info-added">
+                <li>storyboards — sprites, animations and sound samples</li>
+                <li>self-hosted: own osu! OAuth app and API proxy, no third-party relay</li>
+                <li>runs its own build of the replay engine</li>
+                <li>not included: storyboard video, triggers, or storyboards in video export</li>
+              </ul>`;
+
+  const replacement = `<div class="info-body">
+              ${disclaimer.trim()}
+              <details class="info-disclosure">
+                <summary class="info-disclosure-summary">about &amp; credits</summary>
+                <div class="info-disclosure-body">${inner}${added}
+                </div>
+              </details>
+            </div>`;
+
+  const styles = `
+    <style>
+      /* Injected by scripts/capture-upstream.mjs — see addCreditsDisclosure. */
+      .info-disclosure { border-top: 1px solid #2a2a4a; padding-top: 0.5rem; }
+      .info-disclosure-summary {
+        cursor: pointer; list-style: none; color: #e879a0; font-size: 0.75rem;
+        font-weight: 600; display: flex; align-items: center; gap: 0.35rem;
+      }
+      .info-disclosure-summary::-webkit-details-marker { display: none; }
+      .info-disclosure-summary::before {
+        content: "▸"; font-size: 0.7rem; transition: transform 0.15s ease;
+      }
+      .info-disclosure[open] .info-disclosure-summary::before { transform: rotate(90deg); }
+      .info-disclosure-body {
+        display: flex; flex-direction: column; gap: 0.55rem; margin-top: 0.55rem;
+      }
+      .info-added-label { color: #e879a0; font-weight: 600; font-size: 0.75rem; }
+      .info-added {
+        list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column;
+        gap: 0.15rem; color: #a0a0b0; font-size: 0.75rem;
+      }
+      .info-added li { position: relative; padding-left: 0.8rem; }
+      .info-added li::before { content: "+"; position: absolute; left: 0.1rem; color: #e879a0; }
+    </style>`;
+
+  let next = text.slice(0, bodyOpen) + replacement + text.slice(bodyClose);
+  next = next.replace('</head>', `${styles}\n  </head>`);
+  await fs.writeFile(pagePath, next);
+  console.log('wrapped credits in a disclosure and listed this build\'s additions');
+}
+
 /**
  * Upstream's captured oauth-config.json carries THEIR client_id, which cannot work from
  * our origin (osu! validates redirect_uri per registered app). Overwrite it with ours.
@@ -361,6 +460,7 @@ for (const skin of skinNames) await captureSkin(skin);
 
 await rewriteCapturedAssets([...captured].filter(a => a.endsWith('.js')));
 await copyLazerDefaults();
+await addCreditsDisclosure();
 await swapEngineChunk(appAsset);
 await writeOauthConfig();
 
