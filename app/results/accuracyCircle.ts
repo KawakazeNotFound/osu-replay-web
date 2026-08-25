@@ -38,6 +38,10 @@ const GRADED_PADDING = 2.5;
 const BADGE_OUTSET_X = 20;
 const BADGE_OUTSET_Y = 15;
 
+/** RankBadge container `Size = Vector2(28, 14)`. */
+const BADGE_WIDTH = 28;
+const BADGE_HEIGHT = 14;
+
 function el<K extends keyof SVGElementTagNameMap>(
   name: K,
   attrs: Record<string, string | number>,
@@ -107,15 +111,23 @@ export function gradedArcs(cutoffs: RankCutoffs): readonly { rank: GaugeRank; fr
   return spans.map(s => ({ rank: s.rank, from: s.from + half, to: s.to - half }));
 }
 
-/** Builds the circle. Returns the root SVG plus the gauge path, so a caller can animate it. */
+/** Builds the circle. Returns the root SVG plus handles the reveal sequence needs. */
 export function buildAccuracyCircle(inputs: AccuracyCircleInputs): {
   svg: SVGSVGElement;
-  gauge: SVGPathElement;
+  /** Reveals the gauge up to a 0–1 fraction of the ring. */
+  setProgress: (p: number) => void;
+  /** The fill this score settles at, after lazer's corrections. */
   progress: number;
+  /** The centre rank letter, so the reveal can fade it in on its own schedule. */
+  letter: SVGTextElement;
+  /** Badges keyed by rank, so each can pop in when the fill passes it. */
+  badges: ReadonlyMap<string, SVGGElement>;
 } {
   const { size, cutoffs, accuracy, rank } = inputs;
   // The SVG is larger than the circle so the badges, which sit outside it, are not clipped.
-  const pad = Math.max(BADGE_OUTSET_X, BADGE_OUTSET_Y);
+  // The margin has to clear the badge's own half-width too, not just its outset — with only the
+  // outset, a badge centred on the canvas edge loses half its pill.
+  const pad = Math.max(BADGE_OUTSET_X, BADGE_OUTSET_Y) + BADGE_WIDTH / 2;
   const canvas = size + pad * 2;
   const cx = canvas / 2;
   const cy = canvas / 2;
@@ -188,28 +200,43 @@ export function buildAccuracyCircle(inputs: AccuracyCircleInputs): {
   }
   svg.append(gradedGroup);
 
-  // 3. The accuracy gauge itself.
+  // 3. The accuracy gauge itself. Drawn as a full circle and revealed with stroke-dasharray:
+  // animating a dash offset is smooth and cheap, whereas rebuilding the arc path every frame
+  // re-tessellates it and shows seams at the leading edge.
   const isSS = rank === 'X' || rank === 'XH';
   const progress = gaugeProgress(accuracy, isSS, cutoffs);
   const gaugeWidth = ACCURACY_CIRCLE_RADIUS * outerR;
+  const gaugeR = outerR - gaugeWidth / 2;
+  const circumference = 2 * Math.PI * gaugeR;
   const gauge = el('path', {
-    d: arcPath(cx, cy, outerR - gaugeWidth / 2, 0, progress),
+    d: arcPath(cx, cy, gaugeR, 0, 1),
     fill: 'none',
     stroke: `url(#${gradientId})`,
     'stroke-width': gaugeWidth,
     'stroke-linecap': 'butt',
+    'stroke-dasharray': circumference,
+    'stroke-dashoffset': circumference,
     class: 'rs-gauge',
   });
   svg.append(gauge);
 
+  /** Reveals the gauge up to `p` (0–1 of the ring). */
+  const setProgress = (p: number): void => {
+    const clamped = Math.max(0, Math.min(1, p));
+    gauge.setAttribute('stroke-dashoffset', String(circumference * (1 - clamped)));
+  };
+  setProgress(progress);
+
   // Rank badges, on a track outside the rings (the badge layer's negative padding).
   const badgeGroup = el('g', { class: 'rs-badges' });
+  const badges = new Map<string, SVGGElement>();
   for (const badge of rankBadges(cutoffs)) {
     const p = pointAtEllipse(cx, cy, outerR + BADGE_OUTSET_X, outerR + BADGE_OUTSET_Y, badge.position);
     const g = el('g', { transform: `translate(${p.x} ${p.y})` });
     // RankBadge container `Size = Vector2(28, 14)`, origin centred.
     g.append(el('rect', {
-      x: -14, y: -7, width: 28, height: 14, rx: 7,
+      x: -BADGE_WIDTH / 2, y: -BADGE_HEIGHT / 2,
+      width: BADGE_WIDTH, height: BADGE_HEIGHT, rx: BADGE_HEIGHT / 2,
       fill: RANK_COLOUR[badge.rank],
     }));
     const label = el('text', {
@@ -224,6 +251,7 @@ export function buildAccuracyCircle(inputs: AccuracyCircleInputs): {
     label.textContent = rankLetter(badge.rank);
     g.append(label);
     badgeGroup.append(g);
+    badges.set(badge.rank, g);
   }
   svg.append(badgeGroup);
 
@@ -243,5 +271,5 @@ export function buildAccuracyCircle(inputs: AccuracyCircleInputs): {
   letter.textContent = rankLetter(rank);
   svg.append(letter);
 
-  return { svg, gauge, progress };
+  return { svg, setProgress, progress, letter, badges };
 }

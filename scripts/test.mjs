@@ -17,6 +17,14 @@ import { execFileSync } from 'node:child_process';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
+// app/ IS typechecked (it is DOM-only, so needs no @types/node). This runs first because a
+// NaN score once reached a screenshot purely because the preview page is untypechecked JS.
+execFileSync(
+  process.execPath,
+  ['node_modules/typescript/bin/tsc', '-p', 'tsconfig.app.json'],
+  { stdio: 'inherit' },
+);
+
 const TEST_DIR = 'test';
 const OUT_DIR = path.join('node_modules', '.cache', 'replayviewer-tests');
 

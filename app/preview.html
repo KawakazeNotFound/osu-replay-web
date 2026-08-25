@@ -4,21 +4,59 @@
   <meta charset="utf-8" />
   <title>results panel preview</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Exo:wght@300;400;600;700&display=swap" />
+  <link rel="stylesheet"
+        href="https://fonts.googleapis.com/css2?family=Quicksand:wght@400;500;600;700&display=swap" />
   <style>
+    /* Torus is a commercial typeface ppy distributes under separate terms, and osu-resources
+       carries it only as BMFont bitmap binaries — unusable on the web. Drop TorusRegular.woff2
+       and TorusSemiBold.woff2 into app/fonts/ (gitignored) and these rules pick them up;
+       without them the stack falls through to Quicksand, the closest free geometric face. */
+    @font-face {
+      font-family: "Torus";
+      src: url("./fonts/TorusRegular.woff2") format("woff2");
+      font-weight: 400; font-display: swap;
+    }
+    @font-face {
+      font-family: "Torus";
+      src: url("./fonts/TorusSemiBold.woff2") format("woff2");
+      font-weight: 600; font-display: swap;
+    }
+    @font-face {
+      font-family: "Torus";
+      src: url("./fonts/TorusLight.woff2") format("woff2");
+      font-weight: 300; font-display: swap;
+    }
     body {
       margin: 0; min-height: 100vh; background: #1a1a2e;
-      display: flex; align-items: flex-start; justify-content: center;
-      gap: 40px; padding: 40px;
-      font-family: "Exo", system-ui, sans-serif;
+      display: flex; flex-direction: column; align-items: center;
+      gap: 24px; padding: 32px;
+      font-family: "Torus", "Quicksand", system-ui, sans-serif;
+      color: #c0c0d0;
     }
-    .caption { color: #a0a0b0; font-size: 12px; text-align: center; margin-bottom: 10px; }
-    .col { display: flex; flex-direction: column; align-items: center; }
+    .bar { display: flex; gap: 10px; align-items: center; }
+    button.ctl {
+      background: #16213e; color: #e879a0; border: 1px solid #2a2a4a;
+      border-radius: 8px; padding: 6px 12px; font: inherit; font-size: 13px; cursor: pointer;
+    }
+    select.ctl {
+      background: #16213e; color: #c0c0d0; border: 1px solid #2a2a4a;
+      border-radius: 8px; padding: 6px 10px; font: inherit; font-size: 13px;
+    }
+    .stage { display: flex; justify-content: center; min-height: 700px; }
+    .note { font-size: 12px; opacity: 0.7; }
   </style>
 </head>
 <body>
+  <div class="bar">
+    <select class="ctl" id="variant"></select>
+    <button class="ctl" id="replay-anim">replay animation</button>
+    <span class="note" id="status"></span>
+  </div>
+  <div class="stage" id="stage"></div>
+
   <script type="module">
     import { buildResultsPanel, resultsPanelCss, JUDGEMENT_COLOUR } from './results/panel.js';
+    import { prepareReveal, startReveal } from './results/reveal.js';
 
     const style = document.createElement('style');
     style.textContent = resultsPanelCss();
@@ -58,10 +96,9 @@
       playedOn: '25 August 2026 6:42 PM',
     };
 
-    // Cases that exercise the gauge's corrections, which a single sample cannot show.
-    const variants = [
-      ['reference screenshot (S, 98.44%)', reference],
-      ['SS — ring fills completely', {
+    const variants = {
+      'reference screenshot (S, 98.44%)': reference,
+      'SS — ring fills completely': {
         ...reference, rank: 'X', accuracy: 1, score: 30000000, pp: 320,
         judgements: [
           { label: 'great', value: '920', colour: JUDGEMENT_COLOUR.great },
@@ -69,14 +106,14 @@
           { label: 'meh', value: '0', colour: JUDGEMENT_COLOUR.meh },
           { label: 'miss', value: '0', colour: JUDGEMENT_COLOUR.miss },
         ],
-      }],
-      ['failed S — 100% acc but ranked A', {
+      },
+      'failed S — 100% acc but ranked A': {
         ...reference, rank: 'A', accuracy: 1, maxCombo: 812, pp: 90,
-      }],
-      ['no pp / no star rating (manual replay)', {
+      },
+      'no pp / no star rating (manual replay)': {
         ...reference, pp: null, starRating: null, rank: 'B', accuracy: 0.8123,
-      }],
-      ['D rank, low accuracy', {
+      },
+      'D rank, low accuracy': {
         ...reference, rank: 'D', accuracy: 0.4211, score: 812345, maxCombo: 61, pp: 4,
         judgements: [
           { label: 'great', value: '301', colour: JUDGEMENT_COLOUR.great },
@@ -84,19 +121,47 @@
           { label: 'meh', value: '188', colour: JUDGEMENT_COLOUR.meh },
           { label: 'miss', value: '221', colour: JUDGEMENT_COLOUR.miss },
         ],
-      }],
-    ];
+      },
+    };
 
-    for (const [caption, data] of variants) {
-      const col = document.createElement('div');
-      col.className = 'col';
-      const cap = document.createElement('div');
-      cap.className = 'caption';
-      cap.textContent = caption;
-      col.append(cap, buildResultsPanel(data));
-      document.body.append(col);
+    const select = document.getElementById('variant');
+    for (const name of Object.keys(variants)) {
+      const opt = document.createElement('option');
+      opt.value = name;
+      opt.textContent = name;
+      select.append(opt);
     }
 
+    const stage = document.getElementById('stage');
+    const status = document.getElementById('status');
+    let running = null;
+
+    function show(name, animate) {
+      running?.cancel();
+      stage.replaceChildren();
+      const handle = buildResultsPanel(variants[name], () => {
+        status.textContent = 'watch replay clicked';
+      });
+      stage.append(handle.root);
+      if (animate) {
+        prepareReveal(handle);
+        running = startReveal(handle);
+        status.textContent = 'revealing…';
+      } else {
+        status.textContent = '';
+      }
+      // Exposed so a screenshot harness can drive the sequence deterministically. Both cancel
+      // any in-flight reveal first: without that, two tweens write the same elements and the
+      // older one drags the values toward its own end state.
+      window.__handle = handle;
+      window.__prepare = () => { running?.cancel(); running = null; prepareReveal(handle); };
+      window.__reveal = () => { running?.cancel(); running = startReveal(handle); };
+    }
+
+    select.addEventListener('change', () => show(select.value, true));
+    document.getElementById('replay-anim').addEventListener('click', () => show(select.value, true));
+
+    show(select.value, true);
     window.__ready = true;
   </script>
 </body>

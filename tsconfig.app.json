@@ -1,0 +1,19 @@
+{
+  // Typechecks app/ without emitting. app/ is DOM-only, so unlike test/ it needs no
+  // @types/node — which is why this exists and a test tsconfig does not.
+  //
+  // Added after the reveal shipped a NaN score: buildResultsPanel's handle was missing the
+  // score and accuracy the reveal reads, and nothing caught it because the preview page is
+  // plain JS in an HTML file. Untypechecked glue is exactly where that hides.
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "lib": ["ES2020", "DOM", "DOM.Iterable"]
+  },
+  "include": ["app"]
+}

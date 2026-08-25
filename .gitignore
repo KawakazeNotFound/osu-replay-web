@@ -13,3 +13,7 @@ site/
 .dev.vars
 .dev.vars.*
 !.dev.vars.example
+
+# Torus is a commercial typeface ppy distributes under separate terms — supply it yourself
+# (see app/preview.html's @font-face block); it is never committed here.
+app/fonts/

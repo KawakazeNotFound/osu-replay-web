@@ -110,9 +110,35 @@ function statisticRow(entries: readonly StatisticEntry[]): HTMLElement {
   return row;
 }
 
-/** Builds the panel. Returns the root element; caller decides where it mounts. */
-export function buildResultsPanel(data: ResultsPanelData): HTMLElement {
-  const root = div('rs-panel');
+/** Handles the reveal sequence needs, alongside the panel root. */
+export interface ResultsPanelHandle {
+  readonly root: HTMLElement;
+  readonly panel: HTMLElement;
+  readonly setGaugeProgress: (p: number) => void;
+  readonly gaugeProgress: number;
+  readonly rankLetter: SVGTextElement;
+  readonly badges: readonly { readonly element: SVGGElement; readonly accuracy: number }[];
+  readonly scoreElement: HTMLElement;
+  /** Final score, so the reveal can roll up to it. */
+  readonly score: number;
+  readonly accuracyElement: HTMLElement | null;
+  /** Final accuracy, 0–1. */
+  readonly accuracy: number;
+  readonly statisticCells: readonly HTMLElement[];
+  /** The green "watch replay" button, or null when no handler was supplied. */
+  readonly replayButton: HTMLButtonElement | null;
+}
+
+/**
+ * Builds the panel. `onWatchReplay`, when given, adds the button bar underneath — the panel
+ * itself stays a pure presentation of the score.
+ */
+export function buildResultsPanel(
+  data: ResultsPanelData,
+  onWatchReplay?: () => void,
+): ResultsPanelHandle {
+  const root = div('rs-root');
+  const panel = div('rs-panel');
 
   // Top layer — the avatar and player name live here (ExpandedPanelTopContent), not in the
   // middle content.
@@ -125,7 +151,7 @@ export function buildResultsPanel(data: ResultsPanelData): HTMLElement {
     top.append(avatar);
   }
   top.append(text('div', 'rs-player', data.playerName));
-  root.append(top);
+  panel.append(top);
 
   const middle = div('rs-panel-middle');
 
@@ -137,17 +163,18 @@ export function buildResultsPanel(data: ResultsPanelData): HTMLElement {
 
   // 2. Accuracy circle.
   const circleWrap = div('rs-circle');
-  const { svg } = buildAccuracyCircle({
+  const circle = buildAccuracyCircle({
     accuracy: data.accuracy,
     rank: data.rank,
     cutoffs: data.cutoffs,
     size: LAYOUT.circleHeight,
   });
-  circleWrap.append(svg);
+  circleWrap.append(circle.svg);
   middle.append(circleWrap);
 
   // 3. Total score.
-  middle.append(text('div', 'rs-score', formatScore(data.score)));
+  const scoreElement = text('div', 'rs-score', formatScore(data.score));
+  middle.append(scoreElement);
 
   // 4. Star rating row. Omitted entirely when unknown, rather than showing a placeholder that
   //    would read as a real difficulty value.
@@ -201,8 +228,68 @@ export function buildResultsPanel(data: ResultsPanelData): HTMLElement {
     middle.append(text('div', 'rs-played-on', `Played on ${data.playedOn}`));
   }
 
-  root.append(middle);
-  return root;
+  panel.append(middle);
+  root.append(panel);
+
+  // The button bar sits under the panel, as lazer's results screen does.
+  let replayButton: HTMLButtonElement | null = null;
+  if (onWatchReplay !== undefined) {
+    const bar = div('rs-buttons');
+    replayButton = document.createElement('button');
+    replayButton.className = 'rs-watch';
+    replayButton.type = 'button';
+    replayButton.title = 'Watch replay';
+    replayButton.append(cursorIcon(), text('span', 'rs-watch-label', 'Watch replay'));
+    replayButton.addEventListener('click', onWatchReplay);
+    bar.append(replayButton);
+    root.append(bar);
+  }
+
+  // Accuracy is the first cell of the first statistics row.
+  const cells = [...root.querySelectorAll<HTMLElement>('.rs-stat')];
+  const accuracyElement = cells[0]?.querySelector<HTMLElement>('.rs-stat-number') ?? null;
+
+  return {
+    root,
+    panel,
+    setGaugeProgress: circle.setProgress,
+    gaugeProgress: circle.progress,
+    rankLetter: circle.letter,
+    badges: [...circle.badges.entries()].map(([rank, element]) => ({
+      element,
+      accuracy: data.cutoffs[rank as keyof typeof data.cutoffs],
+    })),
+    scoreElement,
+    score: data.score,
+    accuracyElement,
+    accuracy: data.accuracy,
+    statisticCells: cells,
+    replayButton,
+  };
+}
+
+/**
+ * osu!'s cursor glyph, as the reference's green button uses. Drawn rather than imported so the
+ * button carries no external asset.
+ */
+function cursorIcon(): SVGSVGElement {
+  const ns = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(ns, 'svg');
+  svg.setAttribute('viewBox', '0 0 24 24');
+  svg.setAttribute('class', 'rs-watch-icon');
+  const path = document.createElementNS(ns, 'path');
+  path.setAttribute('d', 'M5 2.5 L5 19 L9.2 14.6 L12.1 21.5 L14.9 20.3 L12 13.6 L18.2 13.2 Z');
+  path.setAttribute('fill', 'currentColor');
+  svg.append(path);
+  const ring = document.createElementNS(ns, 'circle');
+  ring.setAttribute('cx', '8.4');
+  ring.setAttribute('cy', '19.6');
+  ring.setAttribute('r', '1.9');
+  ring.setAttribute('fill', 'none');
+  ring.setAttribute('stroke', 'currentColor');
+  ring.setAttribute('stroke-width', '1.1');
+  svg.append(ring);
+  return svg;
 }
 
 /** Stylesheet for the panel. Values come from theme.ts so they stay traceable to lazer. */
@@ -320,6 +407,29 @@ export function resultsPanelCss(): string {
   opacity: 0.7;
 }
 .rs-rank-letter { paint-order: stroke; }
+.rs-root { display: flex; flex-direction: column; align-items: center; gap: 12px; }
+.rs-buttons {
+  width: ${PANEL.expandedWidth}px;
+  display: flex; gap: 8px;
+}
+/* The reference's wide green action button. */
+.rs-watch {
+  flex: 1;
+  height: 42px;
+  border: none;
+  border-radius: 12px;
+  background: #a3cc12;
+  color: #1b2200;
+  font-family: ${FONT.family};
+  font-size: 14px;
+  font-weight: 600;
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  cursor: pointer;
+  transition: background 120ms ease, transform 80ms ease;
+}
+.rs-watch:hover { background: #b6e015; }
+.rs-watch:active { transform: translateY(1px); }
+.rs-watch-icon { width: 20px; height: 20px; }
 `;
 }
 
