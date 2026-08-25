@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>replayviewer — dev</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="stylesheet"
+        href="https://fonts.googleapis.com/css2?family=Quicksand:wght@300;400;500;600;700&display=swap" />
+  <style>
+    /* See preview.html for why Torus is not shipped; drop it into app/fonts/ to use it. */
+    @font-face { font-family: "Torus"; src: url("./fonts/TorusRegular.woff2") format("woff2");
+      font-weight: 400; font-display: swap; }
+    @font-face { font-family: "Torus"; src: url("./fonts/TorusSemiBold.woff2") format("woff2");
+      font-weight: 600; font-display: swap; }
+    @font-face { font-family: "Torus"; src: url("./fonts/TorusLight.woff2") format("woff2");
+      font-weight: 300; font-display: swap; }
+
+    * { box-sizing: border-box; }
+    html, body { height: 100%; margin: 0; }
+    body {
+      background: #12121c; color: #d8d8e4;
+      font-family: "Torus", "Quicksand", system-ui, sans-serif;
+      display: flex; flex-direction: column;
+    }
+    .bar {
+      flex: 0 0 auto; display: flex; gap: 10px; align-items: center;
+      padding: 10px 14px; background: #16213e; border-bottom: 1px solid #2a2a4a;
+    }
+    .bar input[type="text"] {
+      flex: 1; min-width: 0;
+      background: #0f1830; color: #e8e8f4; border: 1px solid #2a2a4a;
+      border-radius: 8px; padding: 8px 12px; font: inherit; font-size: 13px;
+    }
+    .bar button, .bar label.file {
+      background: #0f3460; color: #e879a0; border: 1px solid #2a2a5a;
+      border-radius: 8px; padding: 8px 14px; font: inherit; font-size: 13px; cursor: pointer;
+      white-space: nowrap;
+    }
+    .bar button:hover, .bar label.file:hover { background: #164080; }
+    .bar input[type="file"] { display: none; }
+    #status { font-size: 12px; opacity: 0.8; white-space: nowrap; }
+    #stage { flex: 1 1 auto; min-height: 0; position: relative; }
+  </style>
+</head>
+<body>
+  <div class="bar">
+    <input type="text" id="score-url" placeholder="https://osu.ppy.sh/scores/… or a score id" />
+    <button id="load-online" type="button">Load online</button>
+    <label class="file">.osr<input type="file" id="osr" accept=".osr" /></label>
+    <label class="file">.osz<input type="file" id="osz" accept=".osz" /></label>
+    <button id="load-local" type="button">Load local</button>
+    <span id="status"></span>
+  </div>
+  <div id="stage"></div>
+
+  <script type="module">
+    import { buildFlow } from './player/flow.js';
+    import { loadOnlineScore, loadLocalReplay } from './player/load.js';
+
+    const statusEl = document.getElementById('status');
+    const say = t => { statusEl.textContent = t; };
+
+    const canvas = document.createElement('canvas');
+    canvas.width = 1280;
+    canvas.height = 720;
+
+    const flow = buildFlow({ host: document.getElementById('stage'), canvas });
+
+    // One AudioContext for the page: browsers cap how many can exist, and each load would
+    // otherwise leak one.
+    let audioContext = null;
+    const ctx = () => (audioContext ??= new AudioContext());
+
+    async function run(loader) {
+      try {
+        say('loading…');
+        const replay = await loader(ctx(), canvas, say);
+        flow.present(replay);
+        say('ready — press Watch replay');
+      } catch (err) {
+        console.error(err);
+        say(`failed: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+
+    document.getElementById('load-online').addEventListener('click', () => {
+      const ref = document.getElementById('score-url').value.trim();
+      if (ref === '') { say('enter a score URL or id'); return; }
+      void run((audio, cv, log) => loadOnlineScore(ref, audio, cv, log));
+    });
+
+    document.getElementById('load-local').addEventListener('click', () => {
+      const osr = document.getElementById('osr').files?.[0] ?? null;
+      const osz = document.getElementById('osz').files?.[0] ?? null;
+      if (osr === null) { say('choose a .osr'); return; }
+      void run((audio, cv, log) => loadLocalReplay(osr, osz, audio, cv, log));
+    });
+
+    window.__flow = flow;
+    window.__ready = true;
+  </script>
+</body>
+</html>

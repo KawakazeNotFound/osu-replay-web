@@ -15,5 +15,8 @@
     "noEmit": true,
     "lib": ["ES2020", "DOM", "DOM.Iterable"]
   },
-  "include": ["app"]
+  // src is included because app/ imports the engine directly (not via dist/), which also pulls
+  // in src/parsers/lzma_worker.d.ts — the ambient declaration the lzma import needs. Harmless
+  // here: this config emits nothing.
+  "include": ["app", "src"]
 }

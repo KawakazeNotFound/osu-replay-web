@@ -10,6 +10,13 @@ import path from 'node:path';
 const ROOT = path.resolve('app');
 const PORT = 8900;
 
+// The dev pages load the sample skin and the default hitsounds from the repo, and reach our
+// Worker's public .osu route. Mounted here so the pages use the same URLs the deployed site will.
+const MOUNTS = [
+  ['/assets/', path.resolve('assets')],
+];
+const PROXY_TARGET = 'https://osu-replayviewer.shirasuazusa.workers.dev';
+
 const TYPES = {
   '.html': 'text/html; charset=utf-8',
   '.css': 'text/css; charset=utf-8',
@@ -17,6 +24,11 @@ const TYPES = {
   '.json': 'application/json',
   '.png': 'image/png',
   '.jpg': 'image/jpeg',
+  '.wav': 'audio/wav',
+  '.mp3': 'audio/mpeg',
+  '.ogg': 'audio/ogg',
+  '.ini': 'text/plain; charset=utf-8',
+  '.osz': 'application/octet-stream',
 };
 
 /** A request for `x.js` is served by bundling `x.ts` when only the source exists. */
@@ -39,8 +51,38 @@ async function serveModule(tsPath, res) {
   }
 }
 
-http.createServer((req, res) => {
-  const url = decodeURIComponent((req.url ?? '/').split('?')[0]);
+http.createServer(async (req, res) => {
+  const raw = req.url ?? '/';
+  const url = decodeURIComponent(raw.split('?')[0]);
+
+  // /osu-proxy/* is forwarded to the deployed Worker so the dev page exercises the real route
+  // rather than a stub — the .osu endpoint needs no token.
+  if (url.startsWith('/osu-proxy/')) {
+    try {
+      const upstream = await fetch(PROXY_TARGET + raw, { headers: { Accept: 'text/plain' } });
+      const body = Buffer.from(await upstream.arrayBuffer());
+      res.writeHead(upstream.status, {
+        'Content-Type': upstream.headers.get('content-type') ?? 'application/octet-stream',
+      });
+      res.end(body);
+    } catch (err) {
+      res.writeHead(502, { 'Content-Type': 'text/plain' });
+      res.end(`proxy failed: ${String(err)}`);
+    }
+    return;
+  }
+
+  for (const [prefix, root] of MOUNTS) {
+    if (!url.startsWith(prefix)) continue;
+    const mounted = path.join(root, url.slice(prefix.length));
+    if (!mounted.startsWith(root) || !fs.existsSync(mounted) || !fs.statSync(mounted).isFile()) break;
+    res.writeHead(200, {
+      'Content-Type': TYPES[path.extname(mounted).toLowerCase()] ?? 'application/octet-stream',
+    });
+    fs.createReadStream(mounted).pipe(res);
+    return;
+  }
+
   const rel = url === '/' ? 'preview.html' : url.replace(/^\/+/, '');
   const file = path.join(ROOT, rel);
 
