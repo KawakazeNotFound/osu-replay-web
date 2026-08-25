@@ -1,5 +1,6 @@
 import type { BeatmapData, HitResult, HitSample } from '../types/index.js';
 import type { ComboFrame } from '../renderer/HUDRenderer.js';
+import type { SbSample } from '../storyboard/types.js';
 import type { TaikoInputEvent } from '../rulesets/taiko/input.js';
 import { computeHitsoundSchedule, resolveSample, lookupSkinSound } from './hitsoundSchedule.js';
 import type { PendingSound } from './hitsoundSchedule.js';
@@ -101,6 +102,10 @@ export class AudioSync {
   private readonly synthCache = new Map<string, AudioBuffer>();
   private readonly songGain: GainNode;
   private readonly effectsGain: GainNode;
+  private readonly _sbSamples: readonly SbSample[];
+  private readonly _sbSampleBuffers: ReadonlyMap<string, AudioBuffer> | null;
+  /** Walk position in `_sbSamples`; reset by `_scheduleHitsounds` on play/seek/rate change. */
+  private _sbSampleIdx = 0;
 
   // What we actually feed the buffer source: the raw decoded buffer for nomod/NC, or a
   // pitch-preserved pre-stretched copy for DT/HT. `_playRate` is the playbackRate to pair it
@@ -150,6 +155,13 @@ export class AudioSync {
     taikoGhostTaps?: readonly TaikoInputEvent[] | null;
     comboFrames?: readonly ComboFrame[];
     lazerDefaultSounds?: ReadonlyMap<string, AudioBuffer> | null;
+    /**
+     * Storyboard `Sample` events on the beatmap timeline, and the buffers to play for them
+     * (keyed as `SbSample.lookupPath`). Scheduled alongside hitsounds off the same anchor,
+     * so they follow seeks, DT/HT and the user rate without extra bookkeeping.
+     */
+    storyboardSamples?: readonly SbSample[] | null;
+    storyboardSampleBuffers?: ReadonlyMap<string, AudioBuffer> | null;
   }) {
     this.ctx          = options.ctx;
     this.songBuffer   = options.songBuffer;
@@ -166,6 +178,10 @@ export class AudioSync {
     this.taikoGhostTaps = options.taikoGhostTaps ?? null;
     this.comboFrames  = options.comboFrames ?? [];
     this.lazerDefaultSounds = options.lazerDefaultSounds ?? null;
+    // Sorted defensively: .osb files list samples in time order in practice, but the flush
+    // loop walks the list once and would silently drop anything out of order.
+    this._sbSamples = [...(options.storyboardSamples ?? [])].sort((a, b) => a.time - b.time);
+    this._sbSampleBuffers = options.storyboardSampleBuffers ?? null;
 
     this.songGain    = options.ctx.createGain();
     this.effectsGain = options.ctx.createGain();
@@ -378,8 +394,17 @@ export class AudioSync {
     this._pendingSoundIdx = 0;
     this._sampleVoices = null;
 
+    // Storyboard samples ride the same reschedule: find the first one at or after the new
+    // position so a seek neither replays the past nor skips the future.
+    this._sbSampleIdx = 0;
+    while (
+      this._sbSampleIdx < this._sbSamples.length
+      && this._sbSamples[this._sbSampleIdx]!.time < fromBeatmapMs
+    ) this._sbSampleIdx++;
+
     this._flushPendingSounds();
-    if (this._pendingSoundIdx < this._pendingSounds.length) {
+    if (this._pendingSoundIdx < this._pendingSounds.length
+      || this._sbSampleIdx < this._sbSamples.length) {
       this._flushTimer = setInterval(() => this._flushPendingSounds(), FLUSH_INTERVAL_MS);
     }
   }
@@ -414,10 +439,44 @@ export class AudioSync {
         this._scheduleResolvedSound(ev.type, ev.sampleSet, ev.sampleIndex, customFile, clampedWhen, ev.volume ?? 1);
       }
     }
+    // Storyboard samples share the anchor above, so they stay in step with the song through
+    // seeks and rate changes without a clock of their own.
+    while (this._sbSampleIdx < this._sbSamples.length) {
+      const sample = this._sbSamples[this._sbSampleIdx]!;
+      const when = anchorCtxS + (sample.time - anchorBeatmapMs) / toRealSec;
+      if (when > horizon) break;
+      this._sbSampleIdx++;
+      this._scheduleStoryboardSample(sample, when < now ? now : when);
+    }
+    if (this._pendingSoundIdx < this._pendingSounds.length
+      || this._sbSampleIdx < this._sbSamples.length) return;
     if (this._flushTimer !== null) {
       clearInterval(this._flushTimer);
       this._flushTimer = null;
     }
+  }
+
+  /**
+   * One-shot storyboard sample. Volume is the event's 0–100 scaled into the effects bus, so
+   * the host's effects slider still governs it.
+   */
+  private _scheduleStoryboardSample(sample: SbSample, when: number): void {
+    const buf = this._sbSampleBuffers?.get(sample.lookupPath);
+    // A storyboard may name a file the archive does not carry; nothing to play, and warning
+    // per occurrence would spam a mirror-stripped set.
+    if (buf === undefined) return;
+    const src = this.ctx.createBufferSource();
+    src.buffer = buf;
+    const volume = Math.max(0, Math.min(1, sample.volume / 100));
+    if (volume !== 1) {
+      const gain = this.ctx.createGain();
+      gain.gain.value = volume;
+      src.connect(gain);
+      gain.connect(this.effectsGain);
+    } else {
+      src.connect(this.effectsGain);
+    }
+    src.start(when);
   }
 
   private _scheduleCombobreak(when: number): void {

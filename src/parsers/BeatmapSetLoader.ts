@@ -33,6 +33,12 @@ export interface BeatmapSetContents {
    * front would cost seconds and hundreds of MB of bitmaps for sprites that may never appear.
    */
   storyboardImages: Map<string, Uint8Array>;
+  /**
+   * Decoded audio for storyboard `Sample` events, keyed by lowercased full path with `/`
+   * separators. Shares its buffers with `beatmapSounds` — the same files under a key that
+   * survives storyboard folders.
+   */
+  storyboardSamples: Map<string, AudioBuffer>;
 }
 
 function extractAudioFilename(osuText: string): string {
@@ -160,6 +166,10 @@ export async function loadBeatmapSet(
   }
 
   const beatmapSounds = new Map<string, AudioBuffer>();
+  // Same buffers as beatmapSounds, keyed by full path instead of basename. Storyboard
+  // `Sample` events reference paths like `sb/sfx/intro.mp3`, where basenames are ambiguous
+  // across folders — but decoding twice would be wasteful, so both maps share the buffers.
+  const storyboardSamples = new Map<string, AudioBuffer>();
   // The song itself (audioFilename) is already decoded into audioBuffer above — keep it
   // out of beatmapSounds or it gets decoded a second time and retained as dead PCM.
   const soundEntries = Object.entries(files).filter(([p]) => {
@@ -178,6 +188,7 @@ export async function loadBeatmapSet(
       const audioBuf = await audioCtx.decodeAudioData(copy);
       const basename = (path.split('/').pop() ?? path).toLowerCase();
       beatmapSounds.set(basename, audioBuf);
+      storyboardSamples.set(path.toLowerCase().replace(/\\/g, '/'), audioBuf);
     } catch { /* undecodable */ }
   }));
 
@@ -195,7 +206,10 @@ export async function loadBeatmapSet(
     if (/\.(png|jpe?g)$/.test(lower)) storyboardImages.set(lower, bytes);
   }
 
-  return { osuBytes, audioBuffer, background, beatmapSounds, osbText, storyboardImages };
+  return {
+    osuBytes, audioBuffer, background, beatmapSounds, osbText, storyboardImages,
+    storyboardSamples,
+  };
 }
 
 /**

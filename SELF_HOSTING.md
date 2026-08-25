@@ -137,8 +137,8 @@ neither `index.html` nor `DEFAULT_SKINS`, so capture never saw them and every lo
 - **Storyboards render, but not every part of them.** Sprites and animations from the set's
   `.osb` merged with the `.osu`'s own `[Events]` are drawn, with the full command set
   (`F/M/MX/MY/S/V/R/C/P`), `L` loops, all 35 easings, layer ordering, origin anchoring,
-  flips, additive blending, and 4:3 pillarboxing vs widescreen. Not yet:
-  - **`Sample` events are parsed but not played** — storyboard audio is silent.
+  flips, additive blending, and 4:3 pillarboxing vs widescreen. `Sample` events play, off
+  the hitsound scheduler's anchor so they follow seeks, DT/HT and the user rate. Not yet:
   - **`T` triggers are parsed but never fire.** They react to gameplay events
     (`HitSound*`, `Passing`, `Failing`) and nothing feeds those in yet, so their bodies are
     counted and skipped rather than mis-timed. None of the storyboards surveyed used one.

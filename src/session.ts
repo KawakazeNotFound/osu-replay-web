@@ -42,6 +42,8 @@ export interface BeatmapAssets {
    * each session decodes its own bitmaps from these on demand and releases them on stop.
    */
   readonly storyboardImages: Map<string, Uint8Array>;
+  /** Decoded audio for the storyboard's `Sample` events, keyed by their `lookupPath`. */
+  readonly storyboardSamples: Map<string, AudioBuffer>;
 }
 
 export interface ReplaySessionInputs {
@@ -228,7 +230,7 @@ export async function createReplaySession(inputs: ReplaySessionInputs): Promise<
   let assets: BeatmapAssets;
   const fresh = inputs.beatmapSet instanceof ArrayBuffer;
   if (inputs.beatmapSet instanceof ArrayBuffer) {
-    const { osuBytes, audioBuffer: songBuffer, background, beatmapSounds, osbText, storyboardImages } =
+    const { osuBytes, audioBuffer: songBuffer, background, beatmapSounds, osbText, storyboardImages, storyboardSamples } =
       await loadBeatmapSet(inputs.beatmapSet, replayData.beatmapHash, audioContext, inputs.fetchOsuOverride);
     const osuText = new TextDecoder('utf-8').decode(osuBytes);
     const beatmap = parseBeatmap(osuText);
@@ -242,6 +244,7 @@ export async function createReplaySession(inputs: ReplaySessionInputs): Promise<
       beatmap, songBuffer, background, beatmapSounds,
       storyboard: parsedStoryboard.hasContent ? parsedStoryboard : null,
       storyboardImages,
+      storyboardSamples,
     };
   } else {
     assets = inputs.beatmapSet;
@@ -345,6 +348,10 @@ export async function createReplaySession(inputs: ReplaySessionInputs): Promise<
     taikoGhostTaps: renderer.taikoGhostTaps,
     comboFrames:  renderer.comboFrames,
     lazerDefaultSounds,
+    // Storyboard audio rides the hitsound scheduler's anchor, so it follows seeks and rate
+    // changes for free.
+    storyboardSamples: assets.storyboard?.samples ?? null,
+    storyboardSampleBuffers: assets.storyboardSamples,
   });
 
   return {
