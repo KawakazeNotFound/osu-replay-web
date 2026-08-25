@@ -144,9 +144,10 @@ neither `index.html` nor `DEFAULT_SKINS`, so capture never saw them and every lo
     counted and skipped rather than mis-timed. None of the storyboards surveyed used one.
   - **Video events are ignored**, as they were before. Both mirrors are still asked for
     `noVideo=1`, so the file is not even downloaded.
-  - **Video export does not include the storyboard.** The exporter builds its own Renderer
-    from `ExportRenderBundle` and never calls `setStoryboard`, so exported clips look like
-    playback did before this existed.
+  - **Video export deliberately has no storyboard.** The exporter builds its own Renderer
+    from `ExportRenderBundle` and never calls `setStoryboard`. Wiring it through would mean
+    widening that bundle to cross a worker boundary; decided against — playback showing the
+    storyboard is what matters here. Not a gap to close.
   - There is **no UI toggle** — upstream's options panel has no storyboard checkbox.
     `RenderOptions.showStoryboard` defaults to on, so storyboards simply appear.
 - **The pp counter is inert** — see the engine swap above.
