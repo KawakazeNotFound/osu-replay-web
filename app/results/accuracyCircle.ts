@@ -30,6 +30,14 @@ const SVG_NS = 'http://www.w3.org/2000/svg';
 const GRADED_SCALE = 0.8;
 const GRADED_PADDING = 2.5;
 
+/**
+ * The badge layer's `Padding { Vertical = -15, Horizontal = -20 }` is *negative*, so it
+ * expands past the circle's bounds — badges ride outside the rings rather than on them. The
+ * asymmetry makes their track a slight ellipse, which is why x and y differ here.
+ */
+const BADGE_OUTSET_X = 20;
+const BADGE_OUTSET_Y = 15;
+
 function el<K extends keyof SVGElementTagNameMap>(
   name: K,
   attrs: Record<string, string | number>,
@@ -39,10 +47,17 @@ function el<K extends keyof SVGElementTagNameMap>(
   return node;
 }
 
+/** Point on an ellipse at ring fraction `f`: 0 at the top, clockwise. */
+function pointAtEllipse(
+  cx: number, cy: number, rx: number, ry: number, f: number,
+): { x: number; y: number } {
+  const theta = -Math.PI / 2 + f * 2 * Math.PI;
+  return { x: cx + Math.cos(theta) * rx, y: cy + Math.sin(theta) * ry };
+}
+
 /** Point on a circle at ring fraction `f`: 0 at the top, clockwise. */
 function pointAt(cx: number, cy: number, r: number, f: number): { x: number; y: number } {
-  const theta = -Math.PI / 2 + f * 2 * Math.PI;
-  return { x: cx + Math.cos(theta) * r, y: cy + Math.sin(theta) * r };
+  return pointAtEllipse(cx, cy, r, r, f);
 }
 
 /**
@@ -99,14 +114,17 @@ export function buildAccuracyCircle(inputs: AccuracyCircleInputs): {
   progress: number;
 } {
   const { size, cutoffs, accuracy, rank } = inputs;
-  const cx = size / 2;
-  const cy = size / 2;
+  // The SVG is larger than the circle so the badges, which sit outside it, are not clipped.
+  const pad = Math.max(BADGE_OUTSET_X, BADGE_OUTSET_Y);
+  const canvas = size + pad * 2;
+  const cx = canvas / 2;
+  const cy = canvas / 2;
   const outerR = size / 2;
 
   const svg = el('svg', {
-    width: size,
-    height: size,
-    viewBox: `0 0 ${size} ${size}`,
+    width: canvas,
+    height: canvas,
+    viewBox: `0 0 ${canvas} ${canvas}`,
     class: 'rs-accuracy-circle',
   });
 
@@ -129,6 +147,19 @@ export function buildAccuracyCircle(inputs: AccuracyCircleInputs): {
     el('stop', { offset: '1', 'stop-color': letterFill.to }),
   );
   defs.append(letterGrad);
+
+  // RankText.cs gives the centre letter a glow in the rank's colour. The letter itself stays
+  // white — the DrawableRank gradients above are for the small badges, not this.
+  const glowId = `rs-glow-${rank}`;
+  const glow = el('filter', { id: glowId, x: '-50%', y: '-50%', width: '200%', height: '200%' });
+  glow.append(
+    el('feDropShadow', {
+      dx: 0, dy: 0, stdDeviation: 8,
+      'flood-color': RANK_COLOUR[rank as keyof typeof RANK_COLOUR] ?? RANK_COLOUR.D,
+      'flood-opacity': 0.9,
+    }),
+  );
+  defs.append(glow);
   svg.append(defs);
 
   // 1. Background ring — spans the full circle, slightly thicker so it peeks inside the gauge.
@@ -171,10 +202,10 @@ export function buildAccuracyCircle(inputs: AccuracyCircleInputs): {
   });
   svg.append(gauge);
 
-  // Rank badges, on the graded ring.
+  // Rank badges, on a track outside the rings (the badge layer's negative padding).
   const badgeGroup = el('g', { class: 'rs-badges' });
   for (const badge of rankBadges(cutoffs)) {
-    const p = pointAt(cx, cy, gradedR - gradedWidth / 2, badge.position);
+    const p = pointAtEllipse(cx, cy, outerR + BADGE_OUTSET_X, outerR + BADGE_OUTSET_Y, badge.position);
     const g = el('g', { transform: `translate(${p.x} ${p.y})` });
     // RankBadge container `Size = Vector2(28, 14)`, origin centred.
     g.append(el('rect', {
@@ -196,10 +227,11 @@ export function buildAccuracyCircle(inputs: AccuracyCircleInputs): {
   }
   svg.append(badgeGroup);
 
-  // The rank letter in the centre.
+  // The rank letter in the centre: white, with a glow in the rank's colour.
   const letter = el('text', {
     x: cx, y: cy,
-    fill: `url(#${letterGradId})`,
+    fill: '#ffffff',
+    filter: `url(#${glowId})`,
     'font-family': FONT.family,
     'font-size': FONT.rankLetter.size,
     'font-weight': FONT.rankLetter.weight,

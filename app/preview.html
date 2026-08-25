@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>results panel preview</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Exo:wght@300;400;600;700&display=swap" />
+  <style>
+    body {
+      margin: 0; min-height: 100vh; background: #1a1a2e;
+      display: flex; align-items: flex-start; justify-content: center;
+      gap: 40px; padding: 40px;
+      font-family: "Exo", system-ui, sans-serif;
+    }
+    .caption { color: #a0a0b0; font-size: 12px; text-align: center; margin-bottom: 10px; }
+    .col { display: flex; flex-direction: column; align-items: center; }
+  </style>
+</head>
+<body>
+  <script type="module">
+    import { buildResultsPanel, resultsPanelCss, JUDGEMENT_COLOUR } from './results/panel.js';
+
+    const style = document.createElement('style');
+    style.textContent = resultsPanelCss();
+    document.head.append(style);
+
+    const CUTOFFS = { D: 0, C: 0.7, B: 0.8, A: 0.9, S: 0.95, X: 1 };
+
+    // The exact figures from the reference screenshot, so every field can be compared against
+    // osu! side by side rather than judged by feel.
+    const reference = {
+      title: 'Akikaze no Answer',
+      artist: 'Flower',
+      difficulty: 'Sentimental Memories',
+      mapper: 'Nakano-',
+      playerName: '-Lilac-',
+      avatarUrl: null,
+      score: 26464746,
+      accuracy: 0.9844,
+      rank: 'S',
+      cutoffs: CUTOFFS,
+      maxCombo: 1445,
+      beatmapMaxCombo: 1445,
+      pp: 166,
+      starRating: 4.81,
+      judgements: [
+        { label: 'great', value: '893', colour: JUDGEMENT_COLOUR.great },
+        { label: 'ok', value: '27', colour: JUDGEMENT_COLOUR.ok },
+        { label: 'meh', value: '0', colour: JUDGEMENT_COLOUR.meh },
+        { label: 'miss', value: '0', colour: JUDGEMENT_COLOUR.miss },
+      ],
+      subJudgements: [
+        { label: 'slider tick', value: '56', max: '56', colour: JUDGEMENT_COLOUR.sliderTick },
+        { label: 'slider end', value: '469', max: '469', colour: JUDGEMENT_COLOUR.sliderEnd },
+        { label: 'spinner bonus', value: '29', max: '32', colour: JUDGEMENT_COLOUR.bonus },
+        { label: 'spinner spin', value: '45', max: '45', colour: JUDGEMENT_COLOUR.bonus },
+      ],
+      playedOn: '25 August 2026 6:42 PM',
+    };
+
+    // Cases that exercise the gauge's corrections, which a single sample cannot show.
+    const variants = [
+      ['reference screenshot (S, 98.44%)', reference],
+      ['SS — ring fills completely', {
+        ...reference, rank: 'X', accuracy: 1, score: 30000000, pp: 320,
+        judgements: [
+          { label: 'great', value: '920', colour: JUDGEMENT_COLOUR.great },
+          { label: 'ok', value: '0', colour: JUDGEMENT_COLOUR.ok },
+          { label: 'meh', value: '0', colour: JUDGEMENT_COLOUR.meh },
+          { label: 'miss', value: '0', colour: JUDGEMENT_COLOUR.miss },
+        ],
+      }],
+      ['failed S — 100% acc but ranked A', {
+        ...reference, rank: 'A', accuracy: 1, maxCombo: 812, pp: 90,
+      }],
+      ['no pp / no star rating (manual replay)', {
+        ...reference, pp: null, starRating: null, rank: 'B', accuracy: 0.8123,
+      }],
+      ['D rank, low accuracy', {
+        ...reference, rank: 'D', accuracy: 0.4211, score: 812345, maxCombo: 61, pp: 4,
+        judgements: [
+          { label: 'great', value: '301', colour: JUDGEMENT_COLOUR.great },
+          { label: 'ok', value: '210', colour: JUDGEMENT_COLOUR.ok },
+          { label: 'meh', value: '188', colour: JUDGEMENT_COLOUR.meh },
+          { label: 'miss', value: '221', colour: JUDGEMENT_COLOUR.miss },
+        ],
+      }],
+    ];
+
+    for (const [caption, data] of variants) {
+      const col = document.createElement('div');
+      col.className = 'col';
+      const cap = document.createElement('div');
+      cap.className = 'caption';
+      cap.textContent = caption;
+      col.append(cap, buildResultsPanel(data));
+      document.body.append(col);
+    }
+
+    window.__ready = true;
+  </script>
+</body>
+</html>
