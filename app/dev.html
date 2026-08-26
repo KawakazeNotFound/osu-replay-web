@@ -77,29 +77,32 @@
 
   <script type="module">
     import { buildFlow } from './player/flow.js';
-    import { loadFromInput, loadLocalReplay } from './player/load.js';
+    import { loadFromInput, loadLocalReplay, loadAutoFromBeatmap } from './player/load.js';
     import { cachedUser, completePendingLogin, fetchMe, isLoggedIn, logout, startLogin }
       from './player/auth.js';
     import { icon, iconCss } from './results/icons.js';
     import { DEFAULT_SKIN, getAllSkinNames, importCustomSkinFile } from './player/skins.js';
     import { buildMenuBar, menuBarCss } from './player/menubar.js';
+    import { buildMatchView, matchViewCss } from './player/matchView.js';
 
-    // Inject styles for menubar and icons
+    // Inject styles for menubar, matchView, and icons
     const iconStyle = document.createElement('style');
-    iconStyle.textContent = [iconCss(), menuBarCss()].join('\n');
+    iconStyle.textContent = [iconCss(), menuBarCss(), matchViewCss()].join('\n');
     document.head.append(iconStyle);
 
+    const stageEl = document.getElementById('stage');
     const canvas = document.createElement('canvas');
     canvas.width = 1280;
     canvas.height = 720;
 
-    const flow = buildFlow({ host: document.getElementById('stage'), canvas });
+    const flow = buildFlow({ host: stageEl, canvas });
 
     // One AudioContext for the page
     let audioContext = null;
     const ctx = () => (audioContext ??= new AudioContext());
 
     let selectedSkin = DEFAULT_SKIN;
+    let currentMode = 'replay'; // 'replay' | 'auto' | 'match'
     let lastLoader = null;
     let pendingOsr = null;
     let pendingOsz = null;
@@ -129,9 +132,43 @@
       }
     }
 
+    const matchView = buildMatchView({
+      host: stageEl,
+      getAudioContext: ctx,
+      getSkin: () => selectedSkin,
+      log: say,
+      onExit: () => {
+        currentMode = 'replay';
+        say('Exited match view');
+      },
+    });
+
     const menuBar = buildMenuBar({
+      onSelectMode: mode => {
+        currentMode = mode;
+        if (mode === 'match') {
+          flow.clear();
+          matchView.openRoomDialog();
+        } else if (mode === 'auto') {
+          flow.clear();
+          say('Auto mode: paste a beatmap URL or ID to watch perfect play');
+        } else {
+          matchView.destroy();
+          say('Replay mode: load a score or replay to watch');
+        }
+      },
+      getActiveMode: () => currentMode,
+      onOpenMatchRoom: () => {
+        currentMode = 'match';
+        flow.clear();
+        matchView.openRoomDialog();
+      },
       onImportUrl: url => {
-        void run(options => loadFromInput(url, options));
+        if (currentMode === 'auto') {
+          void run(options => loadAutoFromBeatmap(url, options));
+        } else {
+          void run(options => loadFromInput(url, options));
+        }
       },
       onImportOsu: file => {
         say(`Imported .osu: ${file.name}`);
@@ -157,7 +194,7 @@
       onSelectSkin: skinName => {
         selectedSkin = skinName;
         say(`Skin switched to: ${skinName}`);
-        if (lastLoader !== null) void run(lastLoader);
+        if (lastLoader !== null && currentMode !== 'match') void run(lastLoader);
       },
       onImportSkin: async file => {
         try {
@@ -165,7 +202,7 @@
           const name = await importCustomSkinFile(file, ctx());
           selectedSkin = name;
           say(`Skin "${name}" imported successfully!`);
-          if (lastLoader !== null) void run(lastLoader);
+          if (lastLoader !== null && currentMode !== 'match') void run(lastLoader);
         } catch (err) {
           console.error(err);
           say(`Skin import failed: ${err instanceof Error ? err.message : String(err)}`);
@@ -184,6 +221,7 @@
       },
       onExit: () => {
         flow.clear();
+        matchView.destroy();
         say('Cleared replay session');
       },
       getSelectedSkin: () => selectedSkin,

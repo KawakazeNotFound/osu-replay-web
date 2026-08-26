@@ -5,7 +5,7 @@
  * URL modal prompt, local file imports (.osu, .osz, .osr, .osk), and skin selector.
  */
 
-import { icon } from '../results/icons.js';
+import { icon, type IconName } from '../results/icons.js';
 
 export interface MenuBarOptions {
   readonly onImportUrl: (url: string) => void;
@@ -14,6 +14,9 @@ export interface MenuBarOptions {
   readonly onImportOsr: (file: File) => void;
   readonly onSelectSkin: (skinName: string) => void;
   readonly onImportSkin: (file: File) => void;
+  readonly onSelectMode?: (mode: 'replay' | 'auto' | 'match') => void;
+  readonly getActiveMode?: () => 'replay' | 'auto' | 'match';
+  readonly onOpenMatchRoom?: () => void;
   readonly onToggleSettings?: () => void;
   readonly onToggleFullscreen?: () => void;
   readonly onReload?: () => void;
@@ -178,7 +181,7 @@ export function buildMenuBar(options: MenuBarOptions): MenuBarHandle {
   // ---- Menu Item Renderers ----
   interface MenuItemSpec {
     readonly label: string;
-    readonly icon?: string;
+    readonly icon?: IconName;
     readonly badge?: string;
     readonly isChecked?: boolean;
     readonly isDivider?: boolean;
@@ -222,14 +225,19 @@ export function buildMenuBar(options: MenuBarOptions): MenuBarHandle {
       labelWrapper.className = 'rv-menu-row-label';
 
       if (item.isChecked === true) {
-        // Drawn, not a glyph: `✓` renders as a full-colour emoji on some platforms and as tofu
-        // on others, and no stylesheet can correct that — the shape belongs to the user's font
-        // stack. Every other mark in this app goes through icons.ts for the same reason.
         const check = document.createElement('span');
         check.className = 'rv-menu-check';
         check.append(icon('check', { className: 'rv-icon' }));
         labelWrapper.append(check);
       }
+
+      if (item.icon !== undefined) {
+        const iconSpan = document.createElement('span');
+        iconSpan.className = 'rv-menu-item-icon';
+        iconSpan.append(icon(item.icon, { className: 'rv-icon' }));
+        labelWrapper.append(iconSpan);
+      }
+
       labelWrapper.append(document.createTextNode(item.label));
       row.append(labelWrapper);
 
@@ -241,7 +249,7 @@ export function buildMenuBar(options: MenuBarOptions): MenuBarHandle {
       } else if (item.children !== undefined) {
         const arrow = document.createElement('span');
         arrow.className = 'rv-menu-arrow';
-        arrow.textContent = '›';
+        arrow.append(icon('chevron-right', { className: 'rv-icon' }));
         row.append(arrow);
       }
 
@@ -338,6 +346,30 @@ export function buildMenuBar(options: MenuBarOptions): MenuBarHandle {
     }));
   };
 
+  const getModeItems = (): readonly MenuItemSpec[] => {
+    const cur = options.getActiveMode?.() ?? 'replay';
+    return [
+      {
+        label: '单人回放 (Replay)',
+        icon: 'mode-single',
+        isChecked: cur === 'replay',
+        onClick: () => options.onSelectMode?.('replay'),
+      },
+      {
+        label: '自动演示 (Auto)',
+        icon: 'mode-auto',
+        isChecked: cur === 'auto',
+        onClick: () => options.onSelectMode?.('auto'),
+      },
+      {
+        label: '多人比赛 (Match)',
+        icon: 'mode-match',
+        isChecked: cur === 'match',
+        onClick: () => options.onSelectMode?.('match'),
+      },
+    ];
+  };
+
   const getFileMenuItems = (): readonly MenuItemSpec[] => [
     {
       label: '导入 (Import)',
@@ -345,6 +377,11 @@ export function buildMenuBar(options: MenuBarOptions): MenuBarHandle {
         {
           label: '从链接导入… (From URL)',
           onClick: openUrlModal,
+        },
+        {
+          label: '从比赛房间导入… (Match Room)',
+          icon: 'mode-match',
+          onClick: () => options.onOpenMatchRoom?.(),
         },
         {
           label: '从本地导入 (Local Files)',
@@ -377,6 +414,10 @@ export function buildMenuBar(options: MenuBarOptions): MenuBarHandle {
   ];
 
   const getViewMenuItems = (): readonly MenuItemSpec[] => [
+    {
+      label: '模式 (Mode)',
+      children: getModeItems,
+    },
     {
       label: '皮肤 (Skins)',
       children: [
@@ -623,6 +664,12 @@ export function menuBarCss(): string {
   display: inline-flex; align-items: center;
   margin-right: 4px;
 }
+.rv-menu-item-icon {
+  font-size: 14px;
+  color: #4ed9c8;
+  display: inline-flex; align-items: center;
+  margin-right: 6px;
+}
 .rv-menu-badge {
   font-size: 10px;
   font-weight: 700;
@@ -633,9 +680,9 @@ export function menuBarCss(): string {
   letter-spacing: 0.05em;
 }
 .rv-menu-arrow {
-  font-size: 16px;
-  line-height: 1;
+  font-size: 14px;
   color: rgba(255, 255, 255, 0.5);
+  display: inline-flex; align-items: center;
 }
 .rv-menu-divider {
   height: 1px;

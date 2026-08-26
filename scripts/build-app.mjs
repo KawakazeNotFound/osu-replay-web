@@ -34,6 +34,7 @@ const ENTRIES = [
   'player/skins.ts',
   'player/match.ts',
   'player/matchRoom.ts',
+  'player/matchView.ts',
   'results/panel.ts',
   'results/icons.ts',
   'results/reveal.ts',
