@@ -287,9 +287,6 @@ ${iconCss()}
   font-size: ${FONT.rankLetter.size}px;
   font-weight: ${FONT.rankLetter.weight};
   letter-spacing: ${FONT.rankLetter.letterSpacing}px;
-  /* letter-spacing adds trailing space after the last glyph, which shifts a two-letter rank
-     ("SS") off centre; the padding puts it back. */
-  padding-left: ${-FONT.rankLetter.letterSpacing}px;
   color: #ffffff;
   line-height: 1;
   pointer-events: none;
