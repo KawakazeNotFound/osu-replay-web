@@ -13,9 +13,9 @@
  */
 
 import {
-  analyzeReplay, buildSkin, computeModDifficulty, createReplaySession, generateStdAutoReplay,
-  loadSkinFromDir, md5, parseBeatmap, parseReplay, synthesizeAutoReplay,
-  type CoreSession, type Grade, type ReplayData,
+  analyzeReplay, buildSkin, computeModDifficulty, computeSubJudgements, createReplaySession,
+  generateStdAutoReplay, loadSkinFromDir, md5, parseBeatmap, parseReplay, synthesizeAutoReplay,
+  type CoreSession, type Grade, type ReplayData, type SubJudgementCount,
 } from '../../src/index.js';
 import { JUDGEMENT_COLOUR, type ResultsPanelData, type StatisticEntry } from '../results/panel.js';
 import type { LoadedReplay } from './flow.js';
@@ -67,12 +67,9 @@ function creatorFrom(rawOsu: Uint8Array | undefined): string {
  * disagrees with osu! — worth surfacing elsewhere, not worth papering over here. A synthesised
  * auto replay has no header totals, so those are counted from the analysis instead.
  *
- * The sub-judgement row (SLIDER TICK / SLIDER END / SPINNER BONUS / SPINNER SPIN) is left empty
- * on purpose. `HitResult` marks slider sub-judgements with `isSliderSub` but does not separate
- * tick from repeat from tail, and nothing exposes the per-category maxima; the engine computes
- * that split internally (`buildSliderSubKinds`) but keeps it private. Rather than print counts
- * derived from a guess, the row is omitted until the engine exports the classification — the
- * panel already handles an absent row.
+ * The sub-judgement row comes from `computeSubJudgements`, which re-judges the replay to reach
+ * the slider tick/repeat/tail split and the spinner rotation. That is a second pass over the
+ * input frames, so it is only done for osu!standard — the other rulesets have no such row.
  */
 export function resultsDataFromSession(
   session: CoreSession,
@@ -126,6 +123,26 @@ export function resultsDataFromSession(
   const grade: Grade = lastScore?.grade ?? 'D';
   const maxCombo = meta.fromHeader ? replay.maxCombo : (lastScore?.maxCombo ?? 0);
 
+  // Third row, only where it means something: these four categories are osu!standard's.
+  const subJudgements: StatisticEntry[] = [];
+  if (replay.mode === 0) {
+    const sub = computeSubJudgements(beatmap, replay, analysis.modDiff);
+    // lazer shows a category only when the beatmap offers any of it — a map with no spinners
+    // should not display a 0/0 cell.
+    const cell = (
+      label: string, value: SubJudgementCount, colour: string,
+    ): void => {
+      if (value.max === 0) return;
+      subJudgements.push({
+        label, value: String(value.count), max: String(value.max), colour,
+      });
+    };
+    cell('slider tick', sub.sliderTick, JUDGEMENT_COLOUR.sliderTick);
+    cell('slider end', sub.sliderEnd, JUDGEMENT_COLOUR.sliderEnd);
+    cell('spinner bonus', sub.spinnerBonus, JUDGEMENT_COLOUR.bonus);
+    cell('spinner spin', sub.spinnerSpin, JUDGEMENT_COLOUR.bonus);
+  }
+
   return {
     title: beatmap.title !== '' ? beatmap.title : '(unknown title)',
     artist: beatmap.artist,
@@ -145,7 +162,7 @@ export function resultsDataFromSession(
     pp: meta.pp ?? null,
     starRating: meta.starRating ?? null,
     judgements,
-    subJudgements: [],
+    subJudgements,
     playedOn: meta.playedOn ?? null,
   };
 }

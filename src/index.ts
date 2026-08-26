@@ -26,6 +26,13 @@ export { md5 } from './utils/md5';
 export { computeModDifficulty, hasMod, Mod, type ModDifficulty } from './utils/modDifficulty';
 export { applyStacking } from './utils/stacking';
 export { analyzeReplay, type ReplayAnalysis } from './analyze';
+// The four sub-judgement categories osu!'s results screen shows as achieved/possible. Derived
+// here rather than read off HitResult, which flags slider subs without saying which kind each is
+// and carries no maxima at all.
+export {
+  computeSubJudgements, sliderSubJudgementsFromResults,
+  type SubJudgementBreakdown, type SubJudgementCount,
+} from './utils/subJudgements';
 export type { ScoreFrame, Grade } from './utils/scoreProcessor';
 export type { AccFrame, ComboFrame } from './renderer/HUDRenderer';
 export type { URTimeline, URHit, URZone } from './renderer/URBarRenderer';
