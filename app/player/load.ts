@@ -14,7 +14,7 @@
 
 import {
   analyzeReplay, buildSkin, computeModDifficulty, computeSubJudgements, createReplaySession,
-  generateStdAutoReplay, loadSkinFromDir, md5, parseBeatmap, parseReplay, synthesizeAutoReplay,
+  generateStdAutoReplay, md5, parseBeatmap, parseReplay, synthesizeAutoReplay,
   type CoreSession, type Grade, type ReplayData, type SubJudgementCount,
 } from '../../src/index.js';
 import { JUDGEMENT_COLOUR, type ResultsPanelData, type StatisticEntry } from '../results/panel.js';
@@ -24,15 +24,23 @@ import {
   type ScoreMeta,
 } from './osuApi.js';
 import { isLoggedIn } from './auth.js';
+import { DEFAULT_SKIN, loadSkin } from './skins.js';
 
 /** osu!standard cutoffs, as lazer's ruleset reports them (ScoreProcessor.cs L34-39). */
 const CUTOFFS = { D: 0, C: 0.7, B: 0.8, A: 0.9, S: 0.95, X: 1 } as const;
 
-/** Where the sample skin lives on the dev server. */
-const SKIN_URL = '/assets/skin';
 const LAZER_DEFAULTS_URL = '/assets/lazer-defaults';
 
 export type LogFn = (message: string) => void;
+
+/** Options every loader accepts, so adding one does not change four signatures. */
+export interface LoadOptions {
+  readonly audioContext: AudioContext;
+  readonly canvas: HTMLCanvasElement;
+  readonly log: LogFn;
+  /** Skin directory name under /skins; defaults to the captured page's own preselection. */
+  readonly skin?: string;
+}
 
 /** Reads a File as an ArrayBuffer. */
 async function readFile(file: File): Promise<ArrayBuffer> {
@@ -222,16 +230,16 @@ function formatPlayedOn(iso: string | null): string | null {
   return `${day} ${month} ${date.getFullYear()} ${time}`;
 }
 
-/** Shared session construction, so both entry points agree on skin and defaults. */
+/** Shared session construction, so every entry point agrees on skin and defaults. */
 async function buildSession(
   replay: ReplayData,
   oszBuffer: ArrayBuffer,
-  audioContext: AudioContext,
-  canvas: HTMLCanvasElement,
-  log: LogFn,
+  options: LoadOptions,
 ): Promise<CoreSession> {
-  log('loading skin…');
-  const skin = await loadSkinFromDir(SKIN_URL, audioContext);
+  const { audioContext, canvas, log } = options;
+  const name = options.skin ?? DEFAULT_SKIN;
+  log(`loading skin ${name}…`);
+  const skin = await loadSkin(name, audioContext);
   log('building session…');
   return await createReplaySession({
     canvas,
@@ -247,17 +255,15 @@ async function buildSession(
 export async function loadLocalReplay(
   osrFile: File,
   oszFile: File | null,
-  audioContext: AudioContext,
-  canvas: HTMLCanvasElement,
-  log: LogFn,
+  options: LoadOptions,
 ): Promise<LoadedReplay> {
   if (oszFile === null) {
     throw new Error('a .osz is required alongside the .osr in this dev page');
   }
-  log('reading files…');
+  options.log('reading files…');
   const [osrBuffer, oszBuffer] = await Promise.all([readFile(osrFile), readFile(oszFile)]);
   const replay = await parseReplay(osrBuffer);
-  const session = await buildSession(replay, oszBuffer, audioContext, canvas, log);
+  const session = await buildSession(replay, oszBuffer, options);
 
   return {
     session,
@@ -274,10 +280,9 @@ export async function loadLocalReplay(
  */
 export async function loadAutoFromBeatmap(
   ref: string,
-  audioContext: AudioContext,
-  canvas: HTMLCanvasElement,
-  log: LogFn,
+  options: LoadOptions,
 ): Promise<LoadedReplay> {
+  const { log } = options;
   const beatmapId = parseBeatmapRef(ref);
   if (beatmapId === null) throw new Error(`not a beatmap id or URL: ${ref}`);
 
@@ -294,7 +299,7 @@ export async function loadAutoFromBeatmap(
   const stub = synthesizeAutoReplay(beatmap, hash, [], 0);
   const modDiff = computeModDifficulty(beatmap, stub);
   const replay = synthesizeAutoReplay(beatmap, hash, generateStdAutoReplay(beatmap, modDiff), 0);
-  const session = await buildSession(replay, oszBuffer, audioContext, canvas, log);
+  const session = await buildSession(replay, oszBuffer, options);
 
   return {
     session,
@@ -314,10 +319,9 @@ export async function loadAutoFromBeatmap(
  */
 export async function loadOnlineScore(
   input: string,
-  audioContext: AudioContext,
-  canvas: HTMLCanvasElement,
-  log: LogFn,
+  options: LoadOptions,
 ): Promise<LoadedReplay> {
+  const { log } = options;
   const ref = parseScoreRef(input);
   if (ref === null) throw new Error(`not a score id or URL: ${input}`);
 
@@ -337,7 +341,7 @@ export async function loadOnlineScore(
 
   log('finding the beatmap…');
   const oszBuffer = await downloadBeatmapSet(await setIdForHash(replay.beatmapHash), log);
-  const session = await buildSession(replay, oszBuffer, audioContext, canvas, log);
+  const session = await buildSession(replay, oszBuffer, options);
 
   return {
     session,
@@ -360,23 +364,16 @@ export async function loadOnlineScore(
  * and a beatmap otherwise, which matches what someone pasting an id most likely means in each
  * case.
  */
-export async function loadFromInput(
-  input: string,
-  audioContext: AudioContext,
-  canvas: HTMLCanvasElement,
-  log: LogFn,
-): Promise<LoadedReplay> {
+export async function loadFromInput(input: string, options: LoadOptions): Promise<LoadedReplay> {
   const trimmed = input.trim();
-  if (/\/scores\//i.test(trimmed)) {
-    return await loadOnlineScore(trimmed, audioContext, canvas, log);
-  }
+  if (/\/scores\//i.test(trimmed)) return await loadOnlineScore(trimmed, options);
   if (/beatmapsets?\/|\/beatmaps\//i.test(trimmed)) {
-    return await loadAutoFromBeatmap(trimmed, audioContext, canvas, log);
+    return await loadAutoFromBeatmap(trimmed, options);
   }
   if (/^\d+$/.test(trimmed)) {
     return isLoggedIn()
-      ? await loadOnlineScore(trimmed, audioContext, canvas, log)
-      : await loadAutoFromBeatmap(trimmed, audioContext, canvas, log);
+      ? await loadOnlineScore(trimmed, options)
+      : await loadAutoFromBeatmap(trimmed, options);
   }
   throw new Error('paste an osu! score URL, a beatmap URL, or an id');
 }

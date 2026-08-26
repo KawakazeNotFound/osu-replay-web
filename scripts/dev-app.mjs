@@ -14,6 +14,10 @@ const PORT = 8900;
 // Worker's public .osu route. Mounted here so the pages use the same URLs the deployed site will.
 const MOUNTS = [
   ['/assets/', path.resolve('assets')],
+  // The skin picker reads /skins, which is where the deployed Worker serves the captured set.
+  // Mounted from site/ so the dev page offers the same 12 rather than a smaller local set —
+  // a different URL or list per environment would mean the two builds exercise different code.
+  ['/skins/', path.resolve('site', 'skins')],
 ];
 const PROXY_TARGET = 'https://osu-replayviewer.shirasuazusa.workers.dev';
 

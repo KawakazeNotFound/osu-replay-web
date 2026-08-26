@@ -161,7 +161,20 @@
     select.addEventListener('change', () => show(select.value, true));
     document.getElementById('replay-anim').addEventListener('click', () => show(select.value, true));
 
-    show(select.value, true);
+    const params = new URLSearchParams(location.search);
+    const variantParam = params.get('variant');
+    if (variantParam !== null) {
+      if (variants[variantParam]) {
+        select.value = variantParam;
+      } else {
+        const keys = Object.keys(variants);
+        const idx = parseInt(variantParam, 10);
+        if (!isNaN(idx) && keys[idx]) {
+          select.value = keys[idx];
+        }
+      }
+    }
+    show(select.value, params.get('animate') !== 'false');
     window.__ready = true;
   </script>
 </body>

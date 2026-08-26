@@ -259,11 +259,16 @@ export function buildAccuracyCircle(inputs: AccuracyCircleInputs): {
   // flex centring an HTML element is correct for any font without measuring anything.
   const letter = document.createElement('div');
   letter.className = 'rs-rank-letter';
-  letter.textContent = rankLetter(rank);
   const rankColour = RANK_COLOUR[rank as keyof typeof RANK_COLOUR] ?? RANK_COLOUR.D;
   // RankText.cs: a white letter with a glow in the rank's colour. The DrawableRank gradients are
   // for the small badges, not this.
   letter.style.textShadow = `0 0 18px ${rankColour}, 0 0 6px ${rankColour}`;
+  // Keep the optical correction on a child so the reveal animation's transform on the wrapper
+  // does not replace it. Torus's capital S has a visibly right/down-heavy ink box even when its
+  // line box is mathematically centred; these offsets put the drawn glyph on the ring centre.
+  const glyph = document.createElement('span');
+  glyph.textContent = rankLetter(rank);
+  letter.append(glyph);
 
   // One positioned wrapper holds both layers, so the caller does not have to.
   const container = document.createElement('div');

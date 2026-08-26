@@ -29,6 +29,7 @@ const ENTRIES = [
   'player/transport.ts',
   'player/osuApi.ts',
   'player/auth.ts',
+  'player/skins.ts',
   'results/panel.ts',
   'results/icons.ts',
   'results/reveal.ts',

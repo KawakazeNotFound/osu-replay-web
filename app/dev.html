@@ -38,6 +38,11 @@
     }
     .bar button:hover, .bar label.file:hover { background: #164080; }
     .bar input[type="file"] { display: none; }
+    .bar select {
+      background: #0f1830; color: #e8e8f4; border: 1px solid #2a2a4a;
+      border-radius: 8px; padding: 8px 10px; font: inherit; font-size: 13px; cursor: pointer;
+      max-width: 150px;
+    }
     #status { font-size: 12px; opacity: 0.8; white-space: nowrap; }
 
     /* Signed-in chip, laid out like osu!'s own toolbar: name, then a rounded avatar. */
@@ -69,6 +74,7 @@
     <label class="file">.osr<input type="file" id="osr" accept=".osr" /></label>
     <label class="file">.osz<input type="file" id="osz" accept=".osz" /></label>
     <button id="load-local" type="button">Load local</button>
+    <select id="skin" title="Skin"></select>
     <span id="user-slot"></span>
     <span id="status"></span>
   </div>
@@ -80,6 +86,7 @@
     import { cachedUser, completePendingLogin, fetchMe, isLoggedIn, logout, startLogin }
       from './player/auth.js';
     import { icon, iconCss } from './results/icons.js';
+    import { DEFAULT_SKIN, SKIN_NAMES } from './player/skins.js';
 
     // The flow injects its own stylesheet; icons need theirs before the chip is built.
     const iconStyle = document.createElement('style');
@@ -100,10 +107,29 @@
     let audioContext = null;
     const ctx = () => (audioContext ??= new AudioContext());
 
+    // Skin picker. The 12 skins the captured page ships are already served from /skins, so this
+    // offers the same set rather than a private one.
+    const skinSelect = document.getElementById('skin');
+    for (const name of SKIN_NAMES) {
+      const option = document.createElement('option');
+      option.value = name;
+      option.textContent = name;
+      if (name === DEFAULT_SKIN) option.selected = true;
+      skinSelect.append(option);
+    }
+
+    /** Options every loader takes; read fresh so a skin change applies to the next load. */
+    const loadOptions = () => ({
+      audioContext: ctx(),
+      canvas,
+      log: say,
+      skin: skinSelect.value,
+    });
+
     async function run(loader) {
       try {
         say('loading…');
-        const replay = await loader(ctx(), canvas, say);
+        const replay = await loader(loadOptions());
         flow.present(replay);
         say('ready — press Watch replay');
       } catch (err) {
@@ -115,7 +141,7 @@
     document.getElementById('load-online').addEventListener('click', () => {
       const ref = document.getElementById('score-url').value.trim();
       if (ref === '') { say('paste a score URL, beatmap URL, or id'); return; }
-      void run((audio, cv, log) => loadFromInput(ref, audio, cv, log));
+      void run(options => loadFromInput(ref, options));
     });
 
     // ---- osu! sign-in -------------------------------------------------------------------
@@ -194,7 +220,7 @@
       const osr = document.getElementById('osr').files?.[0] ?? null;
       const osz = document.getElementById('osz').files?.[0] ?? null;
       if (osr === null) { say('choose a .osr'); return; }
-      void run((audio, cv, log) => loadLocalReplay(osr, osz, audio, cv, log));
+      void run(options => loadLocalReplay(osr, osz, options));
     });
 
     window.__flow = flow;

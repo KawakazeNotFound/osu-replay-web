@@ -60,7 +60,14 @@ function flowCss(): string {
   transition: opacity 200ms ease;
 }
 .rv-screen[hidden] { display: none; }
-.rv-results { overflow-y: auto; padding: 24px 0; }
+.rv-results {
+  overflow-y: auto;
+  padding: 24px 0;
+  align-items: flex-start;
+}
+.rv-results > * {
+  margin: auto 0;
+}
 .rv-playback { background: #000; }
 .rv-playback canvas {
   max-width: 100%; max-height: 100%;

@@ -291,6 +291,13 @@ ${iconCss()}
   line-height: 1;
   pointer-events: none;
 }
+.rs-rank-letter > span {
+  display: block;
+  position: relative;
+  /* Optical correction measured against the outer ring at the reference viewport. */
+  left: -7.5px;
+  top: -6px;
+}
 /* Badges scale about their own centre; the outer group carries the position. */
 .rs-badge { transform-origin: 0 0; transform-box: view-box; }
 .rs-panel {
