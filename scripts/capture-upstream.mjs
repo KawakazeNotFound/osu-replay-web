@@ -1,4 +1,5 @@
 import esbuild from 'esbuild';
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
@@ -212,6 +213,22 @@ async function rewriteCapturedAssets(jsAssets) {
     await fs.writeFile(pagePath, stripped);
     console.log(`stripped upstream analytics beacon from ${page}`);
   }
+}
+
+/**
+ * Rebuilds our own UI into site/app/. capture:upstream owns site/, so without this the app
+ * build would only survive until the next capture — and it has to sit on the same origin as the
+ * captured page to reach the osu! token in localStorage.
+ */
+async function buildOwnApp() {
+  const script = path.join(root, 'scripts', 'build-app.mjs');
+  try {
+    await fs.access(script);
+  } catch {
+    console.warn('WARNING: scripts/build-app.mjs missing — site/app/ not built');
+    return;
+  }
+  execFileSync(process.execPath, [script], { stdio: 'inherit' });
 }
 
 /**
@@ -460,6 +477,7 @@ for (const skin of skinNames) await captureSkin(skin);
 
 await rewriteCapturedAssets([...captured].filter(a => a.endsWith('.js')));
 await copyLazerDefaults();
+await buildOwnApp();
 await addCreditsDisclosure();
 await swapEngineChunk(appAsset);
 await writeOauthConfig();
