@@ -215,8 +215,18 @@ export function settingsOverlayCss(): string {
   padding: 14px;
   display: flex; flex-direction: column; gap: 12px;
   overflow-y: auto;
-  background: rgba(12, 12, 12, 0.82);
-  backdrop-filter: blur(8px);
+  /* Frosted glass: the blur does the work, so the tint stays light enough to see gameplay
+     through. An opaque backdrop would make backdrop-filter pointless. A left-to-right gradient
+     keeps the inner edge softer than the outer one, so the panel reads as sitting over the
+     playfield rather than cutting it off. */
+  background: linear-gradient(
+    to right,
+    rgba(16, 16, 20, 0.28),
+    rgba(16, 16, 20, 0.46)
+  );
+  backdrop-filter: blur(22px) saturate(115%);
+  -webkit-backdrop-filter: blur(22px) saturate(115%);
+  border-left: 1px solid rgba(255, 255, 255, 0.09);
   color: #ffffff;
   font-size: 13px;
   /* Parked just off-screen; slides in rather than fading, matching lazer's push-in. */
@@ -228,7 +238,12 @@ export function settingsOverlayCss(): string {
 }
 .ps-overlay.ps-visible { transform: none; pointer-events: auto; }
 .ps-card {
-  background: #1f1f1f;
+  /* Cards are their own faint glass layer so they read as distinct from the panel without
+     going opaque. */
+  background: rgba(28, 28, 34, 0.42);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  border: 1px solid rgba(255, 255, 255, 0.07);
   border-radius: 10px;
   padding: 12px 14px;
   display: flex; flex-direction: column; gap: 12px;
@@ -237,12 +252,18 @@ export function settingsOverlayCss(): string {
   margin: 0;
   font-size: 14px; font-weight: 600;
   color: #ffffff;
+  /* Text sits over moving gameplay, so it carries its own shadow rather than relying on the
+     panel's tint for contrast. */
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
 }
 .ps-row { display: flex; flex-direction: column; gap: 6px; }
 .ps-row-toggle { flex-direction: row; align-items: center; gap: 8px; }
 .ps-row-head { display: flex; align-items: center; gap: 8px; }
-.ps-label { flex: 1; color: #e8e8e8; }
-.ps-value { color: #ffffff; font-weight: 600; font-variant-numeric: tabular-nums; }
+.ps-label { flex: 1; color: #f0f0f0; text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6); }
+.ps-value {
+  color: #ffffff; font-weight: 600; font-variant-numeric: tabular-nums;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
+}
 .ps-reset {
   width: 18px; height: 18px; flex: 0 0 auto;
   border: none; border-radius: 50%;
@@ -251,30 +272,33 @@ export function settingsOverlayCss(): string {
 }
 .ps-reset:hover { color: #d0b8ff; }
 
-/* Slider: a flat track with a wide pill thumb, filled to the current value. */
+/* Slider: a flat track with a wide pill thumb, filled to the current value. The unfilled part
+   is translucent so the glass shows through it too. */
 .ps-slider {
   --ps-fill: 0%;
+  --ps-track: rgba(255, 255, 255, 0.16);
   -webkit-appearance: none; appearance: none;
   width: 100%; height: 18px;
   background: transparent; cursor: pointer;
 }
 .ps-slider::-webkit-slider-runnable-track {
   height: 18px; border-radius: 9px;
-  background: linear-gradient(to right, ${ACCENT} var(--ps-fill), #3a3a3a var(--ps-fill));
+  background: linear-gradient(to right, ${ACCENT} var(--ps-fill), var(--ps-track) var(--ps-fill));
 }
 .ps-slider::-moz-range-track {
   height: 18px; border-radius: 9px;
-  background: linear-gradient(to right, ${ACCENT} var(--ps-fill), #3a3a3a var(--ps-fill));
+  background: linear-gradient(to right, ${ACCENT} var(--ps-fill), var(--ps-track) var(--ps-fill));
 }
 .ps-slider::-webkit-slider-thumb {
   -webkit-appearance: none; appearance: none;
   width: 34px; height: 18px; border: none; border-radius: 9px;
   background: ${ACCENT};
-  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.25);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.45);
 }
 .ps-slider::-moz-range-thumb {
   width: 34px; height: 18px; border: none; border-radius: 9px;
   background: ${ACCENT};
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.45);
 }
 
 /* Toggle: a filled pill when on, an outlined one when off — as lazer draws it. */
