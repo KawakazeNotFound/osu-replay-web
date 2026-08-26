@@ -30,6 +30,7 @@ const ENTRIES = [
   'player/osuApi.ts',
   'player/auth.ts',
   'results/panel.ts',
+  'results/icons.ts',
   'results/reveal.ts',
   'results/accuracyCircle.ts',
   'results/accuracyGauge.ts',

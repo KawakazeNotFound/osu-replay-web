@@ -11,6 +11,7 @@
  */
 
 import { buildAccuracyCircle } from './accuracyCircle.js';
+import { icon, iconCss } from './icons.js';
 import type { RankCutoffs } from './accuracyGauge.js';
 import {
   FONT, HIT_RESULT_COLOUR, LAYOUT, PANEL, PANEL_COLOUR, PERFECT_GRADIENT, RANK_COLOUR,
@@ -116,7 +117,7 @@ export interface ResultsPanelHandle {
   readonly panel: HTMLElement;
   readonly setGaugeProgress: (p: number) => void;
   readonly gaugeProgress: number;
-  readonly rankLetter: SVGTextElement;
+  readonly rankLetter: HTMLElement;
   readonly badges: readonly { readonly element: SVGGElement; readonly accuracy: number }[];
   readonly scoreElement: HTMLElement;
   /** Final score, so the reveal can roll up to it. */
@@ -169,7 +170,7 @@ export function buildResultsPanel(
     cutoffs: data.cutoffs,
     size: LAYOUT.circleHeight,
   });
-  circleWrap.append(circle.svg);
+  circleWrap.append(circle.container);
   middle.append(circleWrap);
 
   // 3. Total score.
@@ -239,7 +240,11 @@ export function buildResultsPanel(
     replayButton.className = 'rs-watch';
     replayButton.type = 'button';
     replayButton.title = 'Watch replay';
-    replayButton.append(cursorIcon(), text('span', 'rs-watch-label', 'Watch replay'));
+    // The download-with-tick, as osu! marks an available replay — not a cursor glyph.
+    replayButton.append(
+      icon('download-check', { className: 'rv-icon rv-icon-wide rs-watch-icon' }),
+      text('span', 'rs-watch-label', 'Watch replay'),
+    );
     replayButton.addEventListener('click', onWatchReplay);
     bar.append(replayButton);
     root.append(bar);
@@ -268,33 +273,29 @@ export function buildResultsPanel(
   };
 }
 
-/**
- * osu!'s cursor glyph, as the reference's green button uses. Drawn rather than imported so the
- * button carries no external asset.
- */
-function cursorIcon(): SVGSVGElement {
-  const ns = 'http://www.w3.org/2000/svg';
-  const svg = document.createElementNS(ns, 'svg');
-  svg.setAttribute('viewBox', '0 0 24 24');
-  svg.setAttribute('class', 'rs-watch-icon');
-  const path = document.createElementNS(ns, 'path');
-  path.setAttribute('d', 'M5 2.5 L5 19 L9.2 14.6 L12.1 21.5 L14.9 20.3 L12 13.6 L18.2 13.2 Z');
-  path.setAttribute('fill', 'currentColor');
-  svg.append(path);
-  const ring = document.createElementNS(ns, 'circle');
-  ring.setAttribute('cx', '8.4');
-  ring.setAttribute('cy', '19.6');
-  ring.setAttribute('r', '1.9');
-  ring.setAttribute('fill', 'none');
-  ring.setAttribute('stroke', 'currentColor');
-  ring.setAttribute('stroke-width', '1.1');
-  svg.append(ring);
-  return svg;
-}
-
 /** Stylesheet for the panel. Values come from theme.ts so they stay traceable to lazer. */
 export function resultsPanelCss(): string {
   return `
+${iconCss()}
+/* The rings and the centre letter share one box; the letter is an HTML overlay so its centring
+   does not depend on SVG baseline metrics. */
+.rs-circle-stack { position: relative; }
+.rs-circle-stack svg { display: block; }
+.rs-rank-letter {
+  position: absolute; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  font-size: ${FONT.rankLetter.size}px;
+  font-weight: ${FONT.rankLetter.weight};
+  letter-spacing: ${FONT.rankLetter.letterSpacing}px;
+  /* letter-spacing adds trailing space after the last glyph, which shifts a two-letter rank
+     ("SS") off centre; the padding puts it back. */
+  padding-left: ${-FONT.rankLetter.letterSpacing}px;
+  color: #ffffff;
+  line-height: 1;
+  pointer-events: none;
+}
+/* Badges scale about their own centre; the outer group carries the position. */
+.rs-badge { transform-origin: 0 0; transform-box: view-box; }
 .rs-panel {
   width: ${PANEL.expandedWidth}px;
   font-family: ${FONT.family};
@@ -406,7 +407,6 @@ export function resultsPanelCss(): string {
   font-size: ${FONT.playedOn.size}px; font-weight: ${FONT.playedOn.weight};
   opacity: 0.7;
 }
-.rs-rank-letter { paint-order: stroke; }
 .rs-root { display: flex; flex-direction: column; align-items: center; gap: 12px; }
 .rs-buttons {
   width: ${PANEL.expandedWidth}px;
@@ -429,7 +429,7 @@ export function resultsPanelCss(): string {
 }
 .rs-watch:hover { background: #b6e015; }
 .rs-watch:active { transform: translateY(1px); }
-.rs-watch-icon { width: 20px; height: 20px; }
+.rs-watch-icon { height: 22px; }
 `;
 }
 

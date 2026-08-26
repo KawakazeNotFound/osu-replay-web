@@ -12,6 +12,7 @@
  */
 
 import type { CoreSession } from '../../src/index.js';
+import { icon, type IconName } from '../results/icons.js';
 
 /** Coarse and fine jumps, in presentation ms. */
 const JUMP_COARSE_MS = 5000;
@@ -28,13 +29,13 @@ export interface TransportHandle {
   destroy(): void;
 }
 
-function button(label: string, title: string, onClick: () => void): HTMLButtonElement {
+function button(name: IconName, title: string, onClick: () => void): HTMLButtonElement {
   const node = document.createElement('button');
   node.type = 'button';
   node.className = 'pt-button';
   node.title = title;
   node.setAttribute('aria-label', title);
-  node.textContent = label;
+  node.append(icon(name, { className: 'rv-icon' }));
   node.addEventListener('click', onClick);
   return node;
 }
@@ -83,17 +84,17 @@ export function buildTransport(session: CoreSession): TransportHandle {
   buttons.className = 'pt-buttons';
 
   buttons.append(
-    button('⏮', 'Restart', () => seekTo(0)),
-    button('⏪', `Back ${JUMP_COARSE_MS / 1000}s`, () => seekTo(audioSync.currentTimeMs - JUMP_COARSE_MS)),
-    button('◀', `Back ${JUMP_FINE_MS / 1000}s`, () => seekTo(audioSync.currentTimeMs - JUMP_FINE_MS)),
+    button('skip-start', 'Restart', () => seekTo(0)),
+    button('rewind', `Back ${JUMP_COARSE_MS / 1000}s`, () => seekTo(audioSync.currentTimeMs - JUMP_COARSE_MS)),
+    button('step-back', `Back ${JUMP_FINE_MS / 1000}s`, () => seekTo(audioSync.currentTimeMs - JUMP_FINE_MS)),
   );
-  const playButton = button('⏸', 'Play / pause', togglePlay);
+  const playButton = button('pause', 'Play / pause', togglePlay);
   playButton.classList.add('pt-play');
   buttons.append(
     playButton,
-    button('▶', `Forward ${JUMP_FINE_MS / 1000}s`, () => seekTo(audioSync.currentTimeMs + JUMP_FINE_MS)),
-    button('⏩', `Forward ${JUMP_COARSE_MS / 1000}s`, () => seekTo(audioSync.currentTimeMs + JUMP_COARSE_MS)),
-    button('⏭', 'Jump to end', () => seekTo(durationMs)),
+    button('step-forward', `Forward ${JUMP_FINE_MS / 1000}s`, () => seekTo(audioSync.currentTimeMs + JUMP_FINE_MS)),
+    button('fast-forward', `Forward ${JUMP_COARSE_MS / 1000}s`, () => seekTo(audioSync.currentTimeMs + JUMP_COARSE_MS)),
+    button('skip-end', 'Jump to end', () => seekTo(durationMs)),
   );
 
   // ---- scrubber ---------------------------------------------------------------------
@@ -162,7 +163,13 @@ export function buildTransport(session: CoreSession): TransportHandle {
     knob.style.left = `${fraction * 100}%`;
     elapsed.textContent = formatTime(now);
     remaining.textContent = formatTime(durationMs);
-    playButton.textContent = audioSync.isPlaying ? '⏸' : '▶';
+    // Swap the glyph only when it actually changes: this runs every frame, and replacing the
+    // child unconditionally would rebuild an SVG 60 times a second.
+    const wanted: IconName = audioSync.isPlaying ? 'pause' : 'play';
+    if (playButton.dataset['icon'] !== wanted) {
+      playButton.dataset['icon'] = wanted;
+      playButton.replaceChildren(icon(wanted, { className: 'rv-icon' }));
+    }
   }
 
   const tick = (): void => {
@@ -197,14 +204,15 @@ export function transportCss(): string {
 }
 .pt-button {
   border: none; background: transparent; color: #ffffff;
-  font-size: 15px; line-height: 1;
+  font-size: 17px; line-height: 1;
   padding: 6px 7px; border-radius: 6px; cursor: pointer;
-  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
+  display: inline-flex; align-items: center; justify-content: center;
+  filter: drop-shadow(0 1px 3px rgba(0, 0, 0, 0.6));
   transition: background 120ms ease;
 }
 .pt-button:hover { background: rgba(255, 255, 255, 0.14); }
 .pt-play {
-  font-size: 20px;
+  font-size: 21px;
   width: 38px; height: 38px;
   border: 2px solid rgba(255, 255, 255, 0.85); border-radius: 50%;
   display: inline-flex; align-items: center; justify-content: center;

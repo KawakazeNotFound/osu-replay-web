@@ -15,6 +15,8 @@
  * data change, not a code one.
  */
 
+import { icon } from '../results/icons.js';
+
 /** osu!'s Yellow, `OsuColour.Yellow` = #ffcc22 — the accent lazer's settings use. */
 const ACCENT = '#ffcc22';
 
@@ -74,7 +76,7 @@ function resetButton(onReset: () => void): HTMLButtonElement {
   button.type = 'button';
   button.className = 'ps-reset';
   button.title = 'Reset to default';
-  button.textContent = '↺';
+  button.append(icon('reset', { className: 'rv-icon' }));
   button.addEventListener('click', onReset);
   return button;
 }
@@ -268,7 +270,8 @@ export function settingsOverlayCss(): string {
   width: 18px; height: 18px; flex: 0 0 auto;
   border: none; border-radius: 50%;
   background: transparent; color: #b18cff;
-  font-size: 13px; line-height: 1; cursor: pointer; padding: 0;
+  font-size: 15px; line-height: 1; cursor: pointer; padding: 0;
+  display: inline-flex; align-items: center; justify-content: center;
 }
 .ps-reset:hover { color: #d0b8ff; }
 

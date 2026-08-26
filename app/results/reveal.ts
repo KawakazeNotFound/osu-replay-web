@@ -31,7 +31,7 @@ export interface RevealTargets {
   /** Where the gauge settles. */
   readonly gaugeProgress: number;
   /** The centre rank letter. */
-  readonly rankLetter: SVGTextElement;
+  readonly rankLetter: HTMLElement;
   /** Badge elements by rank, with the accuracy each sits at. */
   readonly badges: readonly { readonly element: SVGGElement; readonly accuracy: number }[];
   /** Score text node and its final value. */

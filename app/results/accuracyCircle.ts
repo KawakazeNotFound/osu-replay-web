@@ -111,15 +111,17 @@ export function gradedArcs(cutoffs: RankCutoffs): readonly { rank: GaugeRank; fr
   return spans.map(s => ({ rank: s.rank, from: s.from + half, to: s.to - half }));
 }
 
-/** Builds the circle. Returns the root SVG plus handles the reveal sequence needs. */
+/** Builds the circle. Returns the mountable wrapper plus handles the reveal sequence needs. */
 export function buildAccuracyCircle(inputs: AccuracyCircleInputs): {
+  /** Mount this: it stacks the rings and the centre letter. */
+  container: HTMLElement;
   svg: SVGSVGElement;
   /** Reveals the gauge up to a 0–1 fraction of the ring. */
   setProgress: (p: number) => void;
   /** The fill this score settles at, after lazer's corrections. */
   progress: number;
   /** The centre rank letter, so the reveal can fade it in on its own schedule. */
-  letter: SVGTextElement;
+  letter: HTMLElement;
   /** Badges keyed by rank, so each can pop in when the fill passes it. */
   badges: ReadonlyMap<string, SVGGElement>;
 } {
@@ -160,18 +162,6 @@ export function buildAccuracyCircle(inputs: AccuracyCircleInputs): {
   );
   defs.append(letterGrad);
 
-  // RankText.cs gives the centre letter a glow in the rank's colour. The letter itself stays
-  // white — the DrawableRank gradients above are for the small badges, not this.
-  const glowId = `rs-glow-${rank}`;
-  const glow = el('filter', { id: glowId, x: '-50%', y: '-50%', width: '200%', height: '200%' });
-  glow.append(
-    el('feDropShadow', {
-      dx: 0, dy: 0, stdDeviation: 8,
-      'flood-color': RANK_COLOUR[rank as keyof typeof RANK_COLOUR] ?? RANK_COLOUR.D,
-      'flood-opacity': 0.9,
-    }),
-  );
-  defs.append(glow);
   svg.append(defs);
 
   // 1. Background ring — spans the full circle, slightly thicker so it peeks inside the gauge.
@@ -232,7 +222,13 @@ export function buildAccuracyCircle(inputs: AccuracyCircleInputs): {
   const badges = new Map<string, SVGGElement>();
   for (const badge of rankBadges(cutoffs)) {
     const p = pointAtEllipse(cx, cy, outerR + BADGE_OUTSET_X, outerR + BADGE_OUTSET_Y, badge.position);
-    const g = el('g', { transform: `translate(${p.x} ${p.y})` });
+    // Two nested groups on purpose. A CSS `transform` animation *replaces* the `transform`
+    // attribute, so animating this element directly dropped its translate and the badge scaled up
+    // from the SVG's own origin — reading as a slide in from off-screen rather than a pop. The
+    // outer group holds the position; the inner one is what gets animated.
+    const anchor = el('g', { transform: `translate(${p.x} ${p.y})` });
+    const g = el('g', { class: 'rs-badge' });
+    anchor.append(g);
     // RankBadge container `Size = Vector2(28, 14)`, origin centred.
     g.append(el('rect', {
       x: -BADGE_WIDTH / 2, y: -BADGE_HEIGHT / 2,
@@ -250,26 +246,31 @@ export function buildAccuracyCircle(inputs: AccuracyCircleInputs): {
     });
     label.textContent = rankLetter(badge.rank);
     g.append(label);
-    badgeGroup.append(g);
+    badgeGroup.append(anchor);
     badges.set(badge.rank, g);
   }
   svg.append(badgeGroup);
 
-  // The rank letter in the centre: white, with a glow in the rank's colour.
-  const letter = el('text', {
-    x: cx, y: cy,
-    fill: '#ffffff',
-    filter: `url(#${glowId})`,
-    'font-family': FONT.family,
-    'font-size': FONT.rankLetter.size,
-    'font-weight': FONT.rankLetter.weight,
-    'letter-spacing': FONT.rankLetter.letterSpacing,
-    'text-anchor': 'middle',
-    'dominant-baseline': 'central',
-    class: 'rs-rank-letter',
-  });
+  // The rank letter is an HTML overlay rather than SVG text.
+  //
+  // `dominant-baseline: central` centres on the font's em box, and for a capital letter the
+  // unused descent space pushes the glyph visibly low — which is exactly what it did here, by
+  // about 40px at size 76. Getting that right in SVG means measuring cap height at runtime;
+  // flex centring an HTML element is correct for any font without measuring anything.
+  const letter = document.createElement('div');
+  letter.className = 'rs-rank-letter';
   letter.textContent = rankLetter(rank);
-  svg.append(letter);
+  const rankColour = RANK_COLOUR[rank as keyof typeof RANK_COLOUR] ?? RANK_COLOUR.D;
+  // RankText.cs: a white letter with a glow in the rank's colour. The DrawableRank gradients are
+  // for the small badges, not this.
+  letter.style.textShadow = `0 0 18px ${rankColour}, 0 0 6px ${rankColour}`;
 
-  return { svg, setProgress, progress, letter, badges };
+  // One positioned wrapper holds both layers, so the caller does not have to.
+  const container = document.createElement('div');
+  container.className = 'rs-circle-stack';
+  container.style.width = `${canvas}px`;
+  container.style.height = `${canvas}px`;
+  container.append(svg, letter);
+
+  return { container, svg, setProgress, progress, letter, badges };
 }

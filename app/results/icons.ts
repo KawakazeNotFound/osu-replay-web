@@ -1,0 +1,118 @@
+/**
+ * Inline SVG icons.
+ *
+ * Everything is drawn from paths here rather than using glyphs (`⏸`, `↺`, `⏻`) or an icon font.
+ * Glyphs render as full-colour emoji on some platforms and as tofu on others, and neither is
+ * something a stylesheet can correct — the shape is up to the user's font stack, not to us.
+ * Drawn paths also carry no external asset, so nothing to fetch and nothing to license.
+ *
+ * Each icon is a 24×24 viewBox using `currentColor`, so size and colour come from CSS.
+ */
+
+const SVG_NS = 'http://www.w3.org/2000/svg';
+
+export type IconName =
+  | 'skip-start' | 'rewind' | 'step-back' | 'play' | 'pause'
+  | 'step-forward' | 'fast-forward' | 'skip-end'
+  | 'reset' | 'power' | 'download-check';
+
+/**
+ * Path data per icon. Filled shapes rather than strokes, so they stay crisp at the small sizes
+ * the transport row uses without needing vector-effect hints.
+ */
+const PATHS: Readonly<Record<IconName, readonly string[]>> = {
+  // |◀◀ — a bar plus two triangles.
+  'skip-start': [
+    'M5 5h2.2v14H5z',
+    'M20 5.4v13.2L12.4 12z',
+    'M12.2 5.4v13.2L4.6 12z',
+  ],
+  // ◀◀
+  rewind: [
+    'M12.4 5.4v13.2L4.8 12z',
+    'M20 5.4v13.2L12.4 12z',
+  ],
+  // |◀
+  'step-back': [
+    'M6 5h2.2v14H6z',
+    'M19 5.4v13.2L9.6 12z',
+  ],
+  play: ['M7.5 4.8v14.4L19.5 12z'],
+  pause: ['M7 5h3.4v14H7z', 'M13.6 5h3.4v14h-3.4z'],
+  // ▶|
+  'step-forward': [
+    'M15.8 5h2.2v14h-2.2z',
+    'M5 5.4v13.2L14.4 12z',
+  ],
+  // ▶▶
+  'fast-forward': [
+    'M4 5.4v13.2L11.6 12z',
+    'M11.6 5.4v13.2L19.2 12z',
+  ],
+  // ▶▶| — two triangles plus a bar.
+  'skip-end': [
+    'M16.8 5H19v14h-2.2z',
+    'M4 5.4v13.2L11.6 12z',
+    'M11.8 5.4v13.2L19.4 12z',
+  ],
+  // A circular arrow, anticlockwise, with an arrowhead at the top-left.
+  reset: [
+    'M12 5.2a6.8 6.8 0 1 1-6.8 6.8h2a4.8 4.8 0 1 0 4.8-4.8z',
+    'M12.6 3.1 8.9 5.9l3.7 2.8z',
+  ],
+  // A power symbol: broken ring plus a vertical stem.
+  power: [
+    'M11 3.6h2v7.6h-2z',
+    'M7.4 5.9 8.8 7.4a5.6 5.6 0 1 0 6.4 0l1.4-1.5a7.6 7.6 0 1 1-9.2 0z',
+  ],
+  // A download tray beside a tick, as one unit — osu!'s "the replay is here" affordance. Wider
+  // than the others, hence its own viewBox below.
+  'download-check': [
+    'M11 3.2h2v6.9h-2z',
+    'M12 13.4 7.7 8.6h8.6z',
+    'M4.4 15.4h4.1l1.2 2h4.6l1.2-2h4.1v4.3a1 1 0 0 1-1 1H5.4a1 1 0 0 1-1-1z',
+    'M22 16.2 17.8 12l-1.4 1.4L22 19 34 7l-1.4-1.4z',
+  ],
+};
+
+/** Icons that are not square. Everything else uses the 24×24 default. */
+const VIEWBOX: Readonly<Partial<Record<IconName, string>>> = {
+  'download-check': '0 0 38 24',
+};
+
+/** Icons whose shape reads better mirrored than drawn twice. */
+export interface IconOptions {
+  /** Extra class on the `<svg>`, for sizing from CSS. */
+  readonly className?: string;
+  /** Accessible label; omit for icons sitting beside their own text. */
+  readonly label?: string;
+}
+
+/** Builds one icon. Inherits colour via `currentColor` and size via CSS. */
+export function icon(name: IconName, options: IconOptions = {}): SVGSVGElement {
+  const svg = document.createElementNS(SVG_NS, 'svg');
+  svg.setAttribute('viewBox', VIEWBOX[name] ?? '0 0 24 24');
+  svg.setAttribute('class', options.className ?? 'rv-icon');
+  if (options.label !== undefined) {
+    svg.setAttribute('role', 'img');
+    svg.setAttribute('aria-label', options.label);
+  } else {
+    svg.setAttribute('aria-hidden', 'true');
+  }
+  for (const d of PATHS[name]) {
+    const path = document.createElementNS(SVG_NS, 'path');
+    path.setAttribute('d', d);
+    path.setAttribute('fill', 'currentColor');
+    svg.append(path);
+  }
+  return svg;
+}
+
+/** Baseline sizing for icons, so each consumer does not restate it. */
+export function iconCss(): string {
+  return `
+.rv-icon { width: 1em; height: 1em; display: block; flex: 0 0 auto; }
+/* Non-square icons take their width from the aspect ratio instead of the em box. */
+.rv-icon-wide { width: auto; height: 1em; }
+`;
+}

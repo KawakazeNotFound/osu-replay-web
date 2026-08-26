@@ -54,7 +54,8 @@
     }
     .user-chip-logout {
       background: transparent; border: none; color: #7a7a92;
-      font-size: 15px; line-height: 1; padding: 2px 4px; cursor: pointer;
+      font-size: 17px; line-height: 1; padding: 2px 4px; cursor: pointer;
+      display: inline-flex; align-items: center;
     }
     .user-chip-logout:hover { color: #e879a0; }
     #stage { flex: 1 1 auto; min-height: 0; position: relative; }
@@ -78,6 +79,12 @@
     import { loadFromInput, loadLocalReplay } from './player/load.js';
     import { cachedUser, completePendingLogin, fetchMe, isLoggedIn, logout, startLogin }
       from './player/auth.js';
+    import { icon, iconCss } from './results/icons.js';
+
+    // The flow injects its own stylesheet; icons need theirs before the chip is built.
+    const iconStyle = document.createElement('style');
+    iconStyle.textContent = iconCss();
+    document.head.append(iconStyle);
 
     const statusEl = document.getElementById('status');
     const say = t => { statusEl.textContent = t; };
@@ -148,7 +155,7 @@
       out.type = 'button';
       out.className = 'user-chip-logout';
       out.title = 'Sign out';
-      out.textContent = '⏻';
+      out.append(icon('power', { className: 'rv-icon', label: 'Sign out' }));
       out.addEventListener('click', () => { logout(); showLoginButton(); say('signed out'); });
       chip.append(out);
 
