@@ -817,6 +817,7 @@ export function matchViewCss(): string {
   flex-direction: column;
   z-index: 10;
   user-select: none;
+  overflow: hidden;
 }
 
 .rv-match-header {
