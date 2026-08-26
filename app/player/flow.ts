@@ -17,6 +17,7 @@ import {
   buildSettingsOverlay, settingsOverlayCss,
   type SettingsOverlayHandle, type SettingsSection,
 } from './settings.js';
+import { buildTransport, transportCss, type TransportHandle } from './transport.js';
 
 export interface FlowOptions {
   /** Where both screens mount. */
@@ -44,7 +45,9 @@ function ensureStyles(): void {
   if (document.getElementById('rv-flow-styles') !== null) return;
   const style = document.createElement('style');
   style.id = 'rv-flow-styles';
-  style.textContent = `${resultsPanelCss()}\n${settingsOverlayCss()}\n${flowCss()}`;
+  style.textContent = [
+    resultsPanelCss(), settingsOverlayCss(), transportCss(), flowCss(),
+  ].join('\n');
   document.head.append(style);
 }
 
@@ -64,6 +67,9 @@ function flowCss(): string {
   width: auto; height: auto;
   display: block;
 }
+/* The transport row is opaque, so the canvas is inset above it rather than running underneath —
+   otherwise the engine's own bottom HUD (combo, unstable-rate bar) is hidden behind it. */
+.rv-playback { padding-bottom: 40px; }
 /* A hint that the settings live off the right edge, shown only while nothing is open. */
 .rv-edge-hint {
   position: absolute; top: 50%; right: 0; transform: translateY(-50%);
@@ -204,6 +210,9 @@ export function buildFlow(flowOptions: FlowOptions): FlowHandle {
   back.type = 'button';
   back.className = 'rv-back';
   back.textContent = '← Results';
+  // `showResults` is a hoisted function declaration below, so referencing it here is fine — and
+  // without this listener the button was decoration: it rendered and did nothing.
+  back.addEventListener('click', () => showResults());
   playbackScreen.append(back);
 
   flow.append(resultsScreen, playbackScreen);
@@ -212,11 +221,15 @@ export function buildFlow(flowOptions: FlowOptions): FlowHandle {
   let current: LoadedReplay | null = null;
   let reveal: Cancellable | null = null;
   let overlay: SettingsOverlayHandle | null = null;
+  let transport: TransportHandle | null = null;
   let endPoll: number | null = null;
 
   function stopPlayback(): void {
     if (endPoll !== null) { clearInterval(endPoll); endPoll = null; }
+    transport?.destroy();
+    transport = null;
     if (current === null) return;
+    current.session.audioSync.pause();
     current.session.player.pause();
     current.session.renderer.stop();
   }
@@ -235,8 +248,16 @@ export function buildFlow(flowOptions: FlowOptions): FlowHandle {
 
     const { session, startAtMs } = current;
     overlay?.destroy();
+    transport?.destroy();
+
+    transport = buildTransport(session);
     overlay = buildSettingsOverlay(sessionSettings(session), playbackScreen);
-    playbackScreen.append(overlay.root);
+    // The transport buttons live at the top of the settings panel, above the speed slider, as
+    // lazer arranges them; the scrub bar stays on the playback surface where it is always
+    // reachable without summoning the panel.
+    overlay.root.prepend(transport.buttons);
+    playbackScreen.append(overlay.root, transport.scrubber);
+    transport.start();
     // Hide the edge hint once the panel has been found; it is only a discovery aid.
     playbackScreen.addEventListener('pointermove', () => {
       if (overlay?.visible === true) edgeHint.style.opacity = '0';
@@ -253,6 +274,9 @@ export function buildFlow(flowOptions: FlowOptions): FlowHandle {
     // is imperceptible against a replay's length and avoids wiring a callback into the player.
     endPoll = window.setInterval(() => {
       if (current === null) return;
+      // Only while actually playing: seeking to the end while paused should stay there rather
+      // than bouncing back to the results panel.
+      if (!current.session.audioSync.isPlaying) return;
       const duration = current.session.timeMapper.presentationDurationMs;
       if (current.session.audioSync.currentTimeMs >= duration - 50) showResults();
     }, 250);
