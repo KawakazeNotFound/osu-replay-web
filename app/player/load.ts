@@ -25,6 +25,7 @@ import {
 } from './osuApi.js';
 import { isLoggedIn } from './auth.js';
 import { DEFAULT_SKIN, loadSkin } from './skins.js';
+import { downloadMatchReplays, type MatchMap } from './matchRoom.js';
 
 /** osu!standard cutoffs, as lazer's ruleset reports them (ScoreProcessor.cs L34-39). */
 const CUTOFFS = { D: 0, C: 0.7, B: 0.8, A: 0.9, S: 0.95, X: 1 } as const;
@@ -364,6 +365,42 @@ export async function loadOnlineScore(
  * and a beatmap otherwise, which matches what someone pasting an id most likely means in each
  * case.
  */
+/**
+ * Every replay for one map of a match, ready to hand to `createMatch`.
+ *
+ * Returns the shared `.osz` alongside the parsed replays rather than building the sessions here:
+ * how many canvases exist and where they sit is the UI's business, and `createMatch` needs them
+ * up front.
+ */
+export async function loadMatchMap(
+  map: MatchMap,
+  log: LogFn,
+): Promise<{
+  readonly beatmapSet: ArrayBuffer;
+  readonly players: readonly { name: string; replay: ReplayData; team: 'red' | 'blue' | null }[];
+}> {
+  const downloaded = await downloadMatchReplays(map, (done, total, name) => {
+    log(`downloading replay ${done + 1}/${total} (${name})…`);
+  });
+  if (downloaded.length === 0) {
+    throw new Error('osu! holds no replays for this map — nothing to watch');
+  }
+
+  const players = await Promise.all(downloaded.map(async entry => ({
+    name: entry.score.username,
+    replay: await parseReplay(entry.osr),
+    team: entry.score.team,
+  })));
+
+  // The set is resolved from a replay's own beatmapHash rather than from `map.beatmapId`: the
+  // hash names the exact difficulty the score was set on, and the room response carries no
+  // checksum of its own to check against.
+  log('finding the beatmap set…');
+  const setId = await setIdForHash(players[0]!.replay.beatmapHash);
+  const beatmapSet = await downloadBeatmapSet(setId, log);
+  return { beatmapSet, players };
+}
+
 export async function loadFromInput(input: string, options: LoadOptions): Promise<LoadedReplay> {
   const trimmed = input.trim();
   if (/\/scores\//i.test(trimmed)) return await loadOnlineScore(trimmed, options);

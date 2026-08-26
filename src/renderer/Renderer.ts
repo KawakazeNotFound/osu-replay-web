@@ -243,6 +243,15 @@ export class Renderer {
    * the combo-break sound on osu!'s "combo was > 20 before the break" rule. */
   get comboFrames(): readonly ComboFrame[] { return this._comboFrames; }
 
+  /**
+   * Running-accuracy timeline, the same one the HUD draws from.
+   *
+   * Exposed alongside `comboFrames` so an external scoreboard reads the identical numbers the
+   * canvas shows — re-deriving them with `analyzeReplay` would judge the replay a second time
+   * and could diverge on any behaviour that depends on renderer options.
+   */
+  get accFrames(): readonly AccFrame[] { return this._accFrames; }
+
   /** Mania-only: sourceIndex → HitSample lookup, so AudioSync can resolve per-press samples
    * for both Notes and HoldNote heads (holds aren't in beatmap.hitObjects). Null for std/taiko. */
   get maniaSamples(): ReadonlyMap<number, HitSample> | null {

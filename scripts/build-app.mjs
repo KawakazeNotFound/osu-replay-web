@@ -32,6 +32,8 @@ const ENTRIES = [
   'player/osuApi.ts',
   'player/auth.ts',
   'player/skins.ts',
+  'player/match.ts',
+  'player/matchRoom.ts',
   'results/panel.ts',
   'results/icons.ts',
   'results/reveal.ts',
