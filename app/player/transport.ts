@@ -201,6 +201,7 @@ export function transportCss(): string {
   return `
 .pt-buttons {
   display: flex; align-items: center; justify-content: center; gap: 2px;
+  margin-bottom: 2px;
 }
 .pt-button {
   border: none; background: transparent; color: #ffffff;

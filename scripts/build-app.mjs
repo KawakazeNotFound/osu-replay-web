@@ -27,6 +27,8 @@ const ENTRIES = [
   'player/load.ts',
   'player/settings.ts',
   'player/transport.ts',
+  'player/volume-meter.ts',
+  'player/menubar.ts',
   'player/osuApi.ts',
   'player/auth.ts',
   'player/skins.ts',

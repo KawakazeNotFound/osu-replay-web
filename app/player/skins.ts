@@ -10,7 +10,7 @@
  * memory held until reload, which is the same trade the captured page makes.
  */
 
-import { loadSkinFromDir, type SkinAssets } from '../../src/index.js';
+import { loadSkinFromDir, loadSkin as loadSkinFromZip, type SkinAssets } from '../../src/index.js';
 
 /**
  * Where the skins live. Same path on the deployed Worker and on the dev server, which mounts
@@ -51,10 +51,39 @@ export const DEFAULT_SKIN: SkinName = 'YUGEN';
  * started before either finishes should share the work instead of racing.
  */
 const cache = new Map<string, Promise<SkinAssets>>();
+const customSkinNames: string[] = [];
 
 /** URL for a skin directory. Names contain spaces and dots, so each segment is encoded. */
 function skinUrl(name: string): string {
   return `${SKIN_BASE}/${encodeURIComponent(name)}`;
+}
+
+/**
+ * Registers an imported custom skin (e.g. from .osk / .zip).
+ */
+export function registerCustomSkin(name: string, skin: SkinAssets): void {
+  cache.set(name, Promise.resolve(skin));
+  if (!customSkinNames.includes(name)) {
+    customSkinNames.push(name);
+  }
+}
+
+/**
+ * Decodes and registers an uploaded .osk/.zip custom skin file.
+ */
+export async function importCustomSkinFile(file: File, audioContext: AudioContext): Promise<string> {
+  const buf = await file.arrayBuffer();
+  const skin = await loadSkinFromZip(buf, audioContext);
+  const name = file.name.replace(/\.(osk|zip)$/i, '');
+  registerCustomSkin(name, skin);
+  return name;
+}
+
+/**
+ * Returns all available skins, combining default presets and imported custom skins.
+ */
+export function getAllSkinNames(): readonly string[] {
+  return [...SKIN_NAMES, ...customSkinNames];
 }
 
 /**

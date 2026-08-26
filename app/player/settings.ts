@@ -23,6 +23,11 @@ const ACCENT = '#ffcc22';
 /** Fraction of the viewport width that counts as the right edge trigger. */
 export const EDGE_TRIGGER_FRACTION = 0.2;
 
+export interface SliderHandle {
+  getValue(): number;
+  setValue(val: number, notify?: boolean): void;
+}
+
 export interface SliderSpec {
   readonly kind: 'slider';
   readonly label: string;
@@ -35,6 +40,12 @@ export interface SliderSpec {
   readonly onChange: (value: number) => void;
   /** Shows a reset affordance that restores this value. */
   readonly resetTo?: number;
+  /** Exposes a handle to control this slider externally (e.g. linked sliders). */
+  readonly bindHandle?: (handle: SliderHandle) => void;
+  /** Custom parser when user manually enters a value by clicking the readout. */
+  readonly parseInput?: (inputStr: string) => number | null;
+  /** Custom text to show initially in the input box when editing starts. */
+  readonly getEditText?: (value: number) => string;
 }
 
 export interface ToggleSpec {
@@ -45,7 +56,12 @@ export interface ToggleSpec {
   readonly resetTo?: boolean;
 }
 
-export type ControlSpec = SliderSpec | ToggleSpec;
+export interface CustomSpec {
+  readonly kind: 'custom';
+  readonly render: () => HTMLElement;
+}
+
+export type ControlSpec = SliderSpec | ToggleSpec | CustomSpec;
 
 export interface SettingsSection {
   readonly title: string;
@@ -81,36 +97,222 @@ function resetButton(onReset: () => void): HTMLButtonElement {
   return button;
 }
 
+function easeOutQuint(t: number): number {
+  return 1 - Math.pow(1 - t, 5);
+}
+
 function buildSlider(spec: SliderSpec): HTMLElement {
   const row = el('div', 'ps-row ps-row-slider');
 
+  let currentValue = spec.value;
+  let animFrame: number | null = null;
+
+  const stopAnimation = (): void => {
+    if (animFrame !== null) {
+      cancelAnimationFrame(animFrame);
+      animFrame = null;
+    }
+  };
+
   const head = el('div', 'ps-row-head');
-  if (spec.resetTo !== undefined) head.append(resetButton(() => { input.value = String(spec.resetTo); apply(); }));
+  if (spec.resetTo !== undefined) {
+    head.append(resetButton(() => {
+      animateTo(spec.resetTo!, 240, true);
+    }));
+  }
   head.append(el('span', 'ps-label', spec.label));
   const readout = el('span', 'ps-value', spec.format(spec.value));
+  if (spec.parseInput !== undefined) {
+    readout.classList.add('ps-value-editable');
+    readout.title = 'Click to edit value';
+  }
   head.append(readout);
   row.append(head);
 
-  const input = document.createElement('input');
-  input.type = 'range';
-  input.className = 'ps-slider';
-  input.min = String(spec.min);
-  input.max = String(spec.max);
-  input.step = String(spec.step);
-  input.value = String(spec.value);
+  const container = el('div', 'ps-slider-container');
+  container.setAttribute('role', 'slider');
+  container.setAttribute('tabindex', '0');
+  container.setAttribute('aria-valuemin', String(spec.min));
+  container.setAttribute('aria-valuemax', String(spec.max));
+  container.setAttribute('aria-valuenow', String(spec.value));
 
-  const apply = (): void => {
-    const value = Number(input.value);
-    readout.textContent = spec.format(value);
-    // The filled portion is painted with a gradient rather than a pseudo-element so it works
-    // across engines without vendor-specific track styling.
-    const fraction = (value - spec.min) / (spec.max - spec.min);
-    input.style.setProperty('--ps-fill', `${fraction * 100}%`);
-    spec.onChange(value);
+  const track = el('div', 'ps-slider-track');
+  const fill = el('div', 'ps-slider-fill');
+  track.append(fill);
+
+  const nub = el('div', 'ps-slider-nub');
+  container.append(track, nub);
+  row.append(container);
+
+  const render = (val: number, notify = true): void => {
+    currentValue = val;
+    readout.textContent = spec.format(val);
+    const fraction = Math.max(0, Math.min(1, (val - spec.min) / (spec.max - spec.min)));
+    const pos = `calc(17px + (100% - 34px) * ${fraction})`;
+    nub.style.left = pos;
+    fill.style.width = pos;
+    container.setAttribute('aria-valuenow', String(val));
+    if (notify) spec.onChange(val);
   };
-  input.addEventListener('input', apply);
-  row.append(input);
-  apply();
+
+  const animateTo = (targetVal: number, durationMs = 240, notify = true): void => {
+    stopAnimation();
+    const startVal = currentValue;
+    if (Math.abs(targetVal - startVal) < 1e-6) {
+      render(targetVal, notify);
+      return;
+    }
+    const startTime = performance.now();
+
+    const tick = (now: number): void => {
+      const elapsed = now - startTime;
+      const progress = Math.min(1, elapsed / durationMs);
+      const eased = easeOutQuint(progress);
+      const nextVal = startVal + (targetVal - startVal) * eased;
+      render(nextVal, notify);
+      if (progress < 1) {
+        animFrame = requestAnimationFrame(tick);
+      } else {
+        animFrame = null;
+        render(targetVal, notify);
+      }
+    };
+    animFrame = requestAnimationFrame(tick);
+  };
+
+  const valueFromPointer = (clientX: number): number => {
+    const rect = container.getBoundingClientRect();
+    if (rect.width <= 34) return spec.min;
+    const offset = clientX - (rect.left + 17);
+    const trackSpan = rect.width - 34;
+    const fraction = Math.max(0, Math.min(1, offset / trackSpan));
+    const rawVal = spec.min + fraction * (spec.max - spec.min);
+    if (spec.step > 0) {
+      const steps = Math.round((rawVal - spec.min) / spec.step);
+      return Math.max(spec.min, Math.min(spec.max, spec.min + steps * spec.step));
+    }
+    return rawVal;
+  };
+
+  let isDragging = false;
+  let startX = 0;
+
+  container.addEventListener('pointerdown', (e: PointerEvent) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    container.setPointerCapture(e.pointerId);
+    isDragging = true;
+    startX = e.clientX;
+    container.classList.add('ps-dragging');
+
+    const targetVal = valueFromPointer(e.clientX);
+    // Smoothly animate with non-linear easeOutQuint to clicked position
+    animateTo(targetVal, 220, true);
+  });
+
+  container.addEventListener('pointermove', (e: PointerEvent) => {
+    if (!isDragging) return;
+    if (Math.abs(e.clientX - startX) > 3) {
+      stopAnimation();
+      const val = valueFromPointer(e.clientX);
+      render(val, true);
+    }
+  });
+
+  const onPointerUp = (e: PointerEvent): void => {
+    if (!isDragging) return;
+    isDragging = false;
+    container.classList.remove('ps-dragging');
+    try {
+      container.releasePointerCapture(e.pointerId);
+    } catch {}
+  };
+
+  container.addEventListener('pointerup', onPointerUp);
+  container.addEventListener('pointercancel', onPointerUp);
+
+  // Keyboard navigation
+  container.addEventListener('keydown', (e: KeyboardEvent) => {
+    const step = spec.step > 0 ? spec.step : (spec.max - spec.min) / 100;
+    if (e.key === 'ArrowLeft' || e.key === 'ArrowDown') {
+      e.preventDefault();
+      stopAnimation();
+      const next = Math.max(spec.min, currentValue - step);
+      animateTo(next, 120, true);
+    } else if (e.key === 'ArrowRight' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      stopAnimation();
+      const next = Math.min(spec.max, currentValue + step);
+      animateTo(next, 120, true);
+    }
+  });
+
+  // Initial render
+  render(spec.value, false);
+
+  // Manual input when clicking on the readout
+  if (spec.parseInput !== undefined) {
+    readout.addEventListener('click', () => {
+      if (head.querySelector('.ps-value-input') !== null) return;
+      const initialText = spec.getEditText !== undefined
+        ? spec.getEditText(currentValue)
+        : String(Math.round(currentValue * 100));
+
+      const editInput = document.createElement('input');
+      editInput.type = 'text';
+      editInput.className = 'ps-value-input';
+      editInput.value = initialText;
+
+      let finished = false;
+      const commit = (): void => {
+        if (finished) return;
+        finished = true;
+        const parsed = spec.parseInput!(editInput.value);
+        if (parsed !== null && !Number.isNaN(parsed)) {
+          animateTo(parsed, 200, true);
+        } else {
+          render(currentValue, false);
+        }
+        editInput.replaceWith(readout);
+      };
+
+      const cancel = (): void => {
+        if (finished) return;
+        finished = true;
+        editInput.replaceWith(readout);
+      };
+
+      editInput.addEventListener('keydown', (e: KeyboardEvent) => {
+        e.stopPropagation();
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          commit();
+        } else if (e.key === 'Escape') {
+          e.preventDefault();
+          cancel();
+        }
+      });
+
+      editInput.addEventListener('blur', () => {
+        commit();
+      });
+
+      readout.replaceWith(editInput);
+      editInput.focus();
+      editInput.select();
+    });
+  }
+
+  if (spec.bindHandle !== undefined) {
+    spec.bindHandle({
+      getValue: () => currentValue,
+      setValue: (val: number, notify = true) => {
+        stopAnimation();
+        render(val, notify);
+      },
+    });
+  }
+
   return row;
 }
 
@@ -156,7 +358,9 @@ export function buildSettingsOverlay(
     const card = el('section', 'ps-card');
     card.append(el('h3', 'ps-card-title', section.title));
     for (const control of section.controls) {
-      card.append(control.kind === 'slider' ? buildSlider(control) : buildToggle(control));
+      if (control.kind === 'slider') card.append(buildSlider(control));
+      else if (control.kind === 'toggle') card.append(buildToggle(control));
+      else if (control.kind === 'custom') card.append(control.render());
     }
     root.append(card);
   }
@@ -217,18 +421,8 @@ export function settingsOverlayCss(): string {
   padding: 14px;
   display: flex; flex-direction: column; gap: 12px;
   overflow-y: auto;
-  /* Frosted glass: the blur does the work, so the tint stays light enough to see gameplay
-     through. An opaque backdrop would make backdrop-filter pointless. A left-to-right gradient
-     keeps the inner edge softer than the outer one, so the panel reads as sitting over the
-     playfield rather than cutting it off. */
-  background: linear-gradient(
-    to right,
-    rgba(16, 16, 20, 0.28),
-    rgba(16, 16, 20, 0.46)
-  );
-  backdrop-filter: blur(22px) saturate(115%);
-  -webkit-backdrop-filter: blur(22px) saturate(115%);
-  border-left: 1px solid rgba(255, 255, 255, 0.09);
+  /* Transparent container so the playfield and artwork behind remain clearly visible */
+  background: transparent;
   color: #ffffff;
   font-size: 13px;
   /* Parked just off-screen; slides in rather than fading, matching lazer's push-in. */
@@ -240,15 +434,27 @@ export function settingsOverlayCss(): string {
 }
 .ps-overlay.ps-visible { transform: none; pointer-events: auto; }
 .ps-card {
-  /* Cards are their own faint glass layer so they read as distinct from the panel without
-     going opaque. */
-  background: rgba(28, 28, 34, 0.42);
-  backdrop-filter: blur(6px);
-  -webkit-backdrop-filter: blur(6px);
-  border: 1px solid rgba(255, 255, 255, 0.07);
+  /* Each category block is transparent by default so the background shines through clearly.
+     It darkens to a solid focus block only when hovered or focused. */
+  background: rgba(16, 16, 22, 0.22);
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+  border: 1px solid rgba(255, 255, 255, 0.05);
   border-radius: 10px;
   padding: 12px 14px;
   display: flex; flex-direction: column; gap: 12px;
+  transition: background 200ms cubic-bezier(0.2, 0, 0, 1),
+              border-color 200ms ease,
+              backdrop-filter 200ms ease,
+              box-shadow 200ms ease;
+}
+.ps-card:hover,
+.ps-card:focus-within {
+  background: rgba(22, 22, 28, 0.94);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border-color: rgba(255, 255, 255, 0.12);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
 }
 .ps-card-title {
   margin: 0;
@@ -256,7 +462,7 @@ export function settingsOverlayCss(): string {
   color: #ffffff;
   /* Text sits over moving gameplay, so it carries its own shadow rather than relying on the
      panel's tint for contrast. */
-  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.85);
 }
 .ps-row { display: flex; flex-direction: column; gap: 6px; }
 .ps-row-toggle { flex-direction: row; align-items: center; gap: 8px; }
@@ -265,6 +471,34 @@ export function settingsOverlayCss(): string {
 .ps-value {
   color: #ffffff; font-weight: 600; font-variant-numeric: tabular-nums;
   text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
+  padding: 1px 4px;
+  border-radius: 4px;
+  transition: all 120ms ease;
+}
+.ps-value-editable {
+  cursor: pointer;
+  border-bottom: 1px dotted rgba(255, 255, 255, 0.35);
+}
+.ps-value-editable:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: ${ACCENT};
+  border-bottom-color: ${ACCENT};
+}
+.ps-value-input {
+  width: 52px;
+  height: 20px;
+  background: rgba(15, 24, 48, 0.85);
+  color: ${ACCENT};
+  border: 1px solid ${ACCENT};
+  border-radius: 4px;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  text-align: right;
+  padding: 0 4px;
+  box-sizing: border-box;
+  outline: none;
+  box-shadow: 0 0 6px rgba(255, 204, 34, 0.35);
 }
 .ps-reset {
   width: 18px; height: 18px; flex: 0 0 auto;
@@ -275,33 +509,105 @@ export function settingsOverlayCss(): string {
 }
 .ps-reset:hover { color: #d0b8ff; }
 
-/* Slider: a flat track with a wide pill thumb, filled to the current value. The unfilled part
-   is translucent so the glass shows through it too. */
-.ps-slider {
-  --ps-fill: 0%;
-  --ps-track: rgba(255, 255, 255, 0.16);
-  -webkit-appearance: none; appearance: none;
-  width: 100%; height: 18px;
-  background: transparent; cursor: pointer;
+/* Thin slider track with smooth pill nub (osu!lazer style) */
+.ps-slider-container {
+  position: relative;
+  width: 100%;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  user-select: none;
+  touch-action: none;
+  outline: none;
 }
-.ps-slider::-webkit-slider-runnable-track {
-  height: 18px; border-radius: 9px;
-  background: linear-gradient(to right, ${ACCENT} var(--ps-fill), var(--ps-track) var(--ps-fill));
+.ps-slider-track {
+  position: relative;
+  width: 100%;
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.16);
 }
-.ps-slider::-moz-range-track {
-  height: 18px; border-radius: 9px;
-  background: linear-gradient(to right, ${ACCENT} var(--ps-fill), var(--ps-track) var(--ps-fill));
+.ps-slider-fill {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 0%;
+  background: ${ACCENT};
+  border-radius: 2px;
 }
-.ps-slider::-webkit-slider-thumb {
-  -webkit-appearance: none; appearance: none;
-  width: 34px; height: 18px; border: none; border-radius: 9px;
+.ps-slider-nub {
+  position: absolute;
+  top: 50%;
+  width: 34px;
+  height: 14px;
+  border-radius: 7px;
   background: ${ACCENT};
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.45);
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  transition: transform 80ms ease, box-shadow 120ms ease;
 }
-.ps-slider::-moz-range-thumb {
-  width: 34px; height: 18px; border: none; border-radius: 9px;
-  background: ${ACCENT};
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.45);
+.ps-slider-container:hover .ps-slider-nub {
+  box-shadow: 0 0 8px rgba(255, 204, 34, 0.6);
+}
+.ps-slider-container.ps-dragging .ps-slider-nub {
+  transform: translate(-50%, -50%) scale(1.05);
+  box-shadow: 0 0 10px rgba(255, 204, 34, 0.85);
+}
+.ps-slider-container:focus-visible .ps-slider-track {
+  box-shadow: 0 0 0 2px rgba(255, 204, 34, 0.4);
+}
+
+/* Volume link divider between Music volume and Effects volume */
+.ps-volume-link-divider {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 1px 0;
+  padding: 0 2px;
+}
+.ps-volume-link-line {
+  flex: 1;
+  height: 1px;
+  background: rgba(255, 255, 255, 0.12);
+  transition: background 150ms ease;
+}
+.ps-volume-link-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(20, 20, 26, 0.6);
+  color: rgba(255, 255, 255, 0.65);
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 150ms ease;
+}
+.ps-volume-link-btn:hover {
+  color: #ffffff;
+  border-color: rgba(255, 255, 255, 0.35);
+  background: rgba(40, 40, 50, 0.8);
+}
+.ps-volume-link-btn.ps-linked {
+  color: ${ACCENT};
+  border-color: rgba(255, 204, 34, 0.55);
+  background: rgba(255, 204, 34, 0.14);
+  box-shadow: 0 0 8px rgba(255, 204, 34, 0.25);
+}
+.ps-volume-link-btn.ps-linked .rv-icon {
+  color: ${ACCENT};
+}
+.ps-volume-link-divider:has(.ps-linked) .ps-volume-link-line {
+  background: linear-gradient(to right, rgba(255, 204, 34, 0.1), rgba(255, 204, 34, 0.4), rgba(255, 204, 34, 0.1));
+}
+.ps-volume-link-text {
+  letter-spacing: 0.03em;
 }
 
 /* Toggle: a filled pill when on, an outlined one when off — as lazer draws it. */

@@ -58,7 +58,7 @@ export const BACKGROUND_RING_COLOUR = '#2f2f2f';
 
 /** ScorePanel.cs L31-81. Widths/heights are in lazer's own units, which we treat as px. */
 export const PANEL = {
-  expandedWidth: 360,
+  expandedWidth: 380,
   expandedHeight: 586,
   contractedWidth: 130,
   contractedHeight: 385,
@@ -79,11 +79,11 @@ export const PANEL_COLOUR = {
 
 /** ExpandedPanelMiddleContent.cs — L32 padding, L93 outer flow spacing, plus per-element. */
 export const LAYOUT = {
-  padding: 10,
+  padding: 14,
   /** Outer FillFlow `Spacing = Vector2(20)`. */
-  flowSpacing: 20,
+  flowSpacing: 18,
   /** Metadata text is clamped to the panel width less padding on both sides. */
-  maxTextWidth: PANEL.expandedWidth - 10 * 2,
+  maxTextWidth: PANEL.expandedWidth - 14 * 2,
   /** Circle container: `Margin { Top = 40 }`, `Height = 230`. */
   circleMarginTop: 40,
   circleHeight: 230,
@@ -92,10 +92,10 @@ export const LAYOUT = {
   /** Star-rating row `Spacing = Vector2(5, 0)`; DifficultyIcon `Size = 20`. */
   starRowSpacing: 5,
   difficultyIconSize: 20,
-  /** Statistics flow `Spacing = Vector2(0, 5)`. */
-  statisticsRowSpacing: 5,
-  /** StatisticDisplay header pill: `CircularContainer` `Height = 12`, box `#222`. */
-  statHeaderHeight: 12,
+  /** Statistics flow `Spacing = Vector2(0, 12)` — increased for better vertical breathing room. */
+  statisticsRowSpacing: 12,
+  /** StatisticDisplay header pill: `CircularContainer` `Height = 15`, box `#222`. */
+  statHeaderHeight: 15,
   statHeaderColour: '#222222',
 } as const;
 
@@ -115,14 +115,14 @@ export const FONT = {
   artist: { size: 14, weight: 600 },
   difficulty: { size: 16, weight: 600 },
   mapper: { size: 12, weight: 400 },
-  statHeader: { size: 12, weight: 600 },
-  /** Statistic values: `Torus 20 fixedWidth`, `Spacing = (-2, 0)`. */
-  statValue: { size: 20, weight: 400, letterSpacing: -2 },
-  /** CounterStatistic.cs L56-65: the `/max` suffix, `Torus 12 fixedWidth`, `(-2, 0)`. */
-  statMax: { size: 12, weight: 400, letterSpacing: -2 },
+  statHeader: { size: 10, weight: 600 },
+  /** Statistic values: `Torus 20 fixedWidth`. */
+  statValue: { size: 20, weight: 400, letterSpacing: -0.3 },
+  /** CounterStatistic.cs L56-65: the `/max` suffix, `Torus 12 fixedWidth`. */
+  statMax: { size: 12, weight: 400, letterSpacing: 0 },
   /** ComboStatistic's "PERFECT": `Torus 11 SemiBold`. */
   perfect: { size: 11, weight: 600 },
-  playedOn: { size: 10, weight: 600 },
+  playedOn: { size: 11, weight: 400 },
 } as const;
 
 /** ComboStatistic "PERFECT" fill: `GradientVertical(#66FFCC, #FF9AD7)`. */

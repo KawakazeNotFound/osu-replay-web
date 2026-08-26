@@ -47,37 +47,32 @@
 
     /* Signed-in chip, laid out like osu!'s own toolbar: name, then a rounded avatar. */
     .user-chip {
-      display: inline-flex; align-items: center; gap: 10px;
-      padding: 4px 6px 4px 12px;
-      background: #0f1830; border: 1px solid #2a2a4a; border-radius: 10px;
+      display: inline-flex; align-items: center; gap: 8px;
+      padding: 2px 4px 2px 10px;
+      background: #192422; border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 999px;
       white-space: nowrap;
     }
-    .user-chip-name { font-size: 13px; font-weight: 600; color: #e8e8f4; }
+    .user-chip-name { font-size: 12px; font-weight: 600; color: #e0ecea; }
     .user-chip-avatar {
-      width: 30px; height: 30px; border-radius: 8px; object-fit: cover;
+      width: 24px; height: 24px; border-radius: 50%; object-fit: cover;
       background: #1b2540;
     }
     .user-chip-logout {
       background: transparent; border: none; color: #7a7a92;
-      font-size: 17px; line-height: 1; padding: 2px 4px; cursor: pointer;
+      font-size: 15px; line-height: 1; padding: 2px 4px; cursor: pointer;
       display: inline-flex; align-items: center;
     }
     .user-chip-logout:hover { color: #e879a0; }
+    .login-btn {
+      background: #4ed9c8; color: #121e1c; border: none;
+      border-radius: 999px; padding: 4px 12px; font: inherit; font-size: 12px; font-weight: 600;
+      cursor: pointer; transition: all 120ms ease;
+    }
+    .login-btn:hover { background: #63ecd9; box-shadow: 0 0 8px rgba(78, 217, 200, 0.4); }
     #stage { flex: 1 1 auto; min-height: 0; position: relative; }
   </style>
 </head>
 <body>
-  <div class="bar">
-    <input type="text" id="score-url"
-           placeholder="score URL / beatmap URL / id" />
-    <button id="load-online" type="button">Load</button>
-    <label class="file">.osr<input type="file" id="osr" accept=".osr" /></label>
-    <label class="file">.osz<input type="file" id="osz" accept=".osz" /></label>
-    <button id="load-local" type="button">Load local</button>
-    <select id="skin" title="Skin"></select>
-    <span id="user-slot"></span>
-    <span id="status"></span>
-  </div>
   <div id="stage"></div>
 
   <script type="module">
@@ -86,15 +81,13 @@
     import { cachedUser, completePendingLogin, fetchMe, isLoggedIn, logout, startLogin }
       from './player/auth.js';
     import { icon, iconCss } from './results/icons.js';
-    import { DEFAULT_SKIN, SKIN_NAMES } from './player/skins.js';
+    import { DEFAULT_SKIN, getAllSkinNames, importCustomSkinFile } from './player/skins.js';
+    import { buildMenuBar, menuBarCss } from './player/menubar.js';
 
-    // The flow injects its own stylesheet; icons need theirs before the chip is built.
+    // Inject styles for menubar and icons
     const iconStyle = document.createElement('style');
-    iconStyle.textContent = iconCss();
+    iconStyle.textContent = [iconCss(), menuBarCss()].join('\n');
     document.head.append(iconStyle);
-
-    const statusEl = document.getElementById('status');
-    const say = t => { statusEl.textContent = t; };
 
     const canvas = document.createElement('canvas');
     canvas.width = 1280;
@@ -102,31 +95,29 @@
 
     const flow = buildFlow({ host: document.getElementById('stage'), canvas });
 
-    // One AudioContext for the page: browsers cap how many can exist, and each load would
-    // otherwise leak one.
+    // One AudioContext for the page
     let audioContext = null;
     const ctx = () => (audioContext ??= new AudioContext());
 
-    // Skin picker. The 12 skins the captured page ships are already served from /skins, so this
-    // offers the same set rather than a private one.
-    const skinSelect = document.getElementById('skin');
-    for (const name of SKIN_NAMES) {
-      const option = document.createElement('option');
-      option.value = name;
-      option.textContent = name;
-      if (name === DEFAULT_SKIN) option.selected = true;
-      skinSelect.append(option);
-    }
+    let selectedSkin = DEFAULT_SKIN;
+    let lastLoader = null;
+    let pendingOsr = null;
+    let pendingOsz = null;
+
+    const say = t => {
+      if (menuBar?.statusSlot) menuBar.statusSlot.textContent = t;
+    };
 
     /** Options every loader takes; read fresh so a skin change applies to the next load. */
     const loadOptions = () => ({
       audioContext: ctx(),
       canvas,
       log: say,
-      skin: skinSelect.value,
+      skin: selectedSkin,
     });
 
     async function run(loader) {
+      lastLoader = loader;
       try {
         say('loading…');
         const replay = await loader(loadOptions());
@@ -138,24 +129,80 @@
       }
     }
 
-    document.getElementById('load-online').addEventListener('click', () => {
-      const ref = document.getElementById('score-url').value.trim();
-      if (ref === '') { say('paste a score URL, beatmap URL, or id'); return; }
-      void run(options => loadFromInput(ref, options));
+    const menuBar = buildMenuBar({
+      onImportUrl: url => {
+        void run(options => loadFromInput(url, options));
+      },
+      onImportOsu: file => {
+        say(`Imported .osu: ${file.name}`);
+      },
+      onImportOsz: file => {
+        pendingOsz = file;
+        if (pendingOsr !== null) {
+          say(`Loaded ${file.name}, starting local replay...`);
+          void run(options => loadLocalReplay(pendingOsr, pendingOsz, options));
+        } else {
+          say(`Loaded .osz: ${file.name} (now import .osr replay)`);
+        }
+      },
+      onImportOsr: file => {
+        pendingOsr = file;
+        if (pendingOsz !== null) {
+          say(`Loaded ${file.name}, starting local replay...`);
+          void run(options => loadLocalReplay(pendingOsr, pendingOsz, options));
+        } else {
+          say(`Loaded .osr: ${file.name} (now import .osz beatmap)`);
+        }
+      },
+      onSelectSkin: skinName => {
+        selectedSkin = skinName;
+        say(`Skin switched to: ${skinName}`);
+        if (lastLoader !== null) void run(lastLoader);
+      },
+      onImportSkin: async file => {
+        try {
+          say(`Importing skin ${file.name}...`);
+          const name = await importCustomSkinFile(file, ctx());
+          selectedSkin = name;
+          say(`Skin "${name}" imported successfully!`);
+          if (lastLoader !== null) void run(lastLoader);
+        } catch (err) {
+          console.error(err);
+          say(`Skin import failed: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      },
+      onToggleFullscreen: () => {
+        if (document.fullscreenElement !== null) {
+          void document.exitFullscreen();
+        } else {
+          void document.documentElement.requestFullscreen();
+        }
+      },
+      onReload: () => {
+        if (lastLoader !== null) void run(lastLoader);
+        else say('No replay loaded to reload');
+      },
+      onExit: () => {
+        flow.clear();
+        say('Cleared replay session');
+      },
+      getSelectedSkin: () => selectedSkin,
+      getAvailableSkins: () => getAllSkinNames(),
     });
 
-    // ---- osu! sign-in -------------------------------------------------------------------
-    const userSlot = document.getElementById('user-slot');
+    document.body.prepend(menuBar.root);
 
+    // ---- osu! sign-in -------------------------------------------------------------------
     function showLoginButton() {
       const button = document.createElement('button');
       button.type = 'button';
+      button.className = 'login-btn';
       button.textContent = 'Login with osu!';
       button.addEventListener('click', () => {
         say('redirecting to osu!…');
         startLogin().catch(err => say(`login failed: ${err.message}`));
       });
-      userSlot.replaceChildren(button);
+      menuBar.userSlot.replaceChildren(button);
     }
 
     function showUser(user) {
@@ -172,7 +219,6 @@
         avatar.className = 'user-chip-avatar';
         avatar.src = user.avatarUrl;
         avatar.alt = '';
-        // A broken avatar should leave the name readable rather than showing a torn-image icon.
         avatar.addEventListener('error', () => avatar.remove());
         chip.append(avatar);
       }
@@ -185,13 +231,11 @@
       out.addEventListener('click', () => { logout(); showLoginButton(); say('signed out'); });
       chip.append(out);
 
-      userSlot.replaceChildren(chip);
+      menuBar.userSlot.replaceChildren(chip);
     }
 
     async function refreshAuthUi() {
       if (!isLoggedIn()) { showLoginButton(); return; }
-      // Show the cached identity immediately so the chip does not flicker through a blank state
-      // while /me is in flight.
       const cached = cachedUser();
       if (cached !== null) showUser(cached);
       try {
@@ -199,8 +243,6 @@
         if (user !== null) showUser(user);
         else showLoginButton();
       } catch (err) {
-        // A profile fetch can fail while the session is still fine (osu! outage, rate limit), so
-        // keep whatever is shown and say why rather than pretending we are signed out.
         say(`signed in, but ${err.message}`);
         if (cached === null) showLoginButton();
       }
@@ -215,13 +257,6 @@
     // Clean the code out of the address bar so a reload is not mistaken for a fresh callback.
     if (location.search !== '') history.replaceState(null, '', location.pathname + location.hash);
     void refreshAuthUi();
-
-    document.getElementById('load-local').addEventListener('click', () => {
-      const osr = document.getElementById('osr').files?.[0] ?? null;
-      const osz = document.getElementById('osz').files?.[0] ?? null;
-      if (osr === null) { say('choose a .osr'); return; }
-      void run(options => loadLocalReplay(osr, osz, options));
-    });
 
     window.__flow = flow;
     window.__ready = true;

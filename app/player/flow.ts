@@ -15,9 +15,13 @@ import { prepareReveal, startReveal } from '../results/reveal.js';
 import type { Cancellable } from '../results/animate.js';
 import {
   buildSettingsOverlay, settingsOverlayCss,
-  type SettingsOverlayHandle, type SettingsSection,
+  type SettingsOverlayHandle, type SettingsSection, type SliderHandle,
 } from './settings.js';
+import { icon } from '../results/icons.js';
 import { buildTransport, transportCss, type TransportHandle } from './transport.js';
+import {
+  buildVolumeMeter, volumeMeterCss, KeyAccelerator, type VolumeMeterHandle,
+} from './volume-meter.js';
 
 export interface FlowOptions {
   /** Where both screens mount. */
@@ -40,13 +44,13 @@ export interface FlowHandle {
   clear(): void;
 }
 
-/** Injects both stylesheets once. */
+/** Injects all stylesheets once. */
 function ensureStyles(): void {
   if (document.getElementById('rv-flow-styles') !== null) return;
   const style = document.createElement('style');
   style.id = 'rv-flow-styles';
   style.textContent = [
-    resultsPanelCss(), settingsOverlayCss(), transportCss(), flowCss(),
+    resultsPanelCss(), settingsOverlayCss(), transportCss(), volumeMeterCss(), flowCss(),
   ].join('\n');
   document.head.append(style);
 }
@@ -96,13 +100,34 @@ function flowCss(): string {
 `;
 }
 
+export interface SessionSettingsResult {
+  readonly sections: readonly SettingsSection[];
+  readonly adjustVolume: (delta: number) => void;
+  readonly adjustMusicOnly: (delta: number) => void;
+  readonly adjustEffectsOnly: (delta: number) => void;
+}
+
 /**
  * Builds the settings sections from a live session. Only controls that drive something are
  * included — see settings.ts for why the ones lazer shows and this engine lacks are absent.
  */
-export function sessionSettings(session: CoreSession): readonly SettingsSection[] {
+export function sessionSettings(
+  session: CoreSession,
+  volumeMeter?: VolumeMeterHandle | null,
+): SessionSettingsResult {
   const { renderer, audioSync } = session;
   const options = renderer.options;
+
+  /** Parses percentage inputs (e.g. "80", "12.3", "120%", "-5"). Decimals round up, clamps to 0-100. */
+  const parsePercentInput = (raw: string): number | null => {
+    const cleaned = raw.trim().replace(/%/g, '');
+    if (cleaned === '') return null;
+    const num = parseFloat(cleaned);
+    if (Number.isNaN(num)) return null;
+    const rounded = Math.ceil(num);
+    const clamped = Math.max(0, Math.min(100, rounded));
+    return clamped / 100;
+  };
 
   const playback: SettingsSection = {
     title: 'Playback',
@@ -110,9 +135,14 @@ export function sessionSettings(session: CoreSession): readonly SettingsSection[
       {
         kind: 'slider',
         label: 'Playback speed',
-        min: 0.25, max: 2, step: 0.05, value: 1,
+        min: 0.25, max: 2, step: 0.01, value: 1,
         format: v => `${v.toFixed(2)}x`,
         resetTo: 1,
+        parseInput: raw => {
+          const n = parseFloat(raw.trim().replace(/x/gi, ''));
+          return Number.isNaN(n) ? null : Math.max(0.25, Math.min(2, n));
+        },
+        getEditText: v => v.toFixed(2),
         onChange: v => {
           audioSync.setUserRate(v);
           // A rate change needs a seek in place to re-anchor the hitsound schedule.
@@ -128,9 +158,11 @@ export function sessionSettings(session: CoreSession): readonly SettingsSection[
       {
         kind: 'slider',
         label: 'Background dim',
-        min: 0, max: 1, step: 0.05, value: options.backgroundDim,
+        min: 0, max: 1, step: 0.01, value: options.backgroundDim,
         format: v => `${Math.round(v * 100)}%`,
         resetTo: 0.8,
+        parseInput: parsePercentInput,
+        getEditText: v => String(Math.round(v * 100)),
         onChange: v => { options.backgroundDim = v; },
       },
       {
@@ -160,22 +192,174 @@ export function sessionSettings(session: CoreSession): readonly SettingsSection[
     ],
   };
 
+  let musicHandle: SliderHandle | null = null;
+  let effectsHandle: SliderHandle | null = null;
+  let isVolumeLinked = false;
+  let linkBtn: HTMLButtonElement | null = null;
+  let currentSongVolume = 0.25;
+  let currentEffectsVolume = 0.25;
+
+  const updateLinkUi = () => {
+    if (linkBtn !== null) {
+      linkBtn.classList.toggle('ps-linked', isVolumeLinked);
+      linkBtn.setAttribute('aria-pressed', String(isVolumeLinked));
+      linkBtn.title = isVolumeLinked
+        ? 'Volumes are linked (synced). Click to unlink.'
+        : 'Link Music and Effects volumes (sync adjustments)';
+    }
+  };
+
+  const handleLinkToggle = () => {
+    isVolumeLinked = !isVolumeLinked;
+    updateLinkUi();
+    if (isVolumeLinked && musicHandle !== null && effectsHandle !== null) {
+      const m = musicHandle.getValue();
+      const e = effectsHandle.getValue();
+      if (m !== e) {
+        const minVal = Math.min(m, e);
+        currentSongVolume = minVal;
+        currentEffectsVolume = minVal;
+        musicHandle.setValue(minVal, true);
+        effectsHandle.setValue(minVal, true);
+      }
+    }
+  };
+
+  const onMusicChange = (v: number) => {
+    currentSongVolume = v;
+    audioSync.setSongVolume(v);
+    if (isVolumeLinked && effectsHandle !== null) {
+      currentEffectsVolume = v;
+      effectsHandle.setValue(v, false);
+      audioSync.setEffectsVolume(v);
+      volumeMeter?.showVolumes(v, v);
+    } else {
+      volumeMeter?.showMusicVolume(v);
+    }
+  };
+
+  const onEffectsChange = (v: number) => {
+    currentEffectsVolume = v;
+    audioSync.setEffectsVolume(v);
+    if (isVolumeLinked && musicHandle !== null) {
+      currentSongVolume = v;
+      musicHandle.setValue(v, false);
+      audioSync.setSongVolume(v);
+      volumeMeter?.showVolumes(v, v);
+    } else {
+      volumeMeter?.showEffectsVolume(v);
+    }
+  };
+
+  const adjustVolume = (delta: number): void => {
+    if (isVolumeLinked) {
+      const next = Math.max(0, Math.min(1, Math.round((currentSongVolume + delta) * 100) / 100));
+      currentSongVolume = next;
+      currentEffectsVolume = next;
+      audioSync.setSongVolume(next);
+      audioSync.setEffectsVolume(next);
+      musicHandle?.setValue(next, false);
+      effectsHandle?.setValue(next, false);
+      volumeMeter?.showVolumes(next, next);
+    } else {
+      const nextMusic = Math.max(0, Math.min(1, Math.round((currentSongVolume + delta) * 100) / 100));
+      const nextEffects = Math.max(0, Math.min(1, Math.round((currentEffectsVolume + delta) * 100) / 100));
+      currentSongVolume = nextMusic;
+      currentEffectsVolume = nextEffects;
+      audioSync.setSongVolume(nextMusic);
+      audioSync.setEffectsVolume(nextEffects);
+      musicHandle?.setValue(nextMusic, false);
+      effectsHandle?.setValue(nextEffects, false);
+      volumeMeter?.showVolumes(nextMusic, nextEffects);
+    }
+  };
+
+  const adjustMusicOnly = (delta: number): void => {
+    const next = Math.max(0, Math.min(1, Math.round((currentSongVolume + delta) * 100) / 100));
+    currentSongVolume = next;
+    audioSync.setSongVolume(next);
+    musicHandle?.setValue(next, false);
+    if (isVolumeLinked && effectsHandle !== null) {
+      currentEffectsVolume = next;
+      audioSync.setEffectsVolume(next);
+      effectsHandle.setValue(next, false);
+      volumeMeter?.showVolumes(next, next);
+    } else {
+      volumeMeter?.showMusicVolume(next);
+    }
+  };
+
+  const adjustEffectsOnly = (delta: number): void => {
+    const next = Math.max(0, Math.min(1, Math.round((currentEffectsVolume + delta) * 100) / 100));
+    currentEffectsVolume = next;
+    audioSync.setEffectsVolume(next);
+    effectsHandle?.setValue(next, false);
+    if (isVolumeLinked && musicHandle !== null) {
+      currentSongVolume = next;
+      audioSync.setSongVolume(next);
+      musicHandle.setValue(next, false);
+      volumeMeter?.showVolumes(next, next);
+    } else {
+      volumeMeter?.showEffectsVolume(next);
+    }
+  };
+
+  const buildVolumeLinkDivider = (): HTMLElement => {
+    const divider = document.createElement('div');
+    divider.className = 'ps-volume-link-divider';
+
+    const lineLeft = document.createElement('div');
+    lineLeft.className = 'ps-volume-link-line';
+
+    linkBtn = document.createElement('button');
+    linkBtn.type = 'button';
+    linkBtn.className = 'ps-volume-link-btn';
+    linkBtn.setAttribute('aria-label', 'Link Music and Effects volumes');
+
+    const linkText = document.createElement('span');
+    linkText.className = 'ps-volume-link-text';
+    linkText.textContent = 'Link';
+
+    linkBtn.append(
+      icon('link', { className: 'rv-icon' }),
+      linkText,
+    );
+    linkBtn.addEventListener('click', handleLinkToggle);
+    updateLinkUi();
+
+    const lineRight = document.createElement('div');
+    lineRight.className = 'ps-volume-link-line';
+
+    divider.append(lineLeft, linkBtn, lineRight);
+    return divider;
+  };
+
   const audio: SettingsSection = {
     title: 'Audio',
     controls: [
       {
         kind: 'slider', label: 'Music volume',
-        min: 0, max: 1, step: 0.05, value: 0.25,
+        min: 0, max: 1, step: 0.01, value: 0.25,
         format: v => `${Math.round(v * 100)}%`,
         resetTo: 0.25,
-        onChange: v => audioSync.setSongVolume(v),
+        bindHandle: h => { musicHandle = h; },
+        parseInput: parsePercentInput,
+        getEditText: v => String(Math.round(v * 100)),
+        onChange: onMusicChange,
+      },
+      {
+        kind: 'custom',
+        render: buildVolumeLinkDivider,
       },
       {
         kind: 'slider', label: 'Effects volume',
-        min: 0, max: 1, step: 0.05, value: 0.25,
+        min: 0, max: 1, step: 0.01, value: 0.25,
         format: v => `${Math.round(v * 100)}%`,
         resetTo: 0.25,
-        onChange: v => audioSync.setEffectsVolume(v),
+        bindHandle: h => { effectsHandle = h; },
+        parseInput: parsePercentInput,
+        getEditText: v => String(Math.round(v * 100)),
+        onChange: onEffectsChange,
       },
       {
         kind: 'toggle', label: 'Beatmap hitsounds', value: true, resetTo: true,
@@ -186,12 +370,17 @@ export function sessionSettings(session: CoreSession): readonly SettingsSection[
         min: -200, max: 200, step: 1, value: options.audioOffsetMs,
         format: v => `${v > 0 ? '+' : ''}${v} ms`,
         resetTo: 0,
+        parseInput: raw => {
+          const n = parseInt(raw.trim().replace(/ms/gi, ''), 10);
+          return Number.isNaN(n) ? null : Math.max(-200, Math.min(200, n));
+        },
+        getEditText: v => String(v),
         onChange: v => { options.audioOffsetMs = v; },
       },
     ],
   };
 
-  return [playback, display, audio];
+  return { sections: [playback, display, audio], adjustVolume, adjustMusicOnly, adjustEffectsOnly };
 }
 
 export function buildFlow(flowOptions: FlowOptions): FlowHandle {
@@ -229,10 +418,23 @@ export function buildFlow(flowOptions: FlowOptions): FlowHandle {
   let reveal: Cancellable | null = null;
   let overlay: SettingsOverlayHandle | null = null;
   let transport: TransportHandle | null = null;
+  let volumeMeter: VolumeMeterHandle | null = null;
   let endPoll: number | null = null;
+  let keydownListener: ((e: KeyboardEvent) => void) | null = null;
+  let wheelListener: ((e: WheelEvent) => void) | null = null;
 
   function stopPlayback(): void {
     if (endPoll !== null) { clearInterval(endPoll); endPoll = null; }
+    if (keydownListener !== null) {
+      window.removeEventListener('keydown', keydownListener);
+      keydownListener = null;
+    }
+    if (wheelListener !== null) {
+      playbackScreen.removeEventListener('wheel', wheelListener);
+      wheelListener = null;
+    }
+    volumeMeter?.destroy();
+    volumeMeter = null;
     transport?.destroy();
     transport = null;
     if (current === null) return;
@@ -256,19 +458,103 @@ export function buildFlow(flowOptions: FlowOptions): FlowHandle {
     const { session, startAtMs } = current;
     overlay?.destroy();
     transport?.destroy();
+    volumeMeter?.destroy();
 
     transport = buildTransport(session);
-    overlay = buildSettingsOverlay(sessionSettings(session), playbackScreen);
-    // The transport buttons live at the top of the settings panel, above the speed slider, as
-    // lazer arranges them; the scrub bar stays on the playback surface where it is always
-    // reachable without summoning the panel.
-    overlay.root.prepend(transport.buttons);
-    playbackScreen.append(overlay.root, transport.scrubber);
+
+    let adjustVolumeFn = (_delta: number) => {};
+    let adjustMusicOnlyFn = (_delta: number) => {};
+    let adjustEffectsOnlyFn = (_delta: number) => {};
+
+    volumeMeter = buildVolumeMeter({
+      onAdjustMusic: delta => adjustMusicOnlyFn(delta),
+      onAdjustEffects: delta => adjustEffectsOnlyFn(delta),
+    });
+
+    const { sections, adjustVolume, adjustMusicOnly, adjustEffectsOnly } = sessionSettings(session, volumeMeter);
+    adjustVolumeFn = adjustVolume;
+    adjustMusicOnlyFn = adjustMusicOnly;
+    adjustEffectsOnlyFn = adjustEffectsOnly;
+
+    overlay = buildSettingsOverlay(sections, playbackScreen);
+    // The transport buttons live inside the top settings card (Playback) above the speed slider,
+    // as lazer arranges them.
+    const firstCard = overlay.root.querySelector('.ps-card');
+    if (firstCard !== null) {
+      firstCard.prepend(transport.buttons);
+    } else {
+      overlay.root.prepend(transport.buttons);
+    }
+    playbackScreen.append(overlay.root, transport.scrubber, volumeMeter.root);
     transport.start();
     // Hide the edge hint once the panel has been found; it is only a discovery aid.
     playbackScreen.addEventListener('pointermove', () => {
       if (overlay?.visible === true) edgeHint.style.opacity = '0';
     }, { once: false });
+
+    // Keyboard & Wheel Hotkeys
+    const volumeAccelerator = new KeyAccelerator(0.01, 8, 300);
+    const seekAccelerator = new KeyAccelerator(1000, 10, 320);
+
+    keydownListener = (e: KeyboardEvent) => {
+      if (current === null || playbackScreen.hidden) return;
+      // Do not intercept if user is typing in a text/input box
+      if (document.activeElement instanceof HTMLInputElement || document.activeElement instanceof HTMLTextAreaElement) {
+        return;
+      }
+
+      if (e.code === 'Space') {
+        e.preventDefault();
+        if (session.audioSync.isPlaying) {
+          session.audioSync.pause();
+          session.player.pause();
+        } else {
+          const duration = session.timeMapper.presentationDurationMs;
+          const from = session.audioSync.currentTimeMs >= duration - 50 ? 0 : session.audioSync.currentTimeMs;
+          void session.audioSync.playFrom(from).then(() => {
+            session.player.seek(from);
+            session.player.play();
+          });
+        }
+      } else if (e.code === 'ArrowUp') {
+        e.preventDefault();
+        const delta = volumeAccelerator.getDelta();
+        adjustVolumeFn(delta);
+      } else if (e.code === 'ArrowDown') {
+        e.preventDefault();
+        const delta = volumeAccelerator.getDelta();
+        adjustVolumeFn(-delta);
+      } else if (e.code === 'ArrowLeft') {
+        e.preventDefault();
+        const delta = seekAccelerator.getDelta();
+        const currentMs = session.audioSync.currentTimeMs;
+        const targetMs = Math.max(0, currentMs - delta);
+        void session.audioSync.seekTo(targetMs);
+        session.player.seek(targetMs);
+        volumeMeter?.showSeek(targetMs, -delta, session.timeMapper.presentationDurationMs);
+      } else if (e.code === 'ArrowRight') {
+        e.preventDefault();
+        const delta = seekAccelerator.getDelta();
+        const currentMs = session.audioSync.currentTimeMs;
+        const duration = session.timeMapper.presentationDurationMs;
+        const targetMs = Math.min(duration, currentMs + delta);
+        void session.audioSync.seekTo(targetMs);
+        session.player.seek(targetMs);
+        volumeMeter?.showSeek(targetMs, delta, duration);
+      }
+    };
+    window.addEventListener('keydown', keydownListener);
+
+    wheelListener = (e: WheelEvent) => {
+      if (current === null || playbackScreen.hidden) return;
+      if (overlay?.root.contains(e.target as Node)) return;
+      if (volumeMeter?.root.contains(e.target as Node)) return;
+      e.preventDefault();
+      // Mouse wheel is linear: 2% per notch
+      const delta = e.deltaY < 0 ? 0.02 : -0.02;
+      adjustVolumeFn(delta);
+    };
+    playbackScreen.addEventListener('wheel', wheelListener, { passive: false });
 
     session.renderer.start();
     session.player.setClockFn(session.audioSync.clockFn);

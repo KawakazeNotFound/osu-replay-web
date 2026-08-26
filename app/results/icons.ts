@@ -14,13 +14,23 @@ const SVG_NS = 'http://www.w3.org/2000/svg';
 export type IconName =
   | 'skip-start' | 'rewind' | 'step-back' | 'play' | 'pause'
   | 'step-forward' | 'fast-forward' | 'skip-end'
-  | 'reset' | 'power' | 'download-check';
+  | 'reset' | 'power' | 'download-check' | 'link' | 'check' | 'star';
 
 /**
  * Path data per icon. Filled shapes rather than strokes, so they stay crisp at the small sizes
  * the transport row uses without needing vector-effect hints.
  */
 const PATHS: Readonly<Record<IconName, readonly string[]>> = {
+  // A five-pointed star, for the star-rating badge.
+  star: ['M12 2.6l2.9 5.9 6.5.95-4.7 4.6 1.1 6.45L12 17.45 6.2 20.5l1.1-6.45-4.7-4.6 6.5-.95z'],
+  // A tick on its own, for "this option is the selected one".
+  check: ['M9 16.2 4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4z'],
+  // Two interlocking chain links.
+  link: [
+    'M7.5 14.5a3.5 3.5 0 0 1 0-4.95l2.83-2.83a3.5 3.5 0 0 1 4.95 0l.7.7-1.41 1.42-.7-.7a1.5 1.5 0 0 0-2.13 0L8.91 11a1.5 1.5 0 0 0 0 2.12l.71.71-1.42 1.42-.7-.75z',
+    'M16.5 9.5a3.5 3.5 0 0 1 0 4.95l-2.83 2.83a3.5 3.5 0 0 1-4.95 0l-.7-.7 1.41-1.42.7.7a1.5 1.5 0 0 0 2.13 0l2.83-2.83a1.5 1.5 0 0 0 0-2.12l-.71-.71 1.42-1.42.7.75z',
+    'M9.17 14.83l5.66-5.66 1.41 1.41-5.66 5.66z',
+  ],
   // |◀◀ — a bar plus two triangles.
   'skip-start': [
     'M5 5h2.2v14H5z',

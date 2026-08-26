@@ -182,7 +182,8 @@ export function buildResultsPanel(
   if (data.starRating !== null) {
     const starRow = div('rs-star-row');
     const badge = div('rs-star-badge');
-    badge.append(text('span', 'rs-star-glyph', '★'));
+    // Drawn rather than the `★` glyph, which some platforms render as a full-colour emoji.
+    badge.append(icon('star', { className: 'rv-icon rs-star-glyph' }));
     badge.append(text('span', 'rs-star-value', data.starRating.toFixed(2)));
     starRow.append(badge);
     middle.append(starRow);
@@ -355,6 +356,7 @@ ${iconCss()}
   line-height: 1;
 }
 .rs-star-row { display: flex; align-items: center; gap: ${LAYOUT.starRowSpacing}px; }
+.rs-star-glyph { font-size: 12px; }
 .rs-star-badge {
   display: inline-flex; align-items: center; gap: 3px;
   background: #ff66aa; color: #ffffff;
@@ -373,32 +375,39 @@ ${iconCss()}
   display: flex; flex-direction: column;
   gap: ${LAYOUT.statisticsRowSpacing}px;
 }
-.rs-stat-row { display: grid; gap: 4px; width: 100%; }
-.rs-stat { text-align: center; min-width: 0; }
+.rs-stat-row { display: grid; gap: 6px; width: 100%; }
+.rs-stat {
+  text-align: center; min-width: 0;
+  display: flex; flex-direction: column; align-items: stretch;
+}
 .rs-stat-header {
   height: ${LAYOUT.statHeaderHeight}px;
   line-height: ${LAYOUT.statHeaderHeight}px;
   border-radius: 999px;
   font-size: ${FONT.statHeader.size}px;
   font-weight: ${FONT.statHeader.weight};
-  letter-spacing: 0.02em;
+  letter-spacing: 0.03em;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   padding: 0 4px;
 }
 .rs-stat-value {
   display: flex; align-items: baseline; justify-content: center;
   font-variant-numeric: tabular-nums;
+  margin-top: 3px;
+  gap: 1.5px;
 }
 .rs-stat-number {
   font-size: ${FONT.statValue.size}px;
   font-weight: ${FONT.statValue.weight};
   letter-spacing: ${FONT.statValue.letterSpacing}px;
+  line-height: 1;
 }
 .rs-stat-max {
   font-size: ${FONT.statMax.size}px;
   font-weight: ${FONT.statMax.weight};
   letter-spacing: ${FONT.statMax.letterSpacing}px;
   opacity: 0.7;
+  line-height: 1;
 }
 .rs-perfect {
   font-size: ${FONT.perfect.size}px;
@@ -406,10 +415,12 @@ ${iconCss()}
   background: linear-gradient(${PERFECT_GRADIENT.from}, ${PERFECT_GRADIENT.to});
   -webkit-background-clip: text; background-clip: text; color: transparent;
   letter-spacing: 0.08em;
+  margin-top: 1px;
 }
 .rs-played-on {
   font-size: ${FONT.playedOn.size}px; font-weight: ${FONT.playedOn.weight};
-  opacity: 0.7;
+  opacity: 0.65;
+  margin-top: 4px;
 }
 .rs-root { display: flex; flex-direction: column; align-items: center; gap: 12px; }
 .rs-buttons {
