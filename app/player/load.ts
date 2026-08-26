@@ -2,16 +2,14 @@
  * Turns a replay into the two things the flow needs: a live session, and the numbers the
  * results panel shows.
  *
- * Two entry points for now:
- *  - `loadLocalReplay` — a .osr plus its .osz. Entirely offline, so it works before any OAuth
- *    plumbing exists.
- *  - `loadAutoFromBeatmap` — a beatmap reference, played by a synthesised perfect replay. Uses
- *    only the *public* endpoints (our proxy's `/osu/{id}` and the beatmap mirrors), so it also
- *    needs no token.
+ * Three entry points:
+ *  - `loadLocalReplay` — a .osr plus its .osz. Entirely offline.
+ *  - `loadAutoFromBeatmap` — a beatmap reference, played by a synthesised perfect replay. Only
+ *    public endpoints, so no token.
+ *  - `loadOnlineScore` — a real score, which needs the token the captured page holds (see
+ *    osuApi.ts). Same-origin only, which is why the new UI deploys to /app/.
  *
- * Fetching a real online *score* needs a `public`-scope bearer token, which this dev page has
- * no way to obtain — the site's token lives in another origin's localStorage. That path lands
- * when this replaces the deployed page and the two share an origin.
+ * `loadFromInput` picks between them, so the page has one entry rather than a branch of its own.
  */
 
 import {
@@ -21,6 +19,10 @@ import {
 } from '../../src/index.js';
 import { JUDGEMENT_COLOUR, type ResultsPanelData, type StatisticEntry } from '../results/panel.js';
 import type { LoadedReplay } from './flow.js';
+import {
+  downloadReplay, fetchBeatmapOsu, fetchScoreMeta, hasToken, parseScoreRef,
+  type ScoreMeta,
+} from './osuApi.js';
 
 /** osu!standard cutoffs, as lazer's ruleset reports them (ScoreProcessor.cs L34-39). */
 const CUTOFFS = { D: 0, C: 0.7, B: 0.8, A: 0.9, S: 0.95, X: 1 } as const;
@@ -147,6 +149,61 @@ export function resultsDataFromSession(
   };
 }
 
+/**
+ * The `.osz` for a beatmap set, from the public mirrors.
+ *
+ * Two mirrors in a cascade, as the captured page does: osu.direct first, Nerinyan as a fallback.
+ * ppy hosts no `.osz` at all — its own download route is lazer-scoped and then redirects to this
+ * same mirror infrastructure — so this is not a shortcut around an official endpoint.
+ */
+async function downloadBeatmapSet(setId: number, log: LogFn): Promise<ArrayBuffer> {
+  const mirrors = [
+    { name: 'osu.direct', url: `https://osu.direct/api/d/${setId}?noVideo=1` },
+    { name: 'Nerinyan', url: `https://api.nerinyan.moe/d/${setId}?noVideo=1` },
+  ];
+  const failures: string[] = [];
+  for (const mirror of mirrors) {
+    log(`downloading .osz from ${mirror.name}…`);
+    try {
+      const response = await fetch(mirror.url);
+      if (!response.ok) { failures.push(`${mirror.name}: HTTP ${response.status}`); continue; }
+      const buffer = await response.arrayBuffer();
+      // A mirror miss sometimes returns a short HTML error with a 200, which would fail later as
+      // a confusing unzip error.
+      if (buffer.byteLength < 1024) {
+        failures.push(`${mirror.name}: ${buffer.byteLength} bytes`);
+        continue;
+      }
+      return buffer;
+    } catch (err) {
+      failures.push(`${mirror.name}: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+  throw new Error(`no mirror could supply beatmap set ${setId} — ${failures.join(' | ')}`);
+}
+
+/** Resolves a beatmap MD5 to its set id via osu.direct's public index. */
+async function setIdForHash(hash: string): Promise<number> {
+  const response = await fetch(`https://osu.direct/api/v2/md5/${hash}`, {
+    headers: { accept: 'application/json' },
+  });
+  if (!response.ok) throw new Error(`md5 lookup failed (HTTP ${response.status})`);
+  const setId = (await response.json() as { beatmapset_id?: number }).beatmapset_id;
+  if (typeof setId !== 'number') throw new Error('the mirror does not index this beatmap');
+  return setId;
+}
+
+/** osu!'s own played-on wording: `Played on 25 August 2026 6:42 PM`. */
+function formatPlayedOn(iso: string | null): string | null {
+  if (iso === null) return null;
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return null;
+  const day = date.getDate();
+  const month = date.toLocaleString('en-GB', { month: 'long' });
+  const time = date.toLocaleString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+  return `${day} ${month} ${date.getFullYear()} ${time}`;
+}
+
 /** Shared session construction, so both entry points agree on skin and defaults. */
 async function buildSession(
   replay: ReplayData,
@@ -194,8 +251,8 @@ export async function loadLocalReplay(
 }
 
 /**
- * A beatmap reference, played by a synthesised perfect replay. Mirrors the deployed site's
- * login-free path: canonical `.osu` from our own proxy, `.osz` from the public mirrors.
+ * A beatmap reference, played by a synthesised perfect replay. Login-free: the canonical `.osu`
+ * comes from our own proxy and the `.osz` from the public mirrors.
  */
 export async function loadAutoFromBeatmap(
   ref: string,
@@ -204,35 +261,18 @@ export async function loadAutoFromBeatmap(
   log: LogFn,
 ): Promise<LoadedReplay> {
   const beatmapId = parseBeatmapRef(ref);
-  if (beatmapId === null) {
-    throw new Error('not a beatmap id or URL — a score URL needs a token this page cannot get');
-  }
+  if (beatmapId === null) throw new Error(`not a beatmap id or URL: ${ref}`);
 
   log('fetching .osu…');
-  const osuResponse = await fetch(`/osu-proxy/osu/${beatmapId}`, { headers: { Accept: 'text/plain' } });
-  if (!osuResponse.ok) throw new Error(`.osu fetch failed (HTTP ${osuResponse.status})`);
-  const osuBytes = new Uint8Array(await osuResponse.arrayBuffer());
-  const osuText = new TextDecoder().decode(osuBytes);
-  const beatmap = parseBeatmap(osuText);
+  const osuBytes = await fetchBeatmapOsu(beatmapId);
+  const beatmap = parseBeatmap(new TextDecoder().decode(osuBytes));
 
   log('finding the beatmap set…');
   const hash = md5(osuBytes);
-  const lookup = await fetch(`https://osu.direct/api/v2/md5/${hash}`, {
-    headers: { accept: 'application/json' },
-  });
-  if (!lookup.ok) throw new Error(`md5 lookup failed (HTTP ${lookup.status})`);
-  const setId = (await lookup.json() as { beatmapset_id?: number }).beatmapset_id;
-  if (typeof setId !== 'number') throw new Error('the mirror does not index this beatmap');
-
-  log('downloading .osz…');
-  const oszResponse = await fetch(`https://osu.direct/api/d/${setId}?noVideo=1`);
-  if (!oszResponse.ok) throw new Error(`.osz download failed (HTTP ${oszResponse.status})`);
-  const oszBuffer = await oszResponse.arrayBuffer();
+  const oszBuffer = await downloadBeatmapSet(await setIdForHash(hash), log);
 
   // computeModDifficulty reads the *replay* for its mods and lazer-ness, and the generator needs
-  // the difficulty — so a frameless stub breaks the cycle. Passing a bare mods number here type-
-  // checks as nothing and silently degrades to nomod, which is how an earlier throwaway harness
-  // got away with it.
+  // the difficulty — so a frameless stub breaks the cycle.
   const stub = synthesizeAutoReplay(beatmap, hash, [], 0);
   const modDiff = computeModDifficulty(beatmap, stub);
   const replay = synthesizeAutoReplay(beatmap, hash, generateStdAutoReplay(beatmap, modDiff), 0);
@@ -246,5 +286,79 @@ export async function loadAutoFromBeatmap(
   };
 }
 
-/** Kept under the name the dev page uses, so the online path can grow into a real score fetch. */
-export const loadOnlineScore = loadAutoFromBeatmap;
+/**
+ * A real online score. Needs the token the captured page holds — see osuApi.ts for why this
+ * borrows it rather than running a second login.
+ *
+ * The `.osr` decides which beatmap to load, not the score metadata: its `beatmapHash` is the MD5
+ * of the exact difficulty it was set on, so resolving through the hash cannot land on a
+ * re-uploaded or since-edited version the way trusting `beatmap.id` alone could.
+ */
+export async function loadOnlineScore(
+  input: string,
+  audioContext: AudioContext,
+  canvas: HTMLCanvasElement,
+  log: LogFn,
+): Promise<LoadedReplay> {
+  const ref = parseScoreRef(input);
+  if (ref === null) throw new Error(`not a score id or URL: ${input}`);
+
+  log('fetching score…');
+  // Metadata and the replay in parallel: two independent requests, and the replay is the slow one.
+  const [meta, osrBuffer] = await Promise.all([
+    // Metadata is a nicety — pp, avatar, star rating. A failure here must not lose a replay that
+    // downloaded fine, so it degrades to null rather than rejecting.
+    fetchScoreMeta(ref).catch((err: unknown) => {
+      console.warn('score metadata unavailable:', err);
+      return null as ScoreMeta | null;
+    }),
+    downloadReplay(ref),
+  ]);
+
+  const replay = await parseReplay(osrBuffer);
+
+  log('finding the beatmap…');
+  const oszBuffer = await downloadBeatmapSet(await setIdForHash(replay.beatmapHash), log);
+  const session = await buildSession(replay, oszBuffer, audioContext, canvas, log);
+
+  return {
+    session,
+    startAtMs: 0,
+    panel: resultsDataFromSession(session, {
+      fromHeader: true,
+      avatarUrl: meta?.avatarUrl ?? null,
+      pp: meta?.pp ?? null,
+      starRating: meta?.starRating ?? null,
+      playedOn: formatPlayedOn(meta?.endedAt ?? null),
+    }),
+  };
+}
+
+/**
+ * Picks the right loader for whatever was typed, so the page carries no branch of its own.
+ *
+ * A score URL is unmistakable, and a beatmap URL likewise. A bare number is ambiguous — score ids
+ * and beatmap ids are both plain integers — so it is treated as a score when a token is available
+ * and a beatmap otherwise, which matches what someone pasting an id most likely means in each
+ * case.
+ */
+export async function loadFromInput(
+  input: string,
+  audioContext: AudioContext,
+  canvas: HTMLCanvasElement,
+  log: LogFn,
+): Promise<LoadedReplay> {
+  const trimmed = input.trim();
+  if (/\/scores\//i.test(trimmed)) {
+    return await loadOnlineScore(trimmed, audioContext, canvas, log);
+  }
+  if (/beatmapsets?\/|\/beatmaps\//i.test(trimmed)) {
+    return await loadAutoFromBeatmap(trimmed, audioContext, canvas, log);
+  }
+  if (/^\d+$/.test(trimmed)) {
+    return hasToken()
+      ? await loadOnlineScore(trimmed, audioContext, canvas, log)
+      : await loadAutoFromBeatmap(trimmed, audioContext, canvas, log);
+  }
+  throw new Error('paste an osu! score URL, a beatmap URL, or an id');
+}

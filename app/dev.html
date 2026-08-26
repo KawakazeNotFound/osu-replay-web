@@ -39,23 +39,30 @@
     .bar button:hover, .bar label.file:hover { background: #164080; }
     .bar input[type="file"] { display: none; }
     #status { font-size: 12px; opacity: 0.8; white-space: nowrap; }
+    .authbar {
+      flex: 0 0 auto; padding: 6px 14px; font-size: 12px;
+      background: #101828; border-bottom: 1px solid #2a2a4a;
+    }
     #stage { flex: 1 1 auto; min-height: 0; position: relative; }
   </style>
 </head>
 <body>
   <div class="bar">
-    <input type="text" id="score-url" placeholder="https://osu.ppy.sh/scores/… or a score id" />
-    <button id="load-online" type="button">Load online</button>
+    <input type="text" id="score-url"
+           placeholder="score URL / beatmap URL / id" />
+    <button id="load-online" type="button">Load</button>
     <label class="file">.osr<input type="file" id="osr" accept=".osr" /></label>
     <label class="file">.osz<input type="file" id="osz" accept=".osz" /></label>
     <button id="load-local" type="button">Load local</button>
     <span id="status"></span>
   </div>
+  <div class="authbar"><span id="auth"></span></div>
   <div id="stage"></div>
 
   <script type="module">
     import { buildFlow } from './player/flow.js';
-    import { loadOnlineScore, loadLocalReplay } from './player/load.js';
+    import { loadFromInput, loadLocalReplay } from './player/load.js';
+    import { hasToken } from './player/osuApi.js';
 
     const statusEl = document.getElementById('status');
     const say = t => { statusEl.textContent = t; };
@@ -85,9 +92,17 @@
 
     document.getElementById('load-online').addEventListener('click', () => {
       const ref = document.getElementById('score-url').value.trim();
-      if (ref === '') { say('enter a score URL or id'); return; }
-      void run((audio, cv, log) => loadOnlineScore(ref, audio, cv, log));
+      if (ref === '') { say('paste a score URL, beatmap URL, or id'); return; }
+      void run((audio, cv, log) => loadFromInput(ref, audio, cv, log));
     });
+
+    // Says plainly whether online scores are reachable: the token belongs to the main page, so
+    // "log in over there" is the actionable message, not "login failed".
+    const authEl = document.getElementById('auth');
+    authEl.textContent = hasToken()
+      ? 'osu! token found — score URLs work'
+      : 'no osu! token — sign in on the main page for score URLs (beatmap ids work now)';
+    authEl.style.color = hasToken() ? '#a3cc12' : '#b0b0c0';
 
     document.getElementById('load-local').addEventListener('click', () => {
       const osr = document.getElementById('osr').files?.[0] ?? null;
