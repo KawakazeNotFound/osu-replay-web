@@ -40,6 +40,8 @@ export interface LoadedReplay {
 export interface FlowHandle {
   /** Shows the results panel for a freshly loaded replay and plays the reveal. */
   present(replay: LoadedReplay): void;
+  /** Toggles the in-playback settings overlay (slides in/out). */
+  toggleSettings(): void;
   /** Tears down the current replay, if any. */
   clear(): void;
 }
@@ -587,6 +589,12 @@ export function buildFlow(flowOptions: FlowOptions): FlowHandle {
 
       prepareReveal(handle);
       reveal = startReveal(handle);
+    },
+    toggleSettings(): void {
+      if (overlay !== null) {
+        if (overlay.visible) overlay.hide();
+        else overlay.show();
+      }
     },
     clear(): void {
       reveal?.cancel();

@@ -208,6 +208,13 @@
           say(`Skin import failed: ${err instanceof Error ? err.message : String(err)}`);
         }
       },
+      onToggleSettings: () => {
+        if (currentMode === 'match') {
+          matchView.toggleSettings();
+        } else {
+          flow.toggleSettings();
+        }
+      },
       onToggleFullscreen: () => {
         if (document.fullscreenElement !== null) {
           void document.exitFullscreen();
