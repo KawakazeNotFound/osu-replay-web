@@ -20,9 +20,10 @@ import {
 import { JUDGEMENT_COLOUR, type ResultsPanelData, type StatisticEntry } from '../results/panel.js';
 import type { LoadedReplay } from './flow.js';
 import {
-  downloadReplay, fetchBeatmapOsu, fetchScoreMeta, hasToken, parseScoreRef,
+  downloadReplay, fetchBeatmapOsu, fetchScoreMeta, parseScoreRef,
   type ScoreMeta,
 } from './osuApi.js';
+import { isLoggedIn } from './auth.js';
 
 /** osu!standard cutoffs, as lazer's ruleset reports them (ScoreProcessor.cs L34-39). */
 const CUTOFFS = { D: 0, C: 0.7, B: 0.8, A: 0.9, S: 0.95, X: 1 } as const;
@@ -356,7 +357,7 @@ export async function loadFromInput(
     return await loadAutoFromBeatmap(trimmed, audioContext, canvas, log);
   }
   if (/^\d+$/.test(trimmed)) {
-    return hasToken()
+    return isLoggedIn()
       ? await loadOnlineScore(trimmed, audioContext, canvas, log)
       : await loadAutoFromBeatmap(trimmed, audioContext, canvas, log);
   }

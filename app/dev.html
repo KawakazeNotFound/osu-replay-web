@@ -39,10 +39,24 @@
     .bar button:hover, .bar label.file:hover { background: #164080; }
     .bar input[type="file"] { display: none; }
     #status { font-size: 12px; opacity: 0.8; white-space: nowrap; }
-    .authbar {
-      flex: 0 0 auto; padding: 6px 14px; font-size: 12px;
-      background: #101828; border-bottom: 1px solid #2a2a4a;
+
+    /* Signed-in chip, laid out like osu!'s own toolbar: name, then a rounded avatar. */
+    .user-chip {
+      display: inline-flex; align-items: center; gap: 10px;
+      padding: 4px 6px 4px 12px;
+      background: #0f1830; border: 1px solid #2a2a4a; border-radius: 10px;
+      white-space: nowrap;
     }
+    .user-chip-name { font-size: 13px; font-weight: 600; color: #e8e8f4; }
+    .user-chip-avatar {
+      width: 30px; height: 30px; border-radius: 8px; object-fit: cover;
+      background: #1b2540;
+    }
+    .user-chip-logout {
+      background: transparent; border: none; color: #7a7a92;
+      font-size: 15px; line-height: 1; padding: 2px 4px; cursor: pointer;
+    }
+    .user-chip-logout:hover { color: #e879a0; }
     #stage { flex: 1 1 auto; min-height: 0; position: relative; }
   </style>
 </head>
@@ -54,15 +68,16 @@
     <label class="file">.osr<input type="file" id="osr" accept=".osr" /></label>
     <label class="file">.osz<input type="file" id="osz" accept=".osz" /></label>
     <button id="load-local" type="button">Load local</button>
+    <span id="user-slot"></span>
     <span id="status"></span>
   </div>
-  <div class="authbar"><span id="auth"></span></div>
   <div id="stage"></div>
 
   <script type="module">
     import { buildFlow } from './player/flow.js';
     import { loadFromInput, loadLocalReplay } from './player/load.js';
-    import { hasToken } from './player/osuApi.js';
+    import { cachedUser, completePendingLogin, fetchMe, isLoggedIn, logout, startLogin }
+      from './player/auth.js';
 
     const statusEl = document.getElementById('status');
     const say = t => { statusEl.textContent = t; };
@@ -96,13 +111,77 @@
       void run((audio, cv, log) => loadFromInput(ref, audio, cv, log));
     });
 
-    // Says plainly whether online scores are reachable: the token belongs to the main page, so
-    // "log in over there" is the actionable message, not "login failed".
-    const authEl = document.getElementById('auth');
-    authEl.textContent = hasToken()
-      ? 'osu! token found — score URLs work'
-      : 'no osu! token — sign in on the main page for score URLs (beatmap ids work now)';
-    authEl.style.color = hasToken() ? '#a3cc12' : '#b0b0c0';
+    // ---- osu! sign-in -------------------------------------------------------------------
+    const userSlot = document.getElementById('user-slot');
+
+    function showLoginButton() {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.textContent = 'Login with osu!';
+      button.addEventListener('click', () => {
+        say('redirecting to osu!…');
+        startLogin().catch(err => say(`login failed: ${err.message}`));
+      });
+      userSlot.replaceChildren(button);
+    }
+
+    function showUser(user) {
+      const chip = document.createElement('span');
+      chip.className = 'user-chip';
+
+      const name = document.createElement('span');
+      name.className = 'user-chip-name';
+      name.textContent = user.username;
+      chip.append(name);
+
+      if (user.avatarUrl !== null) {
+        const avatar = document.createElement('img');
+        avatar.className = 'user-chip-avatar';
+        avatar.src = user.avatarUrl;
+        avatar.alt = '';
+        // A broken avatar should leave the name readable rather than showing a torn-image icon.
+        avatar.addEventListener('error', () => avatar.remove());
+        chip.append(avatar);
+      }
+
+      const out = document.createElement('button');
+      out.type = 'button';
+      out.className = 'user-chip-logout';
+      out.title = 'Sign out';
+      out.textContent = '⏻';
+      out.addEventListener('click', () => { logout(); showLoginButton(); say('signed out'); });
+      chip.append(out);
+
+      userSlot.replaceChildren(chip);
+    }
+
+    async function refreshAuthUi() {
+      if (!isLoggedIn()) { showLoginButton(); return; }
+      // Show the cached identity immediately so the chip does not flicker through a blank state
+      // while /me is in flight.
+      const cached = cachedUser();
+      if (cached !== null) showUser(cached);
+      try {
+        const user = await fetchMe();
+        if (user !== null) showUser(user);
+        else showLoginButton();
+      } catch (err) {
+        // A profile fetch can fail while the session is still fine (osu! outage, rate limit), so
+        // keep whatever is shown and say why rather than pretending we are signed out.
+        say(`signed in, but ${err.message}`);
+        if (cached === null) showLoginButton();
+      }
+    }
+
+    // Finish a sign-in that redirected back here before deciding what to show.
+    try {
+      if (await completePendingLogin()) say('signed in');
+    } catch (err) {
+      say(err.message);
+    }
+    // Clean the code out of the address bar so a reload is not mistaken for a fresh callback.
+    if (location.search !== '') history.replaceState(null, '', location.pathname + location.hash);
+    void refreshAuthUi();
 
     document.getElementById('load-local').addEventListener('click', () => {
       const osr = document.getElementById('osr').files?.[0] ?? null;

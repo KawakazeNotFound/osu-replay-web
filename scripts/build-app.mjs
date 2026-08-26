@@ -28,6 +28,7 @@ const ENTRIES = [
   'player/settings.ts',
   'player/transport.ts',
   'player/osuApi.ts',
+  'player/auth.ts',
   'results/panel.ts',
   'results/reveal.ts',
   'results/accuracyCircle.ts',

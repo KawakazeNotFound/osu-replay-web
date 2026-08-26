@@ -216,6 +216,38 @@ async function rewriteCapturedAssets(jsAssets) {
 }
 
 /**
+ * Teaches the OAuth callback page to return where the sign-in started.
+ *
+ * Upstream hardcodes `window.location.replace('/')`, so a login begun anywhere else lands on the
+ * main page. Our /app/ pages stash a path under `osu_auth_return`; this honours it and falls back
+ * to '/' when absent, so upstream's own behaviour is unchanged.
+ *
+ * Patching the callback is what avoids registering a second redirect URI — the existing
+ * `/auth/osu/` entry keeps working for both pages.
+ */
+async function patchAuthReturn() {
+  const pagePath = path.join(site, 'auth', 'osu', 'index.html');
+  const html = await fs.readFile(pagePath, 'utf8');
+  const target = "window.location.replace('/');";
+  if (!html.includes(target)) {
+    throw new Error(
+      `auth return: "${target}" not found in auth/osu/index.html — upstream changed its callback, `
+      + 'so signing in from /app/ would silently bounce to the main page',
+    );
+  }
+  const replacement = `try {
+        var back = sessionStorage.getItem('osu_auth_return');
+        sessionStorage.removeItem('osu_auth_return');
+        // Same-origin paths only: an absolute URL here would be an open redirect.
+        window.location.replace(back && back.charAt(0) === '/' && back.charAt(1) !== '/' ? back : '/');
+      } catch (e) {
+        window.location.replace('/');
+      }`;
+  await fs.writeFile(pagePath, html.replace(target, replacement));
+  console.log('patched auth/osu/ to return to the page that started the sign-in');
+}
+
+/**
  * Rebuilds our own UI into site/app/. capture:upstream owns site/, so without this the app
  * build would only survive until the next capture — and it has to sit on the same origin as the
  * captured page to reach the osu! token in localStorage.
@@ -477,6 +509,7 @@ for (const skin of skinNames) await captureSkin(skin);
 
 await rewriteCapturedAssets([...captured].filter(a => a.endsWith('.js')));
 await copyLazerDefaults();
+await patchAuthReturn();
 await buildOwnApp();
 await addCreditsDisclosure();
 await swapEngineChunk(appAsset);

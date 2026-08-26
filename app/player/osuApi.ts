@@ -1,68 +1,18 @@
 /**
- * Reads the osu! token the deployed site already holds.
+ * osu! API calls this page makes, all through our own Worker proxy.
  *
- * Deliberately read-only: the login flow, the code exchange, and the refresh all live in the
- * captured page, which stores the result under `osu_auth_token` in localStorage. Because
- * localStorage is per-origin, this only works when served from the same Worker — which is why
- * the new UI deploys to /app/ rather than running on its own dev port.
- *
- * Implementing a second login here would mean two independent token lifetimes on one origin,
- * where a refresh by either side invalidates the other's copy. Borrowing the existing one has no
- * such failure mode; the cost is that this path needs the user to have logged in on the main
- * page first, which `hasToken` reports so the UI can say so plainly.
+ * Session handling lives in auth.ts, which owns the shared token and its refresh; this module
+ * only consumes it. Keeping the two apart means a request path cannot accidentally mutate the
+ * session, and auth.ts stays the single place that knows the storage contract with the captured
+ * page.
  */
 
-/** Key the captured page writes; see its osuAuth.ts. */
-const TOKEN_STORAGE_KEY = 'osu_auth_token';
+import { accessToken } from './auth.js';
 
-interface StoredToken {
-  accessToken?: string;
-  expiresAtMs?: number;
-}
-
-function readStored(): StoredToken | null {
-  let raw: string | null;
-  try {
-    raw = localStorage.getItem(TOKEN_STORAGE_KEY);
-  } catch {
-    // Private-mode or blocked storage: no token, not a crash.
-    return null;
-  }
-  if (raw === null) return null;
-  try {
-    return JSON.parse(raw) as StoredToken;
-  } catch {
-    return null;
-  }
-}
-
-/**
- * The access token, or null when absent or expired.
- *
- * Expiry is checked but not refreshed: refreshing needs the client secret exchange the main page
- * owns, and racing it would invalidate the token it is holding. An expired token reports as
- * missing so the caller tells the user to reload the main page rather than issuing a request that
- * would 401.
- */
-export function accessToken(): string | null {
-  const stored = readStored();
-  if (stored?.accessToken === undefined || stored.accessToken === '') return null;
-  // 30 s of slack, matching the main page's own margin, so a token about to lapse mid-request is
-  // treated as gone.
-  if (typeof stored.expiresAtMs === 'number' && Date.now() >= stored.expiresAtMs - 30_000) {
-    return null;
-  }
-  return stored.accessToken;
-}
-
-export function hasToken(): boolean {
-  return accessToken() !== null;
-}
-
-/** Thrown when a request needs a token there is none for. */
+/** Thrown when a request needs a session there is none for. */
 export class NotLoggedInError extends Error {
   constructor() {
-    super('not logged in — open the main page and sign in with osu!, then reload this one');
+    super('not signed in — press "Login with osu!" first');
     this.name = 'NotLoggedInError';
   }
 }
@@ -116,7 +66,7 @@ function describeFailure(response: Response): Error {
 
 /** Raw `.osr` bytes for a score. Needs only `public` scope. */
 export async function downloadReplay(ref: ScoreRef): Promise<ArrayBuffer> {
-  const token = accessToken();
+  const token = await accessToken();
   if (token === null) throw new NotLoggedInError();
   const path = ref.ruleset !== null ? `${ref.ruleset}/${ref.id}` : ref.id;
   const response = await fetch(`/osu-proxy/api/v2/scores/${path}/download`, {
@@ -147,7 +97,7 @@ export interface ScoreMeta {
  * zero; the panel does the same.
  */
 export async function fetchScoreMeta(ref: ScoreRef): Promise<ScoreMeta> {
-  const token = accessToken();
+  const token = await accessToken();
   if (token === null) throw new NotLoggedInError();
   const path = ref.ruleset !== null ? `${ref.ruleset}/${ref.id}` : ref.id;
   const response = await fetch(`/osu-proxy/api/v2/scores/${path}`, {
