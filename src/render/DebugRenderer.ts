@@ -362,6 +362,37 @@ export class DebugRenderer {
   }
 
   /**
+   * 皮肤装载的统计,给 UI 与诊断用。
+   *
+   * ## 为什么需要它
+   *
+   * 一次真实故障:用户看到"只有光标是贴图、圈还是线框",而 840 个测试全绿。
+   * 逐组件降级把故障藏得很干净 —— 不报错、不警告,只是某些部件静默走回线框。
+   * 所以必须能从外面看到"到底装上了几个、哪些失败了"。
+   */
+  skinStats(): { readonly loaded: number; readonly failed: readonly string[]; readonly layers: readonly string[] } {
+    return {
+      loaded: this.sprites.size,
+      failed: this.sprites.failed,
+      layers: this.layers.map((l) => l.name),
+    };
+  }
+
+  /** 某个组件当前是否有贴图可用。诊断用 —— 能精确回答"为什么这个部件是线框"。 */
+  hasSprite(componentName: string): boolean {
+    return this.sprites.get(componentName) !== null;
+  }
+
+  /**
+   * 取染色后的贴图。**仅供诊断** —— 染色是整条链路里唯一无法在 Node 下验的一环
+   * (`OffscreenCanvas` + `globalCompositeOperation` 只有浏览器有),
+   * 所以留一个口子让浏览器侧能把结果取出来验。
+   */
+  debugTintedSprite(componentName: string, colourIndex = 0): SkinSprite | null {
+    return this.tinted.get(componentName, colourIndex);
+  }
+
+  /**
    * 让配色表与染色表失效。
    *
    * 记忆化的键是 `beatmap`,但值还依赖皮肤 —— 所以换皮肤必须显式作废,

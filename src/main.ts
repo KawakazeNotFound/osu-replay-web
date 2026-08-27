@@ -711,9 +711,53 @@ async function bootstrapDefaultSkin(): Promise<void> {
   try {
     const layer = await loadDefaultSkin();
     await renderer.setDefaultSkinLayer(layer);
+    reportSkin('默认皮肤');
   } catch (error) {
     console.warn('默认皮肤装载失败,渲染将退回线框:', error);
     setStatus('默认皮肤未装载(渲染退回线框)。试试 node scripts/fetch-default-skin.mjs', 'error');
+  }
+}
+
+/**
+ * 把皮肤装载结果打到控制台。
+ *
+ * ## 为什么这是必要的而不是调试残留
+ *
+ * 一次真实故障:用户看到"只有光标是贴图、圈还是线框",而 840 个测试全绿 ——
+ * **逐组件降级把故障藏得很干净**,不报错、不警告,只是某些部件静默走回线框。
+ * 所以要能一眼看出"到底装上了几个、哪些失败了、关键组件在不在"。
+ */
+function reportSkin(what: string): void {
+  const stats = renderer.skinStats();
+
+  // 关键组件逐个报 —— 只看总数不够:总数很大但恰好缺 hitcircle 也是"圈还是线框"
+  const key = ['hitcircle', 'hitcircleoverlay', 'approachcircle', 'default-0', 'cursor', 'cursortrail'];
+  const missing = key.filter((n) => !renderer.hasSprite(n));
+
+  console.info(
+    `[skin] ${what}:装上 ${stats.loaded} 个贴图,栈 = [${stats.layers.join(' → ')}]`,
+  );
+  if (stats.failed.length > 0) console.warn('[skin] 装载失败的组件:', stats.failed);
+  if (missing.length > 0) {
+    console.warn(`[skin] 关键组件缺失(这些部件会退回线框):`, missing);
+  }
+
+  // dev-only:把结果回传给 headless 浏览器验收(见 vite.config.ts 的 verifySink)。
+  // 浏览器里的东西只能在浏览器里验 —— createImageBitmap / OffscreenCanvas 都是。
+  const name = new URLSearchParams(location.search).get('verifyskin');
+  if (name) {
+    const body = [
+      `tint=${probeTint()}`,
+      `what=${what}`,
+      `loaded=${stats.loaded}`,
+      `layers=${stats.layers.join('|')}`,
+      `failed=${stats.failed.join('|') || '(无)'}`,
+      `missing=${missing.join('|') || '(无)'}`,
+    ].join('\n');
+
+    void fetch(`/__verify/${name}`, { method: 'POST', body }).catch(() => {
+      /* dev server 不在时静默跳过 */
+    });
   }
 }
 
@@ -729,10 +773,46 @@ async function loadSkinFile(file: File | null): Promise<void> {
     const skin = unpackSkin(await file.arrayBuffer());
     await renderer.setSkin(skin);
 
+    reportSkin('用户皮肤');
+
     const name = skin.ini.name.trim() === '' ? file.name : skin.ini.name;
-    setStatus(`皮肤已载入:${name}(${skin.files.size} 个文件)`, 'ok');
+    const stats = renderer.skinStats();
+    setStatus(`皮肤已载入:${name} —— ${skin.files.size} 个文件,${stats.loaded} 个贴图生效`, 'ok');
   } catch (error) {
     reportFailure('皮肤', error);
+  }
+}
+
+/**
+ * dev-only 探针:染色链路在**真实浏览器**里到底出不出像素。
+ *
+ * 这一步是整条贴图路径里唯一无法在 Node 下验的环节 ——
+ * `OffscreenCanvas` + `globalCompositeOperation` 的行为只有浏览器才有。
+ * 取染色结果正中心的 alpha:圈心本该是不透明的,若为 0 说明
+ * 那三步 multiply 配方在真实环境里把图抹掉了。
+ */
+function probeTint(): string {
+  try {
+    // ⚠️ 先强制画一帧:染色表是 `paletteOf` 按需建的,而那只在 draw() 里发生。
+    // 装载刚结束时 tinted 还是空的 —— 第一版探针就在这里读到 no-tinted-sprite,
+    // 那是**探针时序**问题而非染色问题。也不能靠 rAF 等:headless 的虚拟时钟
+    // 下 rAF 不可靠(TECH-NOTES D12)
+    renderer.draw(controller.timeline, stateAt(controller.timeline, controller.currentTime));
+
+    const sprite = renderer.debugTintedSprite('hitcircle');
+    if (sprite === null) return 'no-tinted-sprite';
+
+    const probe = document.createElement('canvas');
+    probe.width = 8;
+    probe.height = 8;
+    const ctx = probe.getContext('2d');
+    if (!ctx) return 'no-2d-context';
+
+    ctx.drawImage(sprite.image, 0, 0, 8, 8);
+    const [r, g, b, a] = ctx.getImageData(4, 4, 1, 1).data;
+    return `rgba(${r},${g},${b},${a})`;
+  } catch (error) {
+    return `throw:${error instanceof Error ? error.message : String(error)}`;
   }
 }
 
