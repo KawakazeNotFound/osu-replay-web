@@ -439,7 +439,7 @@ export function buildFlow(flowOptions: FlowOptions): FlowHandle {
   back.className = 'rv-back';
   const backLabel = document.createElement('span');
   backLabel.textContent = 'Results';
-  back.append(icon('rewind', { className: 'rv-icon' }), backLabel);
+  back.append(icon('arrow-left', { className: 'rv-icon' }), backLabel);
   uiSounds.attachHoverClick(back, { hover: 'button', click: false });
   // `showResults` is a hoisted function declaration below, so referencing it here is fine — and
   // without this listener the button was decoration: it rendered and did nothing.

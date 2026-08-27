@@ -16,7 +16,7 @@ export type IconName =
   | 'step-forward' | 'fast-forward' | 'skip-end'
   | 'reset' | 'power' | 'download-check' | 'link' | 'check' | 'star'
   | 'mode-single' | 'mode-std' | 'mode-auto' | 'mode-match' | 'chevron-right'
-  | 'settings' | 'home' | 'folder' | 'upload';
+  | 'settings' | 'home' | 'folder' | 'upload' | 'arrow-left';
 
 /**
  * Path data per icon. Filled shapes rather than strokes, so they stay crisp at the small sizes
@@ -39,6 +39,8 @@ const PATHS: Readonly<Record<IconName, readonly string[]>> = {
   upload: [
     'M9 16h6v-6h4l-7-7-7 7h4zm-4 2h14v2H5z',
   ],
+  // A left-pointing arrow, for "back".
+  'arrow-left': ['M10.4 4.6 3 12l7.4 7.4 1.5-1.5L7 13h14v-2H7l4.9-4.9z'],
   // A five-pointed star, for the star-rating badge.
   star: ['M12 2.6l2.9 5.9 6.5.95-4.7 4.6 1.1 6.45L12 17.45 6.2 20.5l1.1-6.45-4.7-4.6 6.5-.95z'],
   // A tick on its own, for "this option is the selected one".
