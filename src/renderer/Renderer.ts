@@ -369,7 +369,6 @@ export class Renderer {
     this._tick();
   }
 
-  /** Halt the live loop and cancel any pending animation frame. */
   /**
    * Installs a storyboard: compiles its drawables, builds the lazy image store, and maps it
    * into this renderer's logical space. Pass `null` to remove one.
@@ -399,6 +398,17 @@ export class Renderer {
     });
   }
 
+  /**
+   * Halt the live loop, cancel any pending animation frame, and free the storyboard's decoded
+   * bitmaps — but keep the storyboard itself installed, so a later {@link Renderer.start}
+   * draws it again (textures re-decode on demand from the raw bytes still held).
+   *
+   * `stop` is a pause, not a teardown, and callers stop far more often than they build: the
+   * app's flow stops playback on every return to the results panel, and once *before* the
+   * first frame is ever drawn. Disposing the storyboard here therefore blanked it for the
+   * whole session — the beatmap background still drew, so the map looked like it simply had
+   * no storyboard. Use {@link Renderer.dispose} for the permanent release.
+   */
   stop(): void {
     this._running = false;
     if (this._rafId !== null) {
@@ -407,6 +417,15 @@ export class Renderer {
     }
     // Storyboard bitmaps are this renderer's own (decoded from the set's shared raw bytes),
     // so they are released here rather than left to the caller like `assets`.
+    this.storyboard?.assets.releaseDecoded();
+  }
+
+  /**
+   * Final teardown: stops the loop and releases the storyboard outright. The renderer draws
+   * nothing afterwards unless a new storyboard is installed.
+   */
+  dispose(): void {
+    this.stop();
     this.storyboard?.assets.destroy();
     this.storyboard = null;
   }

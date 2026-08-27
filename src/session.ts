@@ -368,7 +368,8 @@ export async function createReplaySession(inputs: ReplaySessionInputs): Promise<
     background,
     assets,
     destroy(): void {
-      renderer.stop();
+      // dispose(), not stop(): this is the session's end, so the storyboard goes too.
+      renderer.dispose();
       audioSync.destroy();
     },
   };

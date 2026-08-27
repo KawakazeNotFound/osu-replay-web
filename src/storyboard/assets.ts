@@ -101,6 +101,21 @@ export class StoryboardAssets {
     };
   }
 
+  /**
+   * Frees the decoded bitmaps but keeps the store usable: the raw bytes stay, so a later
+   * `request`/`prefetch` decodes them again on demand.
+   *
+   * This is what stopping playback wants. `destroy` is for teardown — reaching for it on a
+   * mere stop makes the storyboard unrecoverable, and the renderer stops more than once per
+   * session (every return to the results panel).
+   */
+  releaseDecoded(): void {
+    if (this._destroyed) return;
+    this._queue.length = 0;
+    for (const bitmap of this._decoded.values()) bitmap.close();
+    this._decoded.clear();
+  }
+
   /** Releases every decoded bitmap. The store is unusable afterwards. */
   destroy(): void {
     this._destroyed = true;

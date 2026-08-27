@@ -200,7 +200,7 @@ export async function createMatch(inputs: MatchInputs): Promise<MatchHandle> {
       // would double-close a bitmap that N renderers had been drawing.
       //
       // storyboardImages is left alone: it holds undecoded bytes, and each renderer's own
-      // storyboard assets (the decoded bitmaps) were released by its stop().
+      // storyboard assets (the decoded bitmaps) were released by its session's destroy().
       shared?.background?.close();
     },
   };
