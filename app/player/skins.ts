@@ -27,6 +27,7 @@ const SKIN_BASE = '/skins';
  * fails loudly on selection rather than silently loading nothing.
  */
 export const SKIN_NAMES = [
+  'Ryosume',
   'YUGEN',
   'Default',
   'Rafis',
@@ -43,8 +44,8 @@ export const SKIN_NAMES = [
 
 export type SkinName = typeof SKIN_NAMES[number];
 
-/** The default, matching the captured page's own preselection. */
-export const DEFAULT_SKIN: SkinName = 'YUGEN';
+/** The default, matching user's custom skin. */
+export const DEFAULT_SKIN: SkinName = 'Ryosume';
 
 /**
  * One entry per skin, holding the in-flight promise rather than the resolved value: two loads
