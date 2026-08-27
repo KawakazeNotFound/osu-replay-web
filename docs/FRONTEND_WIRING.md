@@ -54,7 +54,7 @@ constant.
 
 ## 2. Auto mode — already implemented, no new backend
 
-This exists and `/app/dev` already uses it. `loadFromInput` routes a beatmap URL, or a bare id
+This exists and the modern UI (`/` and `/replay`) already uses it. `loadFromInput` routes a beatmap URL, or a bare id
 with no session, straight to it:
 
 ```ts

@@ -39,13 +39,22 @@ function decodePath(pathname) {
 async function writeAsset(relativePath, bytes) {
   const normalized = relativePath.replace(/^\/+|\/+$/g, '');
   const outputPath = normalized === ''
-    ? 'index.html'
+    ? path.join('legacy', 'index.html')
     : relativePath.endsWith('/')
       ? path.join(normalized, 'index.html')
       : normalized;
   const destination = path.join(site, decodePath(outputPath).replaceAll('/', path.sep));
   await fs.mkdir(path.dirname(destination), { recursive: true });
-  await fs.writeFile(destination, bytes);
+  let content = bytes;
+  if (normalized === '') {
+    // Inject <base href="/" /> so the legacy page at /legacy/ resolves all relative assets against /
+    let html = bytes.toString('utf8');
+    if (!html.includes('<base')) {
+      html = html.replace('<head>', '<head>\n        <base href="/" />');
+    }
+    content = Buffer.from(html, 'utf8');
+  }
+  await fs.writeFile(destination, content);
 }
 
 async function capture(relativePath) {
@@ -205,7 +214,7 @@ async function rewriteCapturedAssets(jsAssets) {
   // String.replace resets a global regex's lastIndex; .test() would not, and would
   // silently skip the second page.
   const beacon = /<!-- Cloudflare Pages Analytics -->.*?<!-- Cloudflare Pages Analytics -->/gs;
-  for (const page of ['index.html', path.join('auth', 'osu', 'index.html')]) {
+  for (const page of [path.join('legacy', 'index.html'), path.join('auth', 'osu', 'index.html')]) {
     const pagePath = path.join(site, page);
     const html = await fs.readFile(pagePath, 'utf8');
     const stripped = html.replace(beacon, '');
@@ -375,7 +384,7 @@ function matchingClose(html, openIdx, tag) {
  * rebuild cannot silently drop them.
  */
 async function addCreditsDisclosure() {
-  const pagePath = path.join(site, 'index.html');
+  const pagePath = path.join(site, 'legacy', 'index.html');
   const text = await fs.readFile(pagePath, 'utf8');
 
   const bodyOpen = text.indexOf('<div class="info-body">');
@@ -402,6 +411,7 @@ async function addCreditsDisclosure() {
   const added = `
               <p class="info-added-label">added in this build:</p>
               <ul class="info-added">
+                <li><a href="/" style="color: #4ed9c8; font-weight: bold; text-decoration: none;">新版播放器 (Modern Replay Viewer) ➔</a></li>
                 <li>storyboards — sprites, animations and sound samples</li>
                 <li>self-hosted: own osu! OAuth app and API proxy, no third-party relay</li>
                 <li>runs its own build of the replay engine</li>

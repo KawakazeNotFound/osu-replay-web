@@ -149,7 +149,7 @@ neither `index.html` nor `DEFAULT_SKINS`, so capture never saw them and every lo
     widening that bundle to cross a worker boundary; decided against — playback showing the
     storyboard is what matters here. Not a gap to close.
   - There is **no UI toggle** in the captured page — upstream's options panel has no storyboard
-    checkbox, so `RenderOptions.showStoryboard` defaults to on there. The new UI at `/app/dev`
+    checkbox, so `RenderOptions.showStoryboard` defaults to on there. The modern UI (at `/` and `/replay`)
     does expose one.
 - **The pp counter is inert** — see the engine swap above.
 

@@ -13,17 +13,17 @@
        without them the stack falls through to Quicksand, the closest free geometric face. */
     @font-face {
       font-family: "Torus";
-      src: url("./fonts/TorusRegular.woff2") format("woff2");
+      src: url("/fonts/TorusRegular.woff2") format("woff2");
       font-weight: 400; font-display: swap;
     }
     @font-face {
       font-family: "Torus";
-      src: url("./fonts/TorusSemiBold.woff2") format("woff2");
+      src: url("/fonts/TorusSemiBold.woff2") format("woff2");
       font-weight: 600; font-display: swap;
     }
     @font-face {
       font-family: "Torus";
-      src: url("./fonts/TorusLight.woff2") format("woff2");
+      src: url("/fonts/TorusLight.woff2") format("woff2");
       font-weight: 300; font-display: swap;
     }
     body {
@@ -55,9 +55,9 @@
   <div class="stage" id="stage"></div>
 
   <script type="module">
-    import { buildResultsPanel, resultsPanelCss, JUDGEMENT_COLOUR } from './results/panel.js';
-    import { prepareReveal, startReveal } from './results/reveal.js';
-    import { uiSounds } from './player/uiSounds.js';
+    import { buildResultsPanel, resultsPanelCss, JUDGEMENT_COLOUR } from '/results/panel.js';
+    import { prepareReveal, startReveal } from '/results/reveal.js';
+    import { uiSounds } from '/player/uiSounds.js';
 
     const style = document.createElement('style');
     style.textContent = resultsPanelCss();

@@ -7,7 +7,7 @@
  *  - `loadAutoFromBeatmap` — a beatmap reference, played by a synthesised perfect replay. Only
  *    public endpoints, so no token.
  *  - `loadOnlineScore` — a real score, which needs the token the captured page holds (see
- *    osuApi.ts). Same-origin only, which is why the new UI deploys to /app/.
+ *    osuApi.ts). Same-origin only, which is why the UI deploys alongside the Worker.
  *
  * `loadFromInput` picks between them, so the page has one entry rather than a branch of its own.
  */

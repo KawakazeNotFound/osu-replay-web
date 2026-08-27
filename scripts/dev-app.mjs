@@ -1,22 +1,19 @@
-// Dev server for the app/ preview pages: serves app/ with the .ts modules compiled on the
-// fly by esbuild, so the preview can import them the same way the built page will.
+// Dev server for the app: serves app/ with the .ts modules compiled on the
+// fly by esbuild, and serves the legacy player from site/legacy/.
 //
-// Run: node scripts/dev-app.mjs   → http://127.0.0.1:8900/preview.html
+// Run: node scripts/dev-app.mjs   → http://127.0.0.1:8900/
 import esbuild from 'esbuild';
 import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
 
 const ROOT = path.resolve('app');
+const SITE_ROOT = path.resolve('site');
 const PORT = 8900;
 
-// The dev pages load the sample skin and the default hitsounds from the repo, and reach our
-// Worker's public .osu route. Mounted here so the pages use the same URLs the deployed site will.
+// Mounted so the pages use the same URLs the deployed site will.
 const MOUNTS = [
   ['/assets/', path.resolve('assets')],
-  // The skin picker reads /skins, which is where the deployed Worker serves the captured set.
-  // Mounted from site/ so the dev page offers the same 12 rather than a smaller local set —
-  // a different URL or list per environment would mean the two builds exercise different code.
   ['/skins/', path.resolve('site', 'skins')],
 ];
 const PROXY_TARGET = 'https://osu-replayviewer.shirasuazusa.workers.dev';
@@ -33,6 +30,7 @@ const TYPES = {
   '.ogg': 'audio/ogg',
   '.ini': 'text/plain; charset=utf-8',
   '.osz': 'application/octet-stream',
+  '.woff2': 'font/woff2',
 };
 
 /** A request for `x.js` is served by bundling `x.ts` when only the source exists. */
@@ -87,7 +85,38 @@ http.createServer(async (req, res) => {
     return;
   }
 
-  const rel = url === '/' ? 'preview.html' : url.replace(/^\/+/, '');
+  // Legacy viewer route
+  if (url === '/legacy' || url === '/legacy/' || url === '/legacy/index.html') {
+    const legacyIndex = path.join(SITE_ROOT, 'legacy', 'index.html');
+    if (fs.existsSync(legacyIndex)) {
+      res.writeHead(200, { 'Content-Type': TYPES['.html'] });
+      fs.createReadStream(legacyIndex).pipe(res);
+      return;
+    }
+  }
+
+  // Legacy bundle assets in site root (e.g. app-*.js, chunk-*.js, style-*.css, horse.png, stretch-worker-*.js)
+  if (/^\/(app-[^/]+\.js|chunk-[^/]+\.js|style-[^/]+\.css|horse\.png|stretch-worker-[^/]+\.js|export-worker-[^/]+\.js|oauth-config\.json)(\.map)?$/.test(url)) {
+    const siteFile = path.join(SITE_ROOT, url.replace(/^\/+/, ''));
+    if (fs.existsSync(siteFile) && fs.statSync(siteFile).isFile()) {
+      res.writeHead(200, { 'Content-Type': TYPES[path.extname(siteFile).toLowerCase()] ?? 'application/octet-stream' });
+      fs.createReadStream(siteFile).pipe(res);
+      return;
+    }
+  }
+
+  // Modern UI routing
+  let rel = url.replace(/^\/+/, '');
+  if (rel === '' || rel === 'index.html' || rel === 'replay' || rel === 'replay/' || rel === 'replay.html') {
+    rel = fs.existsSync(path.join(ROOT, 'index.html')) ? 'index.html' : 'dev.html';
+  } else if (rel === 'dev' || rel === 'dev.html' || rel === 'app/dev' || rel === 'app/dev.html') {
+    rel = fs.existsSync(path.join(ROOT, 'dev.html')) ? 'dev.html' : 'index.html';
+  } else if (rel === 'preview' || rel === 'preview.html' || rel === 'app/preview' || rel === 'app/preview.html') {
+    rel = 'preview.html';
+  } else if (rel.startsWith('app/')) {
+    rel = rel.slice('app/'.length);
+  }
+
   const file = path.join(ROOT, rel);
 
   if (!file.startsWith(ROOT)) {
@@ -109,5 +138,5 @@ http.createServer(async (req, res) => {
   res.writeHead(404, { 'Content-Type': 'text/plain' });
   res.end(`not found: ${rel}`);
 }).listen(PORT, () => {
-  console.log(`app dev server on http://127.0.0.1:${PORT}/preview.html`);
+  console.log(`app dev server on http://127.0.0.1:${PORT}/ (default /, /replay, /legacy, /preview)`);
 });

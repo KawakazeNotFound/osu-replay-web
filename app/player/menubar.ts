@@ -484,6 +484,12 @@ export function buildMenuBar(options: MenuBarOptions): MenuBarHandle {
     },
     { isDivider: true, label: '' },
     {
+      label: '旧版播放器 (Legacy Viewer)',
+      onClick: () => {
+        window.location.href = '/legacy/';
+      },
+    },
+    {
       label: '全屏模式 (Toggle Fullscreen)',
       badge: 'F11',
       onClick: () => options.onToggleFullscreen?.(),
