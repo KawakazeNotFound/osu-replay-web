@@ -88,6 +88,12 @@ function creatorFrom(rawOsu: Uint8Array | undefined): string {
   return /^Creator\s*:\s*(.+)$/mi.exec(text)?.[1]?.trim() ?? '';
 }
 
+function sourceFrom(rawOsu: Uint8Array | undefined): string {
+  if (rawOsu === undefined) return '';
+  const text = new TextDecoder().decode(rawOsu);
+  return /^Source\s*:\s*(.+)$/mi.exec(text)?.[1]?.trim() ?? '';
+}
+
 /**
  * Panel data from a session.
  *
@@ -193,6 +199,7 @@ export function resultsDataFromSession(
     judgements,
     subJudgements,
     playedOn: meta.playedOn ?? null,
+    source: sourceFrom(beatmap.rawOsu),
   };
 }
 

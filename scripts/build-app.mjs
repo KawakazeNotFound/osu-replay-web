@@ -25,6 +25,7 @@ const PAGES = ['dev.html', 'preview.html'];
 const ENTRIES = [
   'player/flow.ts',
   'player/load.ts',
+  'player/playerLoader.ts',
   'player/settings.ts',
   'player/transport.ts',
   'player/volume-meter.ts',

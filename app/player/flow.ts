@@ -23,6 +23,7 @@ import {
   buildVolumeMeter, volumeMeterCss, KeyAccelerator, type VolumeMeterHandle,
 } from './volume-meter.js';
 import { uiSounds, VOL_KEYS, readStoredVolume, writeStoredVolume } from './uiSounds.js';
+import { buildPlayerLoader, playerLoaderCss, type PlayerLoaderHandle } from './playerLoader.js';
 
 export interface FlowOptions {
   /** Where both screens mount. */
@@ -53,7 +54,7 @@ function ensureStyles(): void {
   const style = document.createElement('style');
   style.id = 'rv-flow-styles';
   style.textContent = [
-    resultsPanelCss(), settingsOverlayCss(), transportCss(), volumeMeterCss(), flowCss(),
+    resultsPanelCss(), settingsOverlayCss(), transportCss(), volumeMeterCss(), playerLoaderCss(), flowCss(),
   ].join('\n');
   document.head.append(style);
 }
@@ -454,6 +455,7 @@ export function buildFlow(flowOptions: FlowOptions): FlowHandle {
 
   let current: LoadedReplay | null = null;
   let reveal: Cancellable | null = null;
+  let loader: PlayerLoaderHandle | null = null;
   let overlay: SettingsOverlayHandle | null = null;
   let transport: TransportHandle | null = null;
   let volumeMeter: VolumeMeterHandle | null = null;
@@ -483,9 +485,35 @@ export function buildFlow(flowOptions: FlowOptions): FlowHandle {
 
   function showResults(): void {
     stopPlayback();
+    loader?.destroy();
+    loader = null;
     overlay?.hide();
     playbackScreen.hidden = true;
     resultsScreen.hidden = false;
+  }
+
+  function enterPlayerLoader(): void {
+    if (current === null) return;
+    reveal?.cancel();
+    reveal = null;
+    uiSounds.stopAll();
+    resultsScreen.hidden = true;
+    loader?.destroy();
+
+    loader = buildPlayerLoader({
+      host: flow,
+      session: current.session,
+      panel: current.panel,
+      onReady: () => {
+        loader = null;
+        startPlayback();
+      },
+      onCancel: () => {
+        loader = null;
+        showResults();
+      },
+    });
+    loader.start();
   }
 
   function startPlayback(): void {
@@ -621,7 +649,7 @@ export function buildFlow(flowOptions: FlowOptions): FlowHandle {
       this.clear();
       current = replay;
 
-      const handle = buildResultsPanel(replay.panel, startPlayback);
+      const handle = buildResultsPanel(replay.panel, enterPlayerLoader);
       resultsScreen.replaceChildren(handle.root);
       resultsScreen.hidden = false;
       playbackScreen.hidden = true;
@@ -638,6 +666,8 @@ export function buildFlow(flowOptions: FlowOptions): FlowHandle {
     clear(): void {
       reveal?.cancel();
       reveal = null;
+      loader?.destroy();
+      loader = null;
       stopPlayback();
       overlay?.destroy();
       overlay = null;

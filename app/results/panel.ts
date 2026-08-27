@@ -61,6 +61,7 @@ export interface ResultsPanelData {
 
   /** Formatted date string, or null to omit the line. */
   readonly playedOn: string | null;
+  readonly source?: string | null;
 }
 
 function div(className: string, style?: Partial<CSSStyleDeclaration>): HTMLDivElement {
