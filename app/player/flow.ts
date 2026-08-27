@@ -82,6 +82,14 @@ function flowCss(): string {
   width: auto; height: auto;
   display: block;
 }
+.rv-playback.pl-playfield-in canvas {
+  animation: plPlayfieldEnter 750ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+@keyframes plPlayfieldEnter {
+  0% { transform: scale(0.7); opacity: 0; }
+  33% { opacity: 0; }
+  100% { transform: scale(1); opacity: 1; }
+}
 /* The transport row is opaque, so the canvas is inset above it rather than running underneath —
    otherwise the engine's own bottom HUD (combo, unstable-rate bar) is hidden behind it. */
 .rv-playback { padding-bottom: 40px; }
@@ -523,8 +531,17 @@ export function buildFlow(flowOptions: FlowOptions): FlowHandle {
     uiSounds.stopAll();
     resultsScreen.hidden = true;
     playbackScreen.hidden = false;
+    playbackScreen.classList.remove('pl-playfield-in');
+    void playbackScreen.offsetWidth; // Trigger reflow
+    playbackScreen.classList.add('pl-playfield-in');
+    setTimeout(() => {
+      playbackScreen.classList.remove('pl-playfield-in');
+    }, 800);
 
     const { session, startAtMs } = current;
+    if (startAtMs > 0) {
+      uiSounds.play('submit-select', { volume: 0.8 });
+    }
     overlay?.destroy();
     transport?.destroy();
     volumeMeter?.destroy();

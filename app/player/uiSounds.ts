@@ -62,7 +62,14 @@ export type UiSampleName =
   | 'osd-off'
   | 'osd-on'
   | 'overlay-big-pop-in'
-  | 'overlay-big-pop-out';
+  | 'overlay-big-pop-out'
+  | 'submit-select'
+  | 'screen-back'
+  | 'shutter'
+  | 'settings-pop-in'
+  | 'wave-pop-in'
+  | 'wave-pop-out'
+  | 'tabselect-select';
 export interface PlaySampleOptions {
   readonly volume?: number;
   readonly pitch?: number;

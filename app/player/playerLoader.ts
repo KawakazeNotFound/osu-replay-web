@@ -2,11 +2,11 @@
  * osu!lazer-authentic PlayerLoader transition screen.
  *
  * Implements the complete pre-gameplay loading sequence matching osu!lazer's PlayerLoader:
- * 1. Stage 1 (Entry / Figure 2): Blurred background, central pulsating osu! logo, metadata fade-in and slide-up.
+ * 1. Stage 1 (Entry / Figure 2): Blurred background (15px), central pulsating osu! logo, metadata scaling (0.7 -> 1.0, 650ms, OutQuint) and fade-in (500ms).
  * 2. Stage 2 (Figure 3): Star rating badge pop-in animation under difficulty name.
- * 3. Stage 3 (Figures 4 & 5): Left-side strobe/epilepsy warning and right-side Quick Settings drawer slide-in.
- * 4. Stage 4 (Hold / Ready): Enforces a minimum presentation duration (~2000ms), pauses if user is interacting with settings.
- * 5. Stage 5 (Exit to Gameplay): Metadata expands & fades out, settings slide out, background blur clears, and playback seamlessly begins.
+ * 3. Stage 3 (Figures 4 & 5): Left-side strobe/epilepsy warning and right-side Quick Settings drawer slide-in (500ms, OutQuint).
+ * 4. Stage 4 (Hold / Ready): Enforces a minimum presentation duration (1800ms + disclaimers), pauses if user is interacting with settings.
+ * 5. Stage 5 (Exit to Gameplay): Metadata scales down (0.7, 600ms) & fades out (300ms), settings slide out, background blur clears (0px), audio filter restores, and playback seamlessly begins.
  */
 
 import type { CoreSession } from '../../src/index.js';
@@ -52,7 +52,7 @@ export function playerLoaderCss(): string {
   width: 100%;
   height: 100%;
   object-fit: cover;
-  filter: blur(20px);
+  filter: blur(15px);
   transform: scale(1.08);
   transition: filter 500ms cubic-bezier(0.22, 1, 0.36, 1), opacity 500ms ease;
 }
@@ -68,13 +68,23 @@ export function playerLoaderCss(): string {
   position: absolute;
   top: 50%;
   left: 50%;
-  transform: translate(-50%, -50%);
+  transform: translate(-50%, -50%) scale(0.7);
   display: flex;
   flex-direction: column;
   align-items: center;
   pointer-events: auto;
   z-index: 10;
-  transition: opacity 280ms cubic-bezier(0.64, 0, 0.78, 0), transform 280ms cubic-bezier(0.64, 0, 0.78, 0);
+  opacity: 0;
+  transition: opacity 500ms cubic-bezier(0.22, 1, 0.36, 1), transform 650ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.pl-content.pl-content-show {
+  opacity: 1;
+  transform: translate(-50%, -50%) scale(1);
+}
+.pl-content.pl-content-exit {
+  opacity: 0;
+  transform: translate(-50%, -50%) scale(0.7);
+  transition: opacity 300ms cubic-bezier(0.64, 0, 0.78, 0), transform 600ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 /* osu! Logo */
@@ -114,13 +124,6 @@ export function playerLoaderCss(): string {
   display: flex;
   flex-direction: column;
   align-items: center;
-  opacity: 0;
-  transform: translateY(18px);
-  transition: opacity 500ms cubic-bezier(0.22, 1, 0.36, 1), transform 500ms cubic-bezier(0.22, 1, 0.36, 1);
-}
-.pl-metadata.pl-show {
-  opacity: 1;
-  transform: translateY(0);
 }
 
 .pl-meta-title {
@@ -163,6 +166,32 @@ export function playerLoaderCss(): string {
   height: 100%;
   object-fit: cover;
   display: block;
+}
+.pl-banner-spinner {
+  position: absolute;
+  inset: 0;
+  background: rgba(18, 18, 28, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 200ms ease;
+}
+.pl-banner-spinner.pl-spinner-show {
+  opacity: 1;
+}
+.pl-spinner-ring {
+  width: 24px;
+  height: 24px;
+  border: 2.5px solid rgba(255, 255, 255, 0.25);
+  border-top-color: #ffcc22;
+  border-radius: 50%;
+  animation: plSpin 700ms linear infinite;
+}
+@keyframes plSpin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
 }
 
 .pl-meta-difficulty {
@@ -234,13 +263,18 @@ export function playerLoaderCss(): string {
   border: 1px solid rgba(255, 255, 255, 0.1);
   max-width: 320px;
   opacity: 0;
-  transform: translateX(-30px);
-  transition: opacity 450ms cubic-bezier(0.22, 1, 0.36, 1), transform 450ms cubic-bezier(0.22, 1, 0.36, 1);
+  transform: translateX(-40px);
+  transition: opacity 500ms cubic-bezier(0.22, 1, 0.36, 1), transform 500ms cubic-bezier(0.22, 1, 0.36, 1);
   z-index: 10;
 }
 .pl-disclaimer.pl-show {
   opacity: 1;
   transform: translateX(0);
+}
+.pl-disclaimer.pl-exit {
+  opacity: 0;
+  transform: translateX(-50px);
+  transition: opacity 300ms ease, transform 300ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 .pl-disclaimer-bar {
   width: 4px;
@@ -279,7 +313,7 @@ export function playerLoaderCss(): string {
   overflow-x: hidden;
   padding-right: 4px;
   opacity: 0;
-  transform: translateX(40px);
+  transform: translateX(50px);
   transition: opacity 500ms cubic-bezier(0.22, 1, 0.36, 1), transform 500ms cubic-bezier(0.22, 1, 0.36, 1);
   z-index: 15;
 }
@@ -293,6 +327,11 @@ export function playerLoaderCss(): string {
 .pl-settings-drawer.pl-show {
   opacity: 1;
   transform: translateX(0);
+}
+.pl-settings-drawer.pl-exit {
+  opacity: 0;
+  transform: translateX(60px);
+  transition: opacity 300ms ease, transform 300ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .pl-settings-group {
@@ -521,7 +560,13 @@ export function buildPlayerLoader(options: PlayerLoaderOptions): PlayerLoaderHan
   bannerCanvas.width = 380;
   bannerCanvas.height = 100;
   drawCoverToCanvas(bannerCanvas, session.background);
-  metaBanner.append(bannerCanvas);
+
+  const bannerSpinner = document.createElement('div');
+  bannerSpinner.className = 'pl-banner-spinner';
+  const spinnerRing = document.createElement('div');
+  spinnerRing.className = 'pl-spinner-ring';
+  bannerSpinner.append(spinnerRing);
+  metaBanner.append(bannerCanvas, bannerSpinner);
 
   const metaDiff = document.createElement('div');
   metaDiff.className = 'pl-meta-difficulty';
@@ -797,26 +842,23 @@ export function buildPlayerLoader(options: PlayerLoaderOptions): PlayerLoaderHan
     isExiting = true;
     cancelAllTimers();
 
-    // Stage 5: Exit to Gameplay
-    // Metadata & logo expand and fade out
-    content.style.transition = 'opacity 250ms cubic-bezier(0.64, 0, 0.78, 0), transform 250ms cubic-bezier(0.64, 0, 0.78, 0)';
-    content.style.opacity = '0';
-    content.style.transform = 'translate(-50%, -50%) scale(1.06)';
+    // Stage 4 / 5: Exit to Gameplay
+    // Metadata & logo scale down and fade out (OutQuint 600ms, fade 300ms)
+    content.classList.remove('pl-content-show');
+    content.classList.add('pl-content-exit');
 
     // Disclaimer & settings slide away
-    disclaimer.style.transition = 'opacity 200ms ease, transform 200ms ease';
-    disclaimer.style.opacity = '0';
-    disclaimer.style.transform = 'translateX(-20px)';
+    disclaimer.classList.remove('pl-show');
+    disclaimer.classList.add('pl-exit');
 
-    drawer.style.transition = 'opacity 200ms ease, transform 200ms ease';
-    drawer.style.opacity = '0';
-    drawer.style.transform = 'translateX(30px)';
+    drawer.classList.remove('pl-show');
+    drawer.classList.add('pl-exit');
 
-    backBtn.style.transition = 'opacity 150ms ease';
+    backBtn.style.transition = 'opacity 200ms ease';
     backBtn.style.opacity = '0';
 
     // Clear background blur & transition dim
-    bgCanvas.style.filter = currentBlur > 0 ? `blur(${Math.round(currentBlur * 20)}px)` : 'blur(0px)';
+    bgCanvas.style.filter = currentBlur > 0 ? `blur(${Math.round(currentBlur * 15)}px)` : 'blur(0px)';
     bgDim.style.background = `rgba(0, 0, 0, ${session.renderer.options.backgroundDim})`;
 
     timers.push(window.setTimeout(() => {
@@ -831,11 +873,11 @@ export function buildPlayerLoader(options: PlayerLoaderOptions): PlayerLoaderHan
   }
 
   function start(): void {
-    // Stage 1 (Entry / Figure 2): Metadata fades in & glides up
+    // Stage 1 (Entry / Figure 2): Metadata scales 0.7 -> 1.0 (650ms) and fades in (500ms)
     timers.push(window.setTimeout(() => {
       if (isCancelled || isExiting) return;
-      metadata.classList.add('pl-show');
-    }, 80));
+      content.classList.add('pl-content-show');
+    }, 50));
 
     // Stage 2 (Figure 3): Star Rating badge pops in
     timers.push(window.setTimeout(() => {
@@ -848,12 +890,12 @@ export function buildPlayerLoader(options: PlayerLoaderOptions): PlayerLoaderHan
       if (isCancelled || isExiting) return;
       disclaimer.classList.add('pl-show');
       drawer.classList.add('pl-show');
-    }, 550));
+    }, 500));
 
-    // Stage 4: Hold Duration (1900ms) before transitioning to gameplay
+    // Stage 4: Hold Duration (1800ms) before transitioning to gameplay
     timers.push(window.setTimeout(() => {
       checkAndTriggerReady();
-    }, 1900));
+    }, 1800));
   }
 
   function destroy(): void {
