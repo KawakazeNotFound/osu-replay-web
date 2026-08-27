@@ -14,8 +14,10 @@
 
 import {
   analyzeReplay, buildSkin, computeModDifficulty, computeSubJudgements, createReplaySession,
-  generateStdAutoReplay, md5, parseBeatmap, parseReplay, synthesizeAutoReplay,
-  type CoreSession, type Grade, type ReplayData, type SubJudgementCount,
+  generateStdAutoReplay, generateTaikoAutoReplay, generateCatchAutoReplay, generateManiaAutoReplay,
+  convertBeatmapToCatch, applyPositionOffsets,
+  md5, parseBeatmap, parseReplay, synthesizeAutoReplay, unzipAsync,
+  type AutoFrame, type BeatmapData, type CoreSession, type Grade, type ReplayData, type SubJudgementCount,
 } from '../../src/index.js';
 import { JUDGEMENT_COLOUR, type ResultsPanelData, type StatisticEntry } from '../results/panel.js';
 import type { LoadedReplay } from './flow.js';
@@ -275,6 +277,111 @@ export async function loadLocalReplay(
   };
 }
 
+function generateAutoReplayForBeatmap(beatmap: BeatmapData, hash: string): ReplayData {
+  const stub = synthesizeAutoReplay(beatmap, hash, [], 0);
+  const modDiff = computeModDifficulty(beatmap, stub);
+
+  let frames: AutoFrame[];
+  switch (beatmap.mode) {
+    case 1:
+      frames = generateTaikoAutoReplay(beatmap, modDiff);
+      break;
+    case 2: {
+      const objects = convertBeatmapToCatch(beatmap, modDiff);
+      applyPositionOffsets(objects, beatmap, modDiff);
+      frames = generateCatchAutoReplay(objects, modDiff);
+      break;
+    }
+    case 3:
+      frames = generateManiaAutoReplay(beatmap, modDiff);
+      break;
+    case 0:
+    default:
+      frames = generateStdAutoReplay(beatmap, modDiff);
+      break;
+  }
+  return synthesizeAutoReplay(beatmap, hash, frames, 0);
+}
+
+/**
+ * Loads a local beatmap (.osz or .osu file) and synthesises a perfect Auto replay.
+ * Works completely offline without needing the map to be submitted or published online!
+ */
+export async function loadLocalAuto(
+  file: File,
+  options: LoadOptions,
+): Promise<LoadedReplay> {
+  const { log } = options;
+  log(`reading local beatmap (${file.name})…`);
+
+  const fileBuffer = await readFile(file);
+  const fileName = file.name.toLowerCase();
+
+  let oszBuffer: ArrayBuffer;
+  let beatmap: BeatmapData;
+  let osuBytes: Uint8Array;
+
+  if (fileName.endsWith('.osz') || fileName.endsWith('.zip')) {
+    oszBuffer = fileBuffer;
+    const unzipped = await unzipAsync(new Uint8Array(oszBuffer));
+
+    const osuEntries = Object.keys(unzipped).filter(
+      name => name.toLowerCase().endsWith('.osu') && !name.startsWith('__MACOSX/'),
+    );
+    if (osuEntries.length === 0) {
+      throw new Error('No .osu difficulty file found inside the .osz package');
+    }
+
+    // Select highest difficulty
+    let bestEntry = osuEntries[0]!;
+    let bestScore = -1;
+    let bestBm: BeatmapData | null = null;
+    let bestBytes: Uint8Array = unzipped[bestEntry]!;
+
+    for (const entry of osuEntries) {
+      const bytes = unzipped[entry]!;
+      try {
+        const text = new TextDecoder().decode(bytes);
+        const bm = parseBeatmap(text);
+        const score = bm.overallDifficulty + bm.approachRate + (bm.mode === 0 ? 10 : 0);
+        if (score > bestScore) {
+          bestScore = score;
+          bestEntry = entry;
+          bestBm = bm;
+          bestBytes = bytes;
+        }
+      } catch {
+        // ignore unparseable
+      }
+    }
+
+    if (!bestBm) {
+      bestBytes = unzipped[osuEntries[0]!]!;
+      bestBm = parseBeatmap(new TextDecoder().decode(bestBytes));
+    }
+
+    beatmap = bestBm;
+    osuBytes = bestBytes;
+  } else if (fileName.endsWith('.osu')) {
+    osuBytes = new Uint8Array(fileBuffer);
+    beatmap = parseBeatmap(new TextDecoder().decode(osuBytes));
+    oszBuffer = fileBuffer;
+  } else {
+    throw new Error('Please select a .osz or .osu beatmap file');
+  }
+
+  log(`generating Auto replay for ${beatmap.title} [${beatmap.version}]…`);
+  const hash = md5(osuBytes);
+  const replay = generateAutoReplayForBeatmap(beatmap, hash);
+  const session = await buildSession(replay, oszBuffer, options);
+
+  return {
+    session,
+    startAtMs: 0,
+    panel: resultsDataFromSession(session, { fromHeader: false }),
+  };
+}
+
 /**
  * A beatmap reference, played by a synthesised perfect replay. Login-free: the canonical `.osu`
  * comes from our own proxy and the `.osz` from the public mirrors.
@@ -295,11 +402,7 @@ export async function loadAutoFromBeatmap(
   const hash = md5(osuBytes);
   const oszBuffer = await downloadBeatmapSet(await setIdForHash(hash), log);
 
-  // computeModDifficulty reads the *replay* for its mods and lazer-ness, and the generator needs
-  // the difficulty — so a frameless stub breaks the cycle.
-  const stub = synthesizeAutoReplay(beatmap, hash, [], 0);
-  const modDiff = computeModDifficulty(beatmap, stub);
-  const replay = synthesizeAutoReplay(beatmap, hash, generateStdAutoReplay(beatmap, modDiff), 0);
+  const replay = generateAutoReplayForBeatmap(beatmap, hash);
   const session = await buildSession(replay, oszBuffer, options);
 
   return {

@@ -13,6 +13,7 @@
 import { buildAccuracyCircle } from './accuracyCircle.js';
 import { icon, iconCss } from './icons.js';
 import type { RankCutoffs } from './accuracyGauge.js';
+import { uiSounds } from '../player/uiSounds.js';
 import {
   FONT, HIT_RESULT_COLOUR, LAYOUT, PANEL, PANEL_COLOUR, PERFECT_GRADIENT, RANK_COLOUR,
   formatAccuracy, formatPP, formatScore,
@@ -125,6 +126,8 @@ export interface ResultsPanelHandle {
   readonly accuracyElement: HTMLElement | null;
   /** Final accuracy, 0–1. */
   readonly accuracy: number;
+  /** Final awarded rank. */
+  readonly rank: string;
   readonly statisticCells: readonly HTMLElement[];
   /** The green "watch replay" button, or null when no handler was supplied. */
   readonly replayButton: HTMLButtonElement | null;
@@ -246,7 +249,11 @@ export function buildResultsPanel(
       icon('download-check', { className: 'rv-icon rv-icon-wide rs-watch-icon' }),
       text('span', 'rs-watch-label', 'Watch replay'),
     );
-    replayButton.addEventListener('click', onWatchReplay);
+    uiSounds.attachHoverClick(replayButton, { hover: 'button', click: false });
+    replayButton.addEventListener('click', () => {
+      uiSounds.playClick('button');
+      onWatchReplay();
+    });
     bar.append(replayButton);
     root.append(bar);
   }
@@ -269,6 +276,7 @@ export function buildResultsPanel(
     score: data.score,
     accuracyElement,
     accuracy: data.accuracy,
+    rank: data.rank,
     statisticCells: cells,
     replayButton,
   };

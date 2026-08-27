@@ -35,6 +35,8 @@ const ENTRIES = [
   'player/match.ts',
   'player/matchRoom.ts',
   'player/matchView.ts',
+  'player/uiSounds.ts',
+  'player/notifications.ts',
   'results/panel.ts',
   'results/icons.ts',
   'results/reveal.ts',
@@ -86,6 +88,13 @@ try {
 const assetPairs = [
   [path.join('assets', 'skin'), path.join(OUT_DIR, '..', 'assets', 'skin')],
   [path.join('assets', 'lazer-defaults'), path.join(OUT_DIR, '..', 'assets', 'lazer-defaults')],
+  [path.join('assets', 'ui-sounds'), path.join(OUT_DIR, '..', 'assets', 'ui-sounds')],
+  [path.join('assets', 'Samples'), path.join(OUT_DIR, '..', 'assets', 'Samples')],
+  [path.join('assets', 'Samples'), path.join(OUT_DIR, '..', 'assets', 'samples')],
+  [path.join('assets', 'Samples', 'Results'), path.join(OUT_DIR, '..', 'assets', 'ui-sounds', 'Results')],
+  [path.join('assets', 'Samples', 'Results'), path.join(OUT_DIR, '..', 'assets', 'ui-sounds')],
+  [path.join('assets', 'Samples', 'UI'), path.join(OUT_DIR, '..', 'assets', 'ui-sounds', 'UI')],
+  [path.join('assets', 'Samples', 'UI'), path.join(OUT_DIR, '..', 'assets', 'ui-sounds')],
 ];
 for (const [from, to] of assetPairs) {
   await fs.cp(from, to, { recursive: true });

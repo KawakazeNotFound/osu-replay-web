@@ -70,6 +70,90 @@
     }
     .login-btn:hover { background: #63ecd9; box-shadow: 0 0 8px rgba(78, 217, 200, 0.4); }
     #stage { flex: 1 1 auto; min-height: 0; position: relative; overflow: hidden; }
+
+    /* Sub-Header / Secondary Top Bar */
+    .rv-sub-header {
+      flex: 0 0 44px;
+      height: 44px;
+      background: #1c2624;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 0 16px;
+      position: relative;
+      z-index: 30;
+      user-select: none;
+      font-family: inherit;
+      box-sizing: border-box;
+    }
+    .rv-sub-header[hidden] {
+      display: none !important;
+    }
+    .rv-sub-header-left {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      min-width: 0;
+    }
+    .rv-sub-header-right {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-shrink: 0;
+    }
+    .rv-sub-btn {
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid rgba(255, 255, 255, 0.14);
+      border-radius: 4px;
+      color: #e0ecea;
+      font-family: inherit;
+      font-size: 12.5px;
+      font-weight: 600;
+      padding: 5px 12px;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      transition: all 120ms ease;
+      white-space: nowrap;
+    }
+    .rv-sub-btn:hover {
+      background: rgba(255, 255, 255, 0.15);
+      border-color: rgba(255, 255, 255, 0.25);
+      color: #ffffff;
+    }
+    .rv-sub-back-btn {
+      background: rgba(255, 255, 255, 0.06);
+      color: rgba(255, 255, 255, 0.85);
+    }
+    .rv-sub-back-btn:hover {
+      background: #4a1f28;
+      border-color: #ff5577;
+      color: #ff7799;
+    }
+    .rv-sub-title-info {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      min-width: 0;
+    }
+    .rv-sub-title {
+      font-size: 13px;
+      font-weight: 700;
+      color: #ffffff;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .rv-sub-desc {
+      font-size: 11px;
+      color: rgba(255, 255, 255, 0.6);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
   </style>
 </head>
 <body>
@@ -77,17 +161,18 @@
 
   <script type="module">
     import { buildFlow } from './player/flow.js';
-    import { loadFromInput, loadLocalReplay, loadAutoFromBeatmap } from './player/load.js';
+    import { loadFromInput, loadLocalReplay, loadAutoFromBeatmap, loadLocalAuto } from './player/load.js';
     import { cachedUser, completePendingLogin, fetchMe, isLoggedIn, logout, startLogin }
       from './player/auth.js';
     import { icon, iconCss } from './results/icons.js';
     import { DEFAULT_SKIN, getAllSkinNames, importCustomSkinFile } from './player/skins.js';
-    import { buildMenuBar, menuBarCss } from './player/menubar.js';
+    import { buildMenuBar, menuBarCss, notify, notificationsCss } from './player/menubar.js';
     import { buildMatchView, matchViewCss } from './player/matchView.js';
+    import { uiSounds } from './player/uiSounds.js';
 
-    // Inject styles for menubar, matchView, and icons
+    // Inject styles for menubar, matchView, notifications, and icons
     const iconStyle = document.createElement('style');
-    iconStyle.textContent = [iconCss(), menuBarCss(), matchViewCss()].join('\n');
+    iconStyle.textContent = [iconCss(), menuBarCss(), matchViewCss(), notificationsCss()].join('\n');
     document.head.append(iconStyle);
 
     const stageEl = document.getElementById('stage');
@@ -106,9 +191,42 @@
     let lastLoader = null;
     let pendingOsr = null;
     let pendingOsz = null;
+    let activeProgressNotification = null;
+    let isHome = true;
 
-    const say = t => {
-      if (menuBar?.statusSlot) menuBar.statusSlot.textContent = t;
+    const say = (t, explicitType) => {
+      if (!t) return;
+      let determinedType = explicitType;
+      if (!determinedType) {
+        const lower = t.toLowerCase();
+        if (lower.includes('failed') || lower.includes('error') || lower.includes('invalid') || lower.includes('could not')) {
+          determinedType = 'error';
+        } else if (lower.includes('ready') || lower.includes('success') || lower.includes('imported') || lower.includes('signed in') || lower.includes('playing')) {
+          determinedType = 'success';
+        } else if (lower.includes('loading') || lower.includes('fetching') || lower.includes('redirecting') || lower.includes('…') || lower.includes('...')) {
+          determinedType = 'progress';
+        } else {
+          determinedType = 'info';
+        }
+      }
+
+      if (determinedType === 'progress') {
+        if (activeProgressNotification) {
+          activeProgressNotification.update(t, { type: 'progress' });
+        } else {
+          activeProgressNotification = notify.progress(t);
+        }
+      } else {
+        if (activeProgressNotification) {
+          activeProgressNotification.update(t, {
+            type: determinedType,
+            duration: determinedType === 'error' ? 5000 : 3800,
+          });
+          activeProgressNotification = null;
+        } else {
+          notify(t, { type: determinedType });
+        }
+      }
     };
 
     /** Options every loader takes; read fresh so a skin change applies to the next load. */
@@ -124,6 +242,8 @@
       try {
         say('loading…');
         const replay = await loader(loadOptions());
+        isHome = false;
+        subSettingsBtn.style.display = 'inline-flex';
         flow.present(replay);
         say('ready — press Watch replay');
       } catch (err) {
@@ -132,36 +252,166 @@
       }
     }
 
+    // Hidden file picker for Auto mode
+    const autoFileInput = document.createElement('input');
+    autoFileInput.type = 'file';
+    autoFileInput.accept = '.osz,.zip,.osu';
+    autoFileInput.style.display = 'none';
+    autoFileInput.addEventListener('change', () => {
+      const file = autoFileInput.files?.[0];
+      if (file) {
+        autoFileInput.value = '';
+        say(`已选择谱面: ${file.name}，正在生成自动演示…`);
+        void run(options => loadLocalAuto(file, options));
+      }
+    });
+    document.body.append(autoFileInput);
+
+    // Hidden file pickers for Replay mode
+    const osrFileInput = document.createElement('input');
+    osrFileInput.type = 'file';
+    osrFileInput.accept = '.osr';
+    osrFileInput.style.display = 'none';
+    osrFileInput.addEventListener('change', () => {
+      const file = osrFileInput.files?.[0];
+      if (file) {
+        osrFileInput.value = '';
+        pendingOsr = file;
+        if (pendingOsz !== null) {
+          say(`Loaded ${file.name}, starting local replay...`);
+          void run(options => loadLocalReplay(pendingOsr, pendingOsz, options));
+        } else {
+          say(`已载入 .osr 回放: ${file.name} (请继续导入 .osz 谱面包)`);
+          oszFileInput.click();
+        }
+      }
+    });
+
+    const oszFileInput = document.createElement('input');
+    oszFileInput.type = 'file';
+    oszFileInput.accept = '.osz,.zip';
+    oszFileInput.style.display = 'none';
+    oszFileInput.addEventListener('change', () => {
+      const file = oszFileInput.files?.[0];
+      if (file) {
+        oszFileInput.value = '';
+        if (currentMode === 'auto') {
+          say(`已选择谱面: ${file.name}，正在生成自动演示…`);
+          void run(options => loadLocalAuto(file, options));
+        } else {
+          pendingOsz = file;
+          if (pendingOsr !== null) {
+            say(`Loaded ${file.name}, starting local replay...`);
+            void run(options => loadLocalReplay(pendingOsr, pendingOsz, options));
+          } else {
+            say(`已载入 .osz 谱面包: ${file.name} (请继续导入 .osr 回放文件)`);
+            osrFileInput.click();
+          }
+        }
+      }
+    });
+    document.body.append(osrFileInput, oszFileInput);
+
+    // ---- Sub-Header (二级顶栏) for Replay & Auto Modes ----
+    const subHeader = document.createElement('header');
+    subHeader.className = 'rv-sub-header';
+    subHeader.hidden = true;
+
+    const subLeftGroup = document.createElement('div');
+    subLeftGroup.className = 'rv-sub-header-left';
+
+    const subBackBtn = document.createElement('button');
+    subBackBtn.type = 'button';
+    subBackBtn.className = 'rv-sub-btn rv-sub-back-btn';
+    subBackBtn.append(icon('rewind', { className: 'rv-icon' }));
+    const subBackLabel = document.createElement('span');
+    subBackLabel.textContent = '退出 (Exit)';
+    subBackBtn.append(subBackLabel);
+    uiSounds.attachHoverClick(subBackBtn, { hover: 'button', click: false });
+    subBackBtn.addEventListener('click', () => {
+      uiSounds.playClick('dialog-dangerous');
+      navigateToRoute('home');
+    });
+
+    const subTitleInfo = document.createElement('div');
+    subTitleInfo.className = 'rv-sub-title-info';
+    const subTitle = document.createElement('div');
+    subTitle.className = 'rv-sub-title';
+    subTitle.textContent = '';
+    const subDesc = document.createElement('div');
+    subDesc.className = 'rv-sub-desc';
+    subDesc.textContent = '';
+    subTitleInfo.append(subTitle, subDesc);
+
+    subLeftGroup.append(subBackBtn, subTitleInfo);
+
+    const subRightGroup = document.createElement('div');
+    subRightGroup.className = 'rv-sub-header-right';
+
+    const subImportBtn = document.createElement('button');
+    subImportBtn.type = 'button';
+    subImportBtn.className = 'rv-sub-btn';
+    subImportBtn.append(icon('mode-std', { className: 'rv-icon' }));
+    const subImportLabel = document.createElement('span');
+    subImportLabel.textContent = '从本地导入…';
+    subImportBtn.append(subImportLabel);
+    uiSounds.attachHoverClick(subImportBtn, { hover: 'button', click: false });
+    subImportBtn.addEventListener('click', () => {
+      uiSounds.playClick('button');
+      if (currentMode === 'auto') {
+        autoFileInput.click();
+      } else {
+        osrFileInput.click();
+      }
+    });
+
+    const subUrlBtn = document.createElement('button');
+    subUrlBtn.type = 'button';
+    subUrlBtn.className = 'rv-sub-btn';
+    subUrlBtn.append(icon('link', { className: 'rv-icon' }));
+    const subUrlLabel = document.createElement('span');
+    subUrlLabel.textContent = '打开链接/ID…';
+    subUrlBtn.append(subUrlLabel);
+    uiSounds.attachHoverClick(subUrlBtn, { hover: 'button', click: false });
+    subUrlBtn.addEventListener('click', () => {
+      uiSounds.playClick('button');
+      menuBar.openUrlPrompt();
+    });
+
+    const subSettingsBtn = document.createElement('button');
+    subSettingsBtn.type = 'button';
+    subSettingsBtn.className = 'rv-sub-btn';
+    subSettingsBtn.append(icon('settings', { className: 'rv-icon' }));
+    const subSettingsLabel = document.createElement('span');
+    subSettingsLabel.textContent = '设置 (Settings)';
+    subSettingsBtn.append(subSettingsLabel);
+    subSettingsBtn.style.display = 'none';
+    uiSounds.attachHoverClick(subSettingsBtn, { hover: 'button', click: false });
+    subSettingsBtn.addEventListener('click', () => {
+      uiSounds.playClick('button');
+      flow.toggleSettings();
+    });
+
+    subRightGroup.append(subImportBtn, subUrlBtn, subSettingsBtn);
+    subHeader.append(subLeftGroup, subRightGroup);
+
     const matchView = buildMatchView({
       host: stageEl,
       getAudioContext: ctx,
       getSkin: () => selectedSkin,
       log: say,
       onExit: () => {
-        currentMode = 'replay';
-        say('Exited match view');
+        navigateToRoute('home');
       },
     });
 
     const menuBar = buildMenuBar({
       onSelectMode: mode => {
-        currentMode = mode;
-        if (mode === 'match') {
-          flow.clear();
-          matchView.openRoomDialog();
-        } else if (mode === 'auto') {
-          flow.clear();
-          say('Auto mode: paste a beatmap URL or ID to watch perfect play');
-        } else {
-          matchView.destroy();
-          say('Replay mode: load a score or replay to watch');
-        }
+        navigateToRoute(mode);
       },
       getActiveMode: () => currentMode,
       onOpenMatchRoom: () => {
-        currentMode = 'match';
-        flow.clear();
-        matchView.openRoomDialog();
+        navigateToRoute('match');
       },
       onImportUrl: url => {
         if (currentMode === 'auto') {
@@ -171,15 +421,25 @@
         }
       },
       onImportOsu: file => {
-        say(`Imported .osu: ${file.name}`);
+        if (currentMode === 'auto') {
+          say(`已选择谱面: ${file.name}，正在生成自动演示…`);
+          void run(options => loadLocalAuto(file, options));
+        } else {
+          say(`Imported .osu: ${file.name}`);
+        }
       },
       onImportOsz: file => {
-        pendingOsz = file;
-        if (pendingOsr !== null) {
-          say(`Loaded ${file.name}, starting local replay...`);
-          void run(options => loadLocalReplay(pendingOsr, pendingOsz, options));
+        if (currentMode === 'auto') {
+          say(`已选择谱面: ${file.name}，正在生成自动演示…`);
+          void run(options => loadLocalAuto(file, options));
         } else {
-          say(`Loaded .osz: ${file.name} (now import .osr replay)`);
+          pendingOsz = file;
+          if (pendingOsr !== null) {
+            say(`Loaded ${file.name}, starting local replay...`);
+            void run(options => loadLocalReplay(pendingOsr, pendingOsz, options));
+          } else {
+            say(`Loaded .osz: ${file.name} (now import .osr replay)`);
+          }
         }
       },
       onImportOsr: file => {
@@ -227,15 +487,83 @@
         else say('No replay loaded to reload');
       },
       onExit: () => {
-        flow.clear();
-        matchView.destroy();
-        say('Cleared replay session');
+        navigateToRoute('home');
       },
+      isHomePage: () => isHome,
       getSelectedSkin: () => selectedSkin,
       getAvailableSkins: () => getAllSkinNames(),
     });
 
     document.body.prepend(menuBar.root);
+    document.body.insertBefore(subHeader, stageEl);
+
+    function updateSubHeaderForMode(mode) {
+      if (mode === 'auto') {
+        subBackLabel.textContent = '退出演示 (Exit Auto)';
+        subTitle.textContent = '自动演示 (Auto Play)';
+        subDesc.textContent = '导入本地未发布 .osz 谱面或输入在线链接/ID，自动生成满分演示';
+        subImportLabel.textContent = '导入谱面… (.osz/.osu)';
+        subHeader.hidden = false;
+      } else if (mode === 'replay') {
+        subBackLabel.textContent = '退出回放 (Exit Replay)';
+        subTitle.textContent = '单人回放 (Replay Viewer)';
+        subDesc.textContent = '导入本地 .osr + .osz 或输入成绩链接/ID进行回放';
+        subImportLabel.textContent = '导入回放/谱面…';
+        subHeader.hidden = false;
+      } else {
+        subHeader.hidden = true;
+      }
+    }
+
+    function navigateToRoute(route) {
+      const targetHash = (route === 'home' || route === '' || route === '/') ? '#/' : `#/${route}`;
+      if (location.hash !== targetHash) {
+        location.hash = targetHash;
+      } else {
+        applyCurrentRoute();
+      }
+    }
+
+    function applyCurrentRoute() {
+      const hash = location.hash.replace(/^#\/?/, '').trim().toLowerCase();
+      subSettingsBtn.style.display = 'none';
+      if (hash === 'match') {
+        currentMode = 'match';
+        isHome = false;
+        subHeader.hidden = true;
+        flow.clear();
+        matchView.openRoomDialog();
+      } else if (hash === 'auto') {
+        currentMode = 'auto';
+        isHome = false;
+        matchView.destroy();
+        flow.clear();
+        updateSubHeaderForMode('auto');
+      } else if (hash === 'replay') {
+        currentMode = 'replay';
+        isHome = false;
+        matchView.destroy();
+        updateSubHeaderForMode('replay');
+      } else {
+        // Home
+        currentMode = 'replay';
+        isHome = true;
+        subHeader.hidden = true;
+        matchView.destroy();
+        flow.clear();
+        lastLoader = null;
+        pendingOsr = null;
+        pendingOsz = null;
+        say('已返回主页面');
+      }
+    }
+
+    window.addEventListener('hashchange', () => {
+      applyCurrentRoute();
+    });
+
+    // Run route handling for initial page load
+    applyCurrentRoute();
 
     // ---- osu! sign-in -------------------------------------------------------------------
     function showLoginButton() {
@@ -243,7 +571,9 @@
       button.type = 'button';
       button.className = 'login-btn';
       button.textContent = 'Login with osu!';
+      uiSounds.attachHoverClick(button, { hover: 'button', click: false });
       button.addEventListener('click', () => {
+        uiSounds.playClick('button');
         say('redirecting to osu!…');
         startLogin().catch(err => say(`login failed: ${err.message}`));
       });
@@ -273,7 +603,13 @@
       out.className = 'user-chip-logout';
       out.title = 'Sign out';
       out.append(icon('power', { className: 'rv-icon', label: 'Sign out' }));
-      out.addEventListener('click', () => { logout(); showLoginButton(); say('signed out'); });
+      uiSounds.attachHoverClick(out, { hover: 'button', click: false });
+      out.addEventListener('click', () => {
+        uiSounds.playClick('dialog-cancel');
+        logout();
+        showLoginButton();
+        say('signed out');
+      });
       chip.append(out);
 
       menuBar.userSlot.replaceChildren(chip);

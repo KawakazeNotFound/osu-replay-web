@@ -20,6 +20,7 @@ import {
 import {
   buildSettingsOverlay, type SettingsOverlayHandle, type SettingsSection, type SliderHandle,
 } from './settings.js';
+import { uiSounds, VOL_KEYS, readStoredVolume, writeStoredVolume } from './uiSounds.js';
 
 export interface MatchViewOptions {
   readonly host: HTMLElement;
@@ -54,8 +55,12 @@ export function buildMatchView(options: MatchViewOptions): MatchViewHandle {
   backBtn.className = 'rv-match-btn rv-match-back-btn';
   backBtn.append(icon('rewind', { className: 'rv-icon' }));
   backBtn.append(document.createTextNode('退出比赛 (Exit Match)'));
+  uiSounds.attachHoverClick(backBtn, { hover: 'button', click: false });
   backBtn.addEventListener('click', () => {
+    uiSounds.playClick('button');
     stopCurrentMatch();
+    root.hidden = true;
+    root.remove();
     options.onExit();
   });
 
@@ -84,13 +89,19 @@ export function buildMatchView(options: MatchViewOptions): MatchViewHandle {
   mapSelectLabel.className = 'rv-match-map-select-label';
   mapSelectLabel.textContent = '对局列表 (Maps)';
   mapSelectBtn.append(icon('mode-match', { className: 'rv-icon' }), mapSelectLabel, icon('chevron-right', { className: 'rv-icon rv-rotate-90' }));
+  uiSounds.attachHoverClick(mapSelectBtn, { hover: 'button', click: false });
 
   const settingsBtn = document.createElement('button');
   settingsBtn.type = 'button';
   settingsBtn.className = 'rv-match-btn rv-match-settings-btn';
   settingsBtn.title = '回放设置面板 (Settings)';
-  settingsBtn.append(icon('reset', { className: 'rv-icon' }), document.createTextNode('设置 (Settings)'));
-  settingsBtn.addEventListener('click', () => toggleSettings());
+  settingsBtn.append(icon('settings', { className: 'rv-icon' }), document.createTextNode('设置 (Settings)'));
+  settingsBtn.style.display = 'none';
+  uiSounds.attachHoverClick(settingsBtn, { hover: 'button', click: false });
+  settingsBtn.addEventListener('click', () => {
+    uiSounds.playClick('button');
+    toggleSettings();
+  });
 
   rightGroup.append(mapSelectBtn, settingsBtn);
   header.append(leftGroup, rightGroup);
@@ -124,6 +135,7 @@ export function buildMatchView(options: MatchViewOptions): MatchViewHandle {
   playBtn.type = 'button';
   playBtn.className = 'rv-match-transport-btn';
   playBtn.append(icon('play', { className: 'rv-icon' }));
+  uiSounds.attachHoverClick(playBtn, { hover: 'button', click: false });
 
   const timeDisplay = document.createElement('span');
   timeDisplay.className = 'rv-match-time';
@@ -139,7 +151,6 @@ export function buildMatchView(options: MatchViewOptions): MatchViewHandle {
   transport.append(playBtn, timeDisplay, scrubber);
 
   root.append(header, gridStage, edgeHint, standingsEl, transport);
-  options.host.append(root);
 
   let activeMatch: MatchHandle | null = null;
   let activeMap: MatchMap | null = null;
@@ -151,8 +162,8 @@ export function buildMatchView(options: MatchViewOptions): MatchViewHandle {
   let overlay: SettingsOverlayHandle | null = null;
   let volumeMeter: VolumeMeterHandle | null = null;
 
-  let songVol = 0.25;
-  let fxVol = 0.25;
+  let songVol = readStoredVolume(VOL_KEYS.music, 0.25);
+  let fxVol = readStoredVolume(VOL_KEYS.effects, 0.25);
 
   const closeMapDropdown = (): void => {
     if (activeDropdownMenu !== null) {
@@ -164,12 +175,14 @@ export function buildMatchView(options: MatchViewOptions): MatchViewHandle {
 
   document.addEventListener('pointerdown', (e: PointerEvent) => {
     if (activeDropdownMenu !== null && !activeDropdownMenu.contains(e.target as Node) && !mapSelectBtn.contains(e.target as Node)) {
+      uiSounds.playDropdown(false);
       closeMapDropdown();
     }
   });
 
   const toggleMapDropdown = (): void => {
     if (activeDropdownMenu !== null) {
+      uiSounds.playDropdown(false);
       closeMapDropdown();
       return;
     }
@@ -178,6 +191,7 @@ export function buildMatchView(options: MatchViewOptions): MatchViewHandle {
       return;
     }
 
+    uiSounds.playDropdown(true);
     mapSelectBtn.classList.add('rv-btn-active');
     const menuEl = document.createElement('div');
     menuEl.className = 'rv-dropdown-menu rv-match-dropdown depth-1';
@@ -196,6 +210,8 @@ export function buildMatchView(options: MatchViewOptions): MatchViewHandle {
         row.classList.add('rv-row-disabled');
         row.title = '该谱面无可用回放 (No replays available)';
       }
+
+      row.addEventListener('pointerenter', () => uiSounds.playHover('default'));
 
       const labelWrapper = document.createElement('span');
       labelWrapper.className = 'rv-menu-row-label';
@@ -220,6 +236,7 @@ export function buildMatchView(options: MatchViewOptions): MatchViewHandle {
       if (avail > 0) {
         row.addEventListener('click', (e: MouseEvent) => {
           e.stopPropagation();
+          uiSounds.playClick('button');
           closeMapDropdown();
           if (!isCurrent) {
             void loadAndPlayMap(m).catch(err => {
@@ -227,6 +244,11 @@ export function buildMatchView(options: MatchViewOptions): MatchViewHandle {
               options.log(`Match load failed: ${err instanceof Error ? err.message : String(err)}`);
             });
           }
+        });
+      } else {
+        row.addEventListener('click', (e: MouseEvent) => {
+          e.stopPropagation();
+          uiSounds.playClick('disabled');
         });
       }
 
@@ -239,12 +261,14 @@ export function buildMatchView(options: MatchViewOptions): MatchViewHandle {
 
     const switchRow = document.createElement('div');
     switchRow.className = 'rv-menu-row';
+    switchRow.addEventListener('pointerenter', () => uiSounds.playHover('default'));
     const switchLabel = document.createElement('span');
     switchLabel.className = 'rv-menu-row-label';
     switchLabel.append(icon('mode-match', { className: 'rv-icon rv-menu-item-icon' }), document.createTextNode('输入其他比赛房间… (Switch Room)'));
     switchRow.append(switchLabel);
     switchRow.addEventListener('click', (e: MouseEvent) => {
       e.stopPropagation();
+      uiSounds.playClick('default');
       closeMapDropdown();
       openRoomDialog();
     });
@@ -301,6 +325,7 @@ export function buildMatchView(options: MatchViewOptions): MatchViewHandle {
   // ---- Volume & Settings Helpers ----
   const applySongVolume = (vol: number) => {
     songVol = Math.max(0, Math.min(1, Math.round(vol * 100) / 100));
+    writeStoredVolume(VOL_KEYS.music, songVol);
     if (activeMatch !== null) {
       activeMatch.audible.session.audioSync.setSongVolume(songVol);
     }
@@ -308,6 +333,7 @@ export function buildMatchView(options: MatchViewOptions): MatchViewHandle {
 
   const applyEffectsVolume = (vol: number) => {
     fxVol = Math.max(0, Math.min(1, Math.round(vol * 100) / 100));
+    writeStoredVolume(VOL_KEYS.effects, fxVol);
     if (activeMatch !== null) {
       for (const slot of activeMatch.slots) {
         slot.session.audioSync.setEffectsVolume(fxVol);
@@ -353,6 +379,7 @@ export function buildMatchView(options: MatchViewOptions): MatchViewHandle {
     activeMap = null;
     gridStage.replaceChildren();
     isPlaying = false;
+    settingsBtn.style.display = 'none';
     root.hidden = true;
   };
 
@@ -591,6 +618,16 @@ export function buildMatchView(options: MatchViewOptions): MatchViewHandle {
             for (const s of match.slots) s.session.renderer.options.audioOffsetMs = v;
           },
         },
+        {
+          kind: 'slider',
+          label: 'UI sound volume',
+          min: 0, max: 1, step: 0.01, value: uiSounds.getVolume(),
+          format: v => `${Math.round(v * 100)}%`,
+          resetTo: 0.25,
+          parseInput: parsePercent,
+          getEditText: v => String(Math.round(v * 100)),
+          onChange: v => { uiSounds.setVolume(v); },
+        },
       ],
     };
 
@@ -606,6 +643,8 @@ export function buildMatchView(options: MatchViewOptions): MatchViewHandle {
 
   // ---- Map Loader & Grid Orchestrator ----
   const loadAndPlayMap = async (map: MatchMap): Promise<void> => {
+    root.hidden = false;
+    if (!options.host.contains(root)) options.host.append(root);
     stopCurrentMatch();
     activeMap = map;
     options.log(`Loading match map: ${map.title} [${map.version}]…`);
@@ -667,6 +706,8 @@ export function buildMatchView(options: MatchViewOptions): MatchViewHandle {
     });
 
     activeMatch = match;
+    applySongVolume(songVol);
+    applyEffectsVolume(fxVol);
     isPlaying = true;
     playBtn.replaceChildren(icon('pause', { className: 'rv-icon' }));
 
@@ -700,11 +741,15 @@ export function buildMatchView(options: MatchViewOptions): MatchViewHandle {
       updateStandingsUi(activeMatch.standings());
     }, 250);
 
+    settingsBtn.style.display = 'inline-flex';
     options.log('Match playing!');
   };
 
   // ---- Room Picker Modal Dialog ----
   const openRoomDialog = (): void => {
+    root.hidden = false;
+    if (!options.host.contains(root)) options.host.append(root);
+    uiSounds.playDialog('pop-in');
     const backdrop = document.createElement('div');
     backdrop.className = 'rv-modal-backdrop';
 
@@ -731,6 +776,7 @@ export function buildMatchView(options: MatchViewOptions): MatchViewHandle {
     fetchBtn.type = 'button';
     fetchBtn.className = 'rv-modal-btn rv-modal-btn-primary';
     fetchBtn.textContent = '获取房间 (Fetch)';
+    uiSounds.attachHoverClick(fetchBtn, { hover: 'button', click: false });
 
     inputRow.append(input, fetchBtn);
 
@@ -744,7 +790,17 @@ export function buildMatchView(options: MatchViewOptions): MatchViewHandle {
     cancelBtn.type = 'button';
     cancelBtn.className = 'rv-modal-btn rv-modal-btn-cancel';
     cancelBtn.textContent = '关闭 (Close)';
-    cancelBtn.addEventListener('click', () => backdrop.remove());
+    uiSounds.attachHoverClick(cancelBtn, { hover: 'button', click: false });
+
+    const closeDialog = (): void => {
+      uiSounds.playDialog('pop-out');
+      backdrop.remove();
+    };
+
+    cancelBtn.addEventListener('click', () => {
+      uiSounds.playClick('dialog-cancel');
+      closeDialog();
+    });
 
     actions.append(cancelBtn);
     box.append(title, desc, inputRow, statusMsg, actions);
@@ -755,18 +811,20 @@ export function buildMatchView(options: MatchViewOptions): MatchViewHandle {
       const val = input.value.trim();
       const roomId = parseRoomRef(val);
       if (roomId === null) {
+        uiSounds.playError();
         statusMsg.textContent = '请输入有效的比赛链接或纯数字房间 ID (Invalid Room ID)';
         statusMsg.className = 'rv-match-modal-status rv-status-error';
         return;
       }
 
+      uiSounds.playClick('dialog-ok');
       statusMsg.textContent = '正在获取比赛房间信息 (Fetching room data)…';
       statusMsg.className = 'rv-match-modal-status';
 
       try {
         const room = await fetchMatchRoom(roomId);
         currentRoom = room;
-        backdrop.remove();
+        closeDialog();
 
         // Find first playable map and play it immediately, while setting up the top sub-bar dropdown
         const firstPlayable = room.maps.find(m => playableCount(m) > 0);
@@ -778,6 +836,7 @@ export function buildMatchView(options: MatchViewOptions): MatchViewHandle {
           options.log(`Room "${room.name}" has no maps.`);
         }
       } catch (err) {
+        uiSounds.playError();
         statusMsg.textContent = `获取失败: ${err instanceof Error ? err.message : String(err)}`;
         statusMsg.className = 'rv-match-modal-status rv-status-error';
       }
@@ -786,7 +845,10 @@ export function buildMatchView(options: MatchViewOptions): MatchViewHandle {
     fetchBtn.addEventListener('click', () => void onFetch());
     input.addEventListener('keydown', (e: KeyboardEvent) => {
       if (e.key === 'Enter') void onFetch();
-      if (e.key === 'Escape') backdrop.remove();
+      if (e.key === 'Escape') {
+        uiSounds.playClick('dialog-cancel');
+        closeDialog();
+      }
     });
 
     setTimeout(() => input.focus(), 50);
@@ -801,6 +863,7 @@ export function buildMatchView(options: MatchViewOptions): MatchViewHandle {
       window.removeEventListener('keydown', onKeyDown);
       root.removeEventListener('wheel', onWheel);
       stopCurrentMatch();
+      root.hidden = true;
       root.remove();
     },
   };
@@ -818,6 +881,10 @@ export function matchViewCss(): string {
   z-index: 10;
   user-select: none;
   overflow: hidden;
+}
+
+.rv-match-screen[hidden] {
+  display: none !important;
 }
 
 .rv-match-header {

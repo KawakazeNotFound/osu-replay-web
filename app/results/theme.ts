@@ -7,6 +7,8 @@
 
 /** `OsuColour.ForRank` — osu.Game/Graphics/OsuColour.cs L81-109. */
 export const RANK_COLOUR = {
+  SSH: '#de31ae',
+  SS: '#de31ae',
   XH: '#de31ae',
   X: '#de31ae',
   SH: '#02b5c3',
@@ -23,6 +25,8 @@ export const RANK_COLOUR = {
  * the ring colours above: the silver ranks differ here even though they share a ring colour.
  */
 export const RANK_LETTER_FILL = {
+  SSH: { from: '#ffffff', to: '#afdff0' },
+  SS: { from: '#ffe7a8', to: '#ffb800' },
   XH: { from: '#ffffff', to: '#afdff0' },
   SH: { from: '#ffffff', to: '#afdff0' },
   X: { from: '#ffe7a8', to: '#ffb800' },
@@ -163,9 +167,10 @@ export function formatPP(pp: number): string {
   return String(Math.sign(pp) * Math.round(Math.abs(pp)));
 }
 
-/** DrawableRank.GetRankLetter: SH → "S", X/XH → "SS", otherwise the rank itself. */
+/** DrawableRank.GetRankLetter: SH → "S", X/XH/SSH → "SS", otherwise the rank itself. */
 export function rankLetter(rank: string): string {
   if (rank === 'SH') return 'S';
+  if (rank === 'SSH') return 'SS';
   if (rank === 'X' || rank === 'XH') return 'SS';
   return rank;
 }

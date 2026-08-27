@@ -22,6 +22,7 @@ import {
   type Cancellable,
 } from './animate.js';
 import { formatAccuracy, formatScore } from './theme.js';
+import { uiSounds } from '../player/uiSounds.js';
 
 export interface RevealTargets {
   /** The panel root; scaled up from nothing. */
@@ -40,6 +41,8 @@ export interface RevealTargets {
   /** Accuracy text node and its final value (0–1). */
   readonly accuracyElement: HTMLElement | null;
   readonly accuracy: number;
+  /** Final awarded rank. */
+  readonly rank: string;
   /** Statistic cells, revealed in order. */
   readonly statisticCells: readonly HTMLElement[];
 }
@@ -83,14 +86,24 @@ export function prepareReveal(targets: RevealTargets): void {
 export function startReveal(targets: RevealTargets): Cancellable {
   const parts: Cancellable[] = [];
 
-  // The panel itself: scale 0 → 1.
+  // t = 0 ms: Page enter, panel focus & top appear
+  uiSounds.play('UI/overlay-pop-in');
+  uiSounds.playScorePanelFocus();
+  uiSounds.playScorePanelTopAppear();
+
+  // The panel itself: scale 0 → 1 over 200 ms.
   parts.push(tween({
     durationMs: TIMING.appearDuration,
     easing: outQuint,
     onUpdate: p => { targets.panel.style.transform = `scale(${p})`; },
   }));
 
-  // The ring fill.
+  // t = 443 ms: swoosh-up before circle starts filling
+  parts.push(after(443, () => {
+    uiSounds.playSwooshUp();
+  }));
+
+  // t = 450 ms: The ring fill (3000 ms, OutPow10).
   parts.push(tween({
     delayMs: TIMING.accuracyTransformDelay,
     durationMs: TIMING.accuracyTransformDuration,
@@ -117,15 +130,26 @@ export function startReveal(targets: RevealTargets): Cancellable {
     }));
   }
 
+  // t = 450 ms ~ 1950 ms: Score ticking loop
+  let scoreTickingHandle: { stop: () => void } | null = null;
+  parts.push(after(TIMING.accuracyTransformDelay, () => {
+    scoreTickingHandle = uiSounds.startScoreTicking(targets.accuracy);
+  }));
+  parts.push({ cancel: () => scoreTickingHandle?.stop() });
+
   // Each badge pops as the fill sweeps past it.
-  for (const badge of targets.badges) {
-    if (targets.gaugeProgress <= 0) break;
-    // Badges above the final fill are never reached, so they stay hidden.
-    if (badge.accuracy > targets.gaugeProgress) continue;
+  const reachableBadges = targets.badges.filter(b => targets.gaugeProgress > 0 && b.accuracy <= targets.gaugeProgress);
+  for (let i = 0; i < reachableBadges.length; i++) {
+    const badge = reachableBadges[i]!;
     const share = badge.accuracy / targets.gaugeProgress;
     const at = TIMING.accuracyTransformDelay
       + inverseEasing(outPow10, share) * TIMING.accuracyTransformDuration;
+    const isHighest = i === reachableBadges.length - 1;
+    const normRank = targets.rank.toUpperCase();
+    const isSS = normRank === 'SS' || normRank === 'SSH' || normRank === 'X' || normRank === 'XH';
+
     parts.push(after(at, () => {
+      uiSounds.playBadgeDink(i, isHighest && isSS);
       badge.element.style.opacity = '1';
       badge.element.animate(
         [{ transform: 'scale(0.4)' }, { transform: 'scale(1)' }],
@@ -134,13 +158,20 @@ export function startReveal(targets: RevealTargets): Cancellable {
     }));
   }
 
-  // The rank letter, halfway through the fill.
+  // t = 1950 ms: The rank letter appears halfway through fill (stops score-tick and plays rank-impact)
   parts.push(after(TIMING.accuracyTransformDelay + TIMING.textAppearDelay, () => {
+    scoreTickingHandle?.stop();
+    uiSounds.playRankImpact(targets.rank);
     targets.rankLetter.style.opacity = '1';
     targets.rankLetter.animate(
       [{ transform: 'scale(1.6)', opacity: '0' }, { transform: 'scale(1)', opacity: '1' }],
       { duration: 400, easing: 'cubic-bezier(0.22, 1, 0.36, 1)' },
     );
+  }));
+
+  // t = 2495 ms (1950ms + 545ms): Applause audio according to rank
+  parts.push(after(TIMING.accuracyTransformDelay + TIMING.textAppearDelay + 545, () => {
+    uiSounds.playApplause(targets.rank);
   }));
 
   // Statistics, staggered.

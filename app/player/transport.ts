@@ -13,6 +13,7 @@
 
 import type { CoreSession } from '../../src/index.js';
 import { icon, type IconName } from '../results/icons.js';
+import { uiSounds } from './uiSounds.js';
 
 /** Coarse and fine jumps, in presentation ms. */
 const JUMP_COARSE_MS = 5000;
@@ -36,7 +37,11 @@ function button(name: IconName, title: string, onClick: () => void): HTMLButtonE
   node.title = title;
   node.setAttribute('aria-label', title);
   node.append(icon(name, { className: 'rv-icon' }));
-  node.addEventListener('click', onClick);
+  uiSounds.attachHoverClick(node, { hover: 'button', click: false });
+  node.addEventListener('click', () => {
+    uiSounds.playClick('button');
+    onClick();
+  });
   return node;
 }
 
@@ -115,6 +120,8 @@ export function buildTransport(session: CoreSession): TransportHandle {
   knob.className = 'pt-knob';
   track.append(fill, knob);
 
+  track.addEventListener('pointerenter', () => uiSounds.playHover('default'));
+
   scrubber.append(elapsed, track, remaining);
 
   /** Pointer x within the track → presentation ms. */
@@ -134,11 +141,13 @@ export function buildTransport(session: CoreSession): TransportHandle {
     dragging = true;
     dragMs = msFromPointer(event.clientX);
     track.setPointerCapture(event.pointerId);
+    uiSounds.playOsd('change');
     seekTo(dragMs);
   };
   const onPointerMove = (event: PointerEvent): void => {
     if (!dragging) return;
     dragMs = msFromPointer(event.clientX);
+    uiSounds.playOsd('change');
     seekTo(dragMs);
   };
   const onPointerUp = (event: PointerEvent): void => {

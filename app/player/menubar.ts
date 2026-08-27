@@ -6,6 +6,9 @@
  */
 
 import { icon, type IconName } from '../results/icons.js';
+import { uiSounds } from './uiSounds.js';
+
+export { notify, notificationsCss, type NotificationType, type NotificationOptions, type NotificationHandle } from './notifications.js';
 
 export interface MenuBarOptions {
   readonly onImportUrl: (url: string) => void;
@@ -21,6 +24,7 @@ export interface MenuBarOptions {
   readonly onToggleFullscreen?: () => void;
   readonly onReload?: () => void;
   readonly onExit?: () => void;
+  readonly isHomePage?: () => boolean;
   readonly getSelectedSkin: () => string;
   readonly getAvailableSkins: () => readonly string[];
 }
@@ -29,6 +33,7 @@ export interface MenuBarHandle {
   readonly root: HTMLElement;
   readonly userSlot: HTMLElement;
   readonly statusSlot: HTMLElement;
+  openUrlPrompt(): void;
   updateSkins(): void;
   destroy(): void;
 }
@@ -66,7 +71,7 @@ export function buildMenuBar(options: MenuBarOptions): MenuBarHandle {
   menuBarItems.className = 'rv-menu-items';
   leftGroup.append(menuBarItems);
 
-  // ---- Right container: Status + User Profile ----
+  // ---- Right container: User Profile ----
   const rightGroup = document.createElement('div');
   rightGroup.className = 'rv-menu-right';
 
@@ -76,7 +81,7 @@ export function buildMenuBar(options: MenuBarOptions): MenuBarHandle {
   const userSlot = document.createElement('div');
   userSlot.className = 'rv-menu-user';
 
-  rightGroup.append(statusSlot, userSlot);
+  rightGroup.append(userSlot);
   root.append(leftGroup, rightGroup);
 
   // ---- Hidden File Inputs ----
@@ -102,6 +107,7 @@ export function buildMenuBar(options: MenuBarOptions): MenuBarHandle {
   // ---- URL Import Modal ----
   const openUrlModal = (): void => {
     closeAllMenus();
+    uiSounds.playDialog('pop-in');
     const modalBackdrop = document.createElement('div');
     modalBackdrop.className = 'rv-modal-backdrop';
 
@@ -128,25 +134,41 @@ export function buildMenuBar(options: MenuBarOptions): MenuBarHandle {
     cancelBtn.type = 'button';
     cancelBtn.className = 'rv-modal-btn rv-modal-btn-cancel';
     cancelBtn.textContent = '取消 (Cancel)';
+    uiSounds.attachHoverClick(cancelBtn, { hover: 'button', click: false });
 
     const loadBtn = document.createElement('button');
     loadBtn.type = 'button';
     loadBtn.className = 'rv-modal-btn rv-modal-btn-primary';
     loadBtn.textContent = '加载 (Load)';
+    uiSounds.attachHoverClick(loadBtn, { hover: 'button', click: false });
+
+    const closeModal = (): void => {
+      uiSounds.playDialog('pop-out');
+      modalBackdrop.remove();
+    };
 
     const submit = (): void => {
       const val = input.value.trim();
       if (val !== '') {
-        modalBackdrop.remove();
+        uiSounds.playClick('dialog-ok');
+        closeModal();
         options.onImportUrl(val);
+      } else {
+        uiSounds.playClick('disabled');
       }
     };
 
-    cancelBtn.addEventListener('click', () => modalBackdrop.remove());
+    cancelBtn.addEventListener('click', () => {
+      uiSounds.playClick('dialog-cancel');
+      closeModal();
+    });
     loadBtn.addEventListener('click', submit);
     input.addEventListener('keydown', (e: KeyboardEvent) => {
       if (e.key === 'Enter') submit();
-      if (e.key === 'Escape') modalBackdrop.remove();
+      if (e.key === 'Escape') {
+        uiSounds.playClick('dialog-cancel');
+        closeModal();
+      }
     });
 
     actions.append(cancelBtn, loadBtn);
@@ -174,6 +196,7 @@ export function buildMenuBar(options: MenuBarOptions): MenuBarHandle {
 
   window.addEventListener('pointerdown', (e: PointerEvent) => {
     if (!root.contains(e.target as Node) && !activeDropdown?.contains(e.target as Node)) {
+      if (activeDropdown !== null) uiSounds.playMenu('close');
       closeAllMenus();
     }
   });
@@ -185,6 +208,8 @@ export function buildMenuBar(options: MenuBarOptions): MenuBarHandle {
     readonly badge?: string;
     readonly isChecked?: boolean;
     readonly isDivider?: boolean;
+    readonly isDanger?: boolean;
+    readonly isDisabled?: boolean;
     readonly onClick?: () => void;
     readonly children?: readonly MenuItemSpec[] | (() => readonly MenuItemSpec[]);
   }
@@ -220,6 +245,8 @@ export function buildMenuBar(options: MenuBarOptions): MenuBarHandle {
       const row = document.createElement('div');
       row.className = 'rv-menu-row';
       if (item.children !== undefined) row.classList.add('rv-has-submenu');
+      if (item.isDanger === true) row.classList.add('rv-row-danger');
+      if (item.isDisabled === true) row.classList.add('rv-row-disabled');
 
       const labelWrapper = document.createElement('span');
       labelWrapper.className = 'rv-menu-row-label';
@@ -253,7 +280,12 @@ export function buildMenuBar(options: MenuBarOptions): MenuBarHandle {
         row.append(arrow);
       }
 
-      if (item.children !== undefined) {
+      if (item.isDisabled === true) {
+        row.addEventListener('click', (e: MouseEvent) => {
+          e.stopPropagation();
+          uiSounds.playClick('disabled');
+        });
+      } else if (item.children !== undefined) {
         const openChild = (): void => {
           if (closeTimer !== null) {
             clearTimeout(closeTimer);
@@ -270,6 +302,7 @@ export function buildMenuBar(options: MenuBarOptions): MenuBarHandle {
 
           activeRow = row;
           row.classList.add('rv-row-active');
+          uiSounds.playMenu('sub-open');
 
           const subItems = typeof item.children === 'function' ? item.children() : item.children!;
           const childMenu = renderDropdown(subItems, depth + 1);
@@ -279,7 +312,10 @@ export function buildMenuBar(options: MenuBarOptions): MenuBarHandle {
           activeChildMenu = childMenu;
         };
 
-        row.addEventListener('pointerenter', openChild);
+        row.addEventListener('pointerenter', () => {
+          uiSounds.playHover('default');
+          openChild();
+        });
         row.addEventListener('pointerleave', (e: PointerEvent) => {
           if (activeChildMenu !== null) {
             if (closeTimer !== null) clearTimeout(closeTimer);
@@ -295,6 +331,7 @@ export function buildMenuBar(options: MenuBarOptions): MenuBarHandle {
         });
       } else {
         row.addEventListener('pointerenter', () => {
+          uiSounds.playHover('default');
           if (activeChildMenu !== null) {
             activeChildMenu.remove();
             activeChildMenu = null;
@@ -307,6 +344,13 @@ export function buildMenuBar(options: MenuBarOptions): MenuBarHandle {
         if (item.onClick !== undefined) {
           row.addEventListener('click', (e: MouseEvent) => {
             e.stopPropagation();
+            if (item.isDanger === true) {
+              uiSounds.playClick('dialog-dangerous');
+            } else if (item.isChecked !== undefined) {
+              uiSounds.playToggle(!item.isChecked);
+            } else {
+              uiSounds.playClick('default');
+            }
             closeAllMenus();
             item.onClick!();
           });
@@ -321,6 +365,7 @@ export function buildMenuBar(options: MenuBarOptions): MenuBarHandle {
 
   const openTopMenu = (btn: HTMLElement, getItems: () => readonly MenuItemSpec[]): void => {
     if (activeMenuBtn === btn) {
+      uiSounds.playMenu('close');
       closeAllMenus();
       return;
     }
@@ -328,6 +373,7 @@ export function buildMenuBar(options: MenuBarOptions): MenuBarHandle {
 
     activeMenuBtn = btn;
     btn.classList.add('rv-menu-btn-active');
+    uiSounds.playMenu('open');
 
     const dropdown = renderDropdown(getItems(), 1);
     dropdown.style.left = `${btn.offsetLeft}px`;
@@ -370,48 +416,53 @@ export function buildMenuBar(options: MenuBarOptions): MenuBarHandle {
     ];
   };
 
-  const getFileMenuItems = (): readonly MenuItemSpec[] => [
-    {
-      label: '导入 (Import)',
-      children: [
-        {
-          label: '从链接导入… (From URL)',
-          onClick: openUrlModal,
-        },
-        {
-          label: '从比赛房间导入… (Match Room)',
-          icon: 'mode-match',
-          onClick: () => options.onOpenMatchRoom?.(),
-        },
-        {
-          label: '从本地导入 (Local Files)',
-          children: [
-            {
-              label: '导入 .osu 谱面…',
-              onClick: () => osuFileInput.click(),
-            },
-            {
-              label: '导入 .osz 谱面包…',
-              onClick: () => oszFileInput.click(),
-            },
-            {
-              label: '导入 .osr 回放…',
-              onClick: () => osrFileInput.click(),
-            },
-          ],
-        },
-      ],
-    },
-    { isDivider: true, label: '' },
-    {
-      label: '重新加载 (Reload)',
-      onClick: () => options.onReload?.(),
-    },
-    {
-      label: '退出到选择页 (Exit)',
-      onClick: () => options.onExit?.(),
-    },
-  ];
+  const getFileMenuItems = (): readonly MenuItemSpec[] => {
+    const isHome = options.isHomePage !== undefined ? options.isHomePage() : false;
+    return [
+      {
+        label: '导入 (Import)',
+        children: [
+          {
+            label: '从链接导入… (From URL)',
+            onClick: openUrlModal,
+          },
+          {
+            label: '从比赛房间导入… (Match Room)',
+            icon: 'mode-match',
+            onClick: () => options.onOpenMatchRoom?.(),
+          },
+          {
+            label: '从本地导入 (Local Files)',
+            children: [
+              {
+                label: '导入 .osu 谱面…',
+                onClick: () => osuFileInput.click(),
+              },
+              {
+                label: '导入 .osz 谱面包…',
+                onClick: () => oszFileInput.click(),
+              },
+              {
+                label: '导入 .osr 回放…',
+                onClick: () => osrFileInput.click(),
+              },
+            ],
+          },
+        ],
+      },
+      { isDivider: true, label: '' },
+      {
+        label: '重新加载 (Reload)',
+        onClick: () => options.onReload?.(),
+      },
+      {
+        label: '主页面',
+        isDanger: true,
+        isDisabled: isHome,
+        onClick: isHome ? undefined : () => options.onExit?.(),
+      },
+    ];
+  };
 
   const getViewMenuItems = (): readonly MenuItemSpec[] => [
     {
@@ -433,10 +484,6 @@ export function buildMenuBar(options: MenuBarOptions): MenuBarHandle {
     },
     { isDivider: true, label: '' },
     {
-      label: '回放设置面板 (Settings)',
-      onClick: () => options.onToggleSettings?.(),
-    },
-    {
       label: '全屏模式 (Toggle Fullscreen)',
       badge: 'F11',
       onClick: () => options.onToggleFullscreen?.(),
@@ -451,6 +498,7 @@ export function buildMenuBar(options: MenuBarOptions): MenuBarHandle {
 
     btn.addEventListener('click', () => openTopMenu(btn, getItems));
     btn.addEventListener('pointerenter', () => {
+      uiSounds.playHover('button');
       if (activeMenuBtn !== null && activeMenuBtn !== btn) {
         openTopMenu(btn, getItems);
       }
@@ -466,6 +514,7 @@ export function buildMenuBar(options: MenuBarOptions): MenuBarHandle {
     root,
     userSlot,
     statusSlot,
+    openUrlPrompt: openUrlModal,
     updateSkins(): void {
       // Re-render skin list if dropdown is open
     },
@@ -652,6 +701,33 @@ export function menuBarCss(): string {
 .rv-menu-row.rv-row-active {
   background: #3d524d;
   color: #ffffff;
+}
+.rv-menu-row.rv-row-danger {
+  color: #ff5577;
+}
+.rv-menu-row.rv-row-danger .rv-menu-row-label {
+  color: #ff5577;
+}
+.rv-menu-row.rv-row-danger:hover:not(.rv-row-disabled),
+.rv-menu-row.rv-row-danger.rv-row-active:not(.rv-row-disabled) {
+  background: #4a1f28;
+  color: #ff7799;
+}
+.rv-menu-row.rv-row-danger:hover:not(.rv-row-disabled) .rv-menu-row-label,
+.rv-menu-row.rv-row-danger.rv-row-active:not(.rv-row-disabled) .rv-menu-row-label {
+  color: #ff7799;
+}
+.rv-menu-row.rv-row-disabled {
+  cursor: default;
+  background: rgba(0, 0, 0, 0.3);
+  opacity: 0.5;
+}
+.rv-menu-row.rv-row-disabled:hover {
+  background: rgba(0, 0, 0, 0.3) !important;
+}
+.rv-menu-row.rv-row-danger.rv-row-disabled,
+.rv-menu-row.rv-row-danger.rv-row-disabled .rv-menu-row-label {
+  color: #ff5577 !important;
 }
 .rv-menu-row-label {
   display: flex;

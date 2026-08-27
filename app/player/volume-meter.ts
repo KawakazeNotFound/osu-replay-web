@@ -6,6 +6,8 @@
  * when hovering over individual discs.
  */
 
+import { uiSounds } from './uiSounds.js';
+
 const ACCENT = '#ffcc22';
 const ARC_LENGTH = 216.77;
 const CIRCUMFERENCE = 289.026;
@@ -141,11 +143,14 @@ function createDiscUnit(label: string, onWheel?: (delta: number) => void): DiscU
 
   row.append(disc, labelBadge);
 
+  row.addEventListener('pointerenter', () => uiSounds.playHover('default'));
+
   if (onWheel !== undefined) {
     row.addEventListener('wheel', (e: WheelEvent) => {
       e.preventDefault();
       e.stopPropagation();
       const delta = e.deltaY < 0 ? 0.02 : -0.02;
+      uiSounds.playOsd('change');
       onWheel(delta);
     }, { passive: false });
   }
@@ -274,6 +279,7 @@ export function buildVolumeMeter(callbacks: VolumeMeterCallbacks = {}): VolumeMe
 
       musicUnit.setActive(true);
       effectsUnit.setActive(true);
+      uiSounds.playOsd('change');
       show(1400);
     },
     showMusicVolume(musicFraction: number): void {
@@ -283,6 +289,7 @@ export function buildVolumeMeter(callbacks: VolumeMeterCallbacks = {}): VolumeMe
       musicUnit.setFraction(musicFraction);
       musicUnit.setActive(true);
       effectsUnit.setActive(false);
+      uiSounds.playOsd(musicFraction === 0 ? 'off' : 'change');
       show(1400);
     },
     showEffectsVolume(effectsFraction: number): void {
@@ -292,6 +299,7 @@ export function buildVolumeMeter(callbacks: VolumeMeterCallbacks = {}): VolumeMe
       effectsUnit.setFraction(effectsFraction);
       effectsUnit.setActive(true);
       musicUnit.setActive(false);
+      uiSounds.playOsd(effectsFraction === 0 ? 'off' : 'change');
       show(1400);
     },
     showSeek(targetMs: number, deltaMs: number, totalDurationMs: number): void {
@@ -309,6 +317,7 @@ export function buildVolumeMeter(callbacks: VolumeMeterCallbacks = {}): VolumeMe
       seekArcFill.setAttribute('stroke-dashoffset', String(offset));
       seekIcon.innerHTML = seekSvg(deltaMs >= 0);
 
+      uiSounds.playOsd('change');
       show(1400);
     },
     destroy(): void {

@@ -57,6 +57,7 @@
   <script type="module">
     import { buildResultsPanel, resultsPanelCss, JUDGEMENT_COLOUR } from './results/panel.js';
     import { prepareReveal, startReveal } from './results/reveal.js';
+    import { uiSounds } from './player/uiSounds.js';
 
     const style = document.createElement('style');
     style.textContent = resultsPanelCss();
@@ -158,8 +159,17 @@
       window.__reveal = () => { running?.cancel(); running = startReveal(handle); };
     }
 
-    select.addEventListener('change', () => show(select.value, true));
-    document.getElementById('replay-anim').addEventListener('click', () => show(select.value, true));
+    const replayAnimBtn = document.getElementById('replay-anim');
+    uiSounds.attachHoverClick(replayAnimBtn, { hover: 'button', click: false });
+    replayAnimBtn.addEventListener('click', () => {
+      uiSounds.playClick('button');
+      show(select.value, true);
+    });
+
+    select.addEventListener('change', () => {
+      uiSounds.playClick('default');
+      show(select.value, true);
+    });
 
     const params = new URLSearchParams(location.search);
     const variantParam = params.get('variant');

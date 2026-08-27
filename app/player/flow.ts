@@ -22,6 +22,7 @@ import { buildTransport, transportCss, type TransportHandle } from './transport.
 import {
   buildVolumeMeter, volumeMeterCss, KeyAccelerator, type VolumeMeterHandle,
 } from './volume-meter.js';
+import { uiSounds, VOL_KEYS, readStoredVolume, writeStoredVolume } from './uiSounds.js';
 
 export interface FlowOptions {
   /** Where both screens mount. */
@@ -198,8 +199,11 @@ export function sessionSettings(
   let effectsHandle: SliderHandle | null = null;
   let isVolumeLinked = false;
   let linkBtn: HTMLButtonElement | null = null;
-  let currentSongVolume = 0.25;
-  let currentEffectsVolume = 0.25;
+  let currentSongVolume = readStoredVolume(VOL_KEYS.music, 0.25);
+  let currentEffectsVolume = readStoredVolume(VOL_KEYS.effects, 0.25);
+
+  audioSync.setSongVolume(currentSongVolume);
+  audioSync.setEffectsVolume(currentEffectsVolume);
 
   const updateLinkUi = () => {
     if (linkBtn !== null) {
@@ -213,6 +217,7 @@ export function sessionSettings(
 
   const handleLinkToggle = () => {
     isVolumeLinked = !isVolumeLinked;
+    uiSounds.playToggle(isVolumeLinked);
     updateLinkUi();
     if (isVolumeLinked && musicHandle !== null && effectsHandle !== null) {
       const m = musicHandle.getValue();
@@ -221,6 +226,8 @@ export function sessionSettings(
         const minVal = Math.min(m, e);
         currentSongVolume = minVal;
         currentEffectsVolume = minVal;
+        writeStoredVolume(VOL_KEYS.music, minVal);
+        writeStoredVolume(VOL_KEYS.effects, minVal);
         musicHandle.setValue(minVal, true);
         effectsHandle.setValue(minVal, true);
       }
@@ -230,10 +237,12 @@ export function sessionSettings(
   const onMusicChange = (v: number) => {
     currentSongVolume = v;
     audioSync.setSongVolume(v);
+    writeStoredVolume(VOL_KEYS.music, v);
     if (isVolumeLinked && effectsHandle !== null) {
       currentEffectsVolume = v;
       effectsHandle.setValue(v, false);
       audioSync.setEffectsVolume(v);
+      writeStoredVolume(VOL_KEYS.effects, v);
       volumeMeter?.showVolumes(v, v);
     } else {
       volumeMeter?.showMusicVolume(v);
@@ -243,10 +252,12 @@ export function sessionSettings(
   const onEffectsChange = (v: number) => {
     currentEffectsVolume = v;
     audioSync.setEffectsVolume(v);
+    writeStoredVolume(VOL_KEYS.effects, v);
     if (isVolumeLinked && musicHandle !== null) {
       currentSongVolume = v;
       musicHandle.setValue(v, false);
       audioSync.setSongVolume(v);
+      writeStoredVolume(VOL_KEYS.music, v);
       volumeMeter?.showVolumes(v, v);
     } else {
       volumeMeter?.showEffectsVolume(v);
@@ -260,6 +271,8 @@ export function sessionSettings(
       currentEffectsVolume = next;
       audioSync.setSongVolume(next);
       audioSync.setEffectsVolume(next);
+      writeStoredVolume(VOL_KEYS.music, next);
+      writeStoredVolume(VOL_KEYS.effects, next);
       musicHandle?.setValue(next, false);
       effectsHandle?.setValue(next, false);
       volumeMeter?.showVolumes(next, next);
@@ -270,6 +283,8 @@ export function sessionSettings(
       currentEffectsVolume = nextEffects;
       audioSync.setSongVolume(nextMusic);
       audioSync.setEffectsVolume(nextEffects);
+      writeStoredVolume(VOL_KEYS.music, nextMusic);
+      writeStoredVolume(VOL_KEYS.effects, nextEffects);
       musicHandle?.setValue(nextMusic, false);
       effectsHandle?.setValue(nextEffects, false);
       volumeMeter?.showVolumes(nextMusic, nextEffects);
@@ -280,10 +295,12 @@ export function sessionSettings(
     const next = Math.max(0, Math.min(1, Math.round((currentSongVolume + delta) * 100) / 100));
     currentSongVolume = next;
     audioSync.setSongVolume(next);
+    writeStoredVolume(VOL_KEYS.music, next);
     musicHandle?.setValue(next, false);
     if (isVolumeLinked && effectsHandle !== null) {
       currentEffectsVolume = next;
       audioSync.setEffectsVolume(next);
+      writeStoredVolume(VOL_KEYS.effects, next);
       effectsHandle.setValue(next, false);
       volumeMeter?.showVolumes(next, next);
     } else {
@@ -295,10 +312,12 @@ export function sessionSettings(
     const next = Math.max(0, Math.min(1, Math.round((currentEffectsVolume + delta) * 100) / 100));
     currentEffectsVolume = next;
     audioSync.setEffectsVolume(next);
+    writeStoredVolume(VOL_KEYS.effects, next);
     effectsHandle?.setValue(next, false);
     if (isVolumeLinked && musicHandle !== null) {
       currentSongVolume = next;
       audioSync.setSongVolume(next);
+      writeStoredVolume(VOL_KEYS.music, next);
       musicHandle.setValue(next, false);
       volumeMeter?.showVolumes(next, next);
     } else {
@@ -317,6 +336,7 @@ export function sessionSettings(
     linkBtn.type = 'button';
     linkBtn.className = 'ps-volume-link-btn';
     linkBtn.setAttribute('aria-label', 'Link Music and Effects volumes');
+    uiSounds.attachHoverClick(linkBtn, { hover: 'button', click: false });
 
     const linkText = document.createElement('span');
     linkText.className = 'ps-volume-link-text';
@@ -341,7 +361,7 @@ export function sessionSettings(
     controls: [
       {
         kind: 'slider', label: 'Music volume',
-        min: 0, max: 1, step: 0.01, value: 0.25,
+        min: 0, max: 1, step: 0.01, value: currentSongVolume,
         format: v => `${Math.round(v * 100)}%`,
         resetTo: 0.25,
         bindHandle: h => { musicHandle = h; },
@@ -355,7 +375,7 @@ export function sessionSettings(
       },
       {
         kind: 'slider', label: 'Effects volume',
-        min: 0, max: 1, step: 0.01, value: 0.25,
+        min: 0, max: 1, step: 0.01, value: currentEffectsVolume,
         format: v => `${Math.round(v * 100)}%`,
         resetTo: 0.25,
         bindHandle: h => { effectsHandle = h; },
@@ -378,6 +398,15 @@ export function sessionSettings(
         },
         getEditText: v => String(v),
         onChange: v => { options.audioOffsetMs = v; },
+      },
+      {
+        kind: 'slider', label: 'UI sound volume',
+        min: 0, max: 1, step: 0.01, value: uiSounds.getVolume(),
+        format: v => `${Math.round(v * 100)}%`,
+        resetTo: 0.25,
+        parseInput: parsePercentInput,
+        getEditText: v => String(Math.round(v * 100)),
+        onChange: v => { uiSounds.setVolume(v); },
       },
     ],
   };
@@ -408,9 +437,13 @@ export function buildFlow(flowOptions: FlowOptions): FlowHandle {
   back.type = 'button';
   back.className = 'rv-back';
   back.textContent = '← Results';
+  uiSounds.attachHoverClick(back, { hover: 'button', click: false });
   // `showResults` is a hoisted function declaration below, so referencing it here is fine — and
   // without this listener the button was decoration: it rendered and did nothing.
-  back.addEventListener('click', () => showResults());
+  back.addEventListener('click', () => {
+    uiSounds.playClick('button');
+    showResults();
+  });
   playbackScreen.append(back);
 
   flow.append(resultsScreen, playbackScreen);

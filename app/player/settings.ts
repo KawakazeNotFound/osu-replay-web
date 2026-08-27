@@ -16,6 +16,7 @@
  */
 
 import { icon } from '../results/icons.js';
+import { uiSounds } from './uiSounds.js';
 
 /** osu!'s Yellow, `OsuColour.Yellow` = #ffcc22 — the accent lazer's settings use. */
 const ACCENT = '#ffcc22';
@@ -93,7 +94,11 @@ function resetButton(onReset: () => void): HTMLButtonElement {
   button.className = 'ps-reset';
   button.title = 'Reset to default';
   button.append(icon('reset', { className: 'rv-icon' }));
-  button.addEventListener('click', onReset);
+  uiSounds.attachHoverClick(button, { hover: 'button', click: false });
+  button.addEventListener('click', () => {
+    uiSounds.playClick('button');
+    onReset();
+  });
   return button;
 }
 
@@ -125,6 +130,7 @@ function buildSlider(spec: SliderSpec): HTMLElement {
   if (spec.parseInput !== undefined) {
     readout.classList.add('ps-value-editable');
     readout.title = 'Click to edit value';
+    uiSounds.attachHoverClick(readout, { hover: 'default', click: false });
   }
   head.append(readout);
   row.append(head);
@@ -135,6 +141,8 @@ function buildSlider(spec: SliderSpec): HTMLElement {
   container.setAttribute('aria-valuemin', String(spec.min));
   container.setAttribute('aria-valuemax', String(spec.max));
   container.setAttribute('aria-valuenow', String(spec.value));
+
+  container.addEventListener('pointerenter', () => uiSounds.playHover('default'));
 
   const track = el('div', 'ps-slider-track');
   const fill = el('div', 'ps-slider-fill');
@@ -152,7 +160,10 @@ function buildSlider(spec: SliderSpec): HTMLElement {
     nub.style.left = pos;
     fill.style.width = pos;
     container.setAttribute('aria-valuenow', String(val));
-    if (notify) spec.onChange(val);
+    if (notify) {
+      spec.onChange(val);
+      uiSounds.playSliderTick();
+    }
   };
 
   const animateTo = (targetVal: number, durationMs = 240, notify = true): void => {
@@ -269,8 +280,10 @@ function buildSlider(spec: SliderSpec): HTMLElement {
         finished = true;
         const parsed = spec.parseInput!(editInput.value);
         if (parsed !== null && !Number.isNaN(parsed)) {
+          uiSounds.playClick('dialog-ok');
           animateTo(parsed, 200, true);
         } else {
+          uiSounds.playClick('disabled');
           render(currentValue, false);
         }
         editInput.replaceWith(readout);
@@ -279,6 +292,7 @@ function buildSlider(spec: SliderSpec): HTMLElement {
       const cancel = (): void => {
         if (finished) return;
         finished = true;
+        uiSounds.playClick('dialog-cancel');
         editInput.replaceWith(readout);
       };
 
@@ -325,16 +339,21 @@ function buildToggle(spec: ToggleSpec): HTMLElement {
   button.type = 'button';
   button.className = 'ps-switch';
   button.setAttribute('role', 'switch');
+  button.addEventListener('pointerenter', () => uiSounds.playHover('default'));
 
   let current = spec.value;
   function set(next: boolean): void {
+    if (current !== next) {
+      uiSounds.playToggle(next);
+    }
     current = next;
     button.setAttribute('aria-checked', String(next));
     button.classList.toggle('ps-on', next);
     spec.onChange(next);
   }
   button.addEventListener('click', () => set(!current));
-  set(current);
+  button.setAttribute('aria-checked', String(current));
+  button.classList.toggle('ps-on', current);
 
   row.append(button);
   return row;
@@ -369,11 +388,13 @@ export function buildSettingsOverlay(
   const show = (): void => {
     if (visible) return;
     visible = true;
+    uiSounds.playDrawer('open');
     root.classList.add('ps-visible');
   };
   const hide = (): void => {
     if (!visible) return;
     visible = false;
+    uiSounds.playDrawer('close');
     root.classList.remove('ps-visible');
   };
 

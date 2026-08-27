@@ -17,7 +17,7 @@ export * from './types/index';
 export { parseReplay } from './parsers/ReplayParser';
 export { parseBeatmap } from './parsers/BeatmapParser';
 export {
-  loadBeatmapSet, extractBeatmapBackground, type BeatmapSetContents,
+  loadBeatmapSet, extractBeatmapBackground, unzipAsync, type BeatmapSetContents,
 } from './parsers/BeatmapSetLoader';
 export { loadSkin, loadSkinFromDir, mergeSkinAssets } from './parsers/SkinLoader';
 export { md5 } from './utils/md5';

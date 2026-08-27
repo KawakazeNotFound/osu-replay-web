@@ -193,7 +193,7 @@ export function buildAccuracyCircle(inputs: AccuracyCircleInputs): {
   // 3. The accuracy gauge itself. Drawn as a full circle and revealed with stroke-dasharray:
   // animating a dash offset is smooth and cheap, whereas rebuilding the arc path every frame
   // re-tessellates it and shows seams at the leading edge.
-  const isSS = rank === 'X' || rank === 'XH';
+  const isSS = rank === 'X' || rank === 'XH' || rank === 'SS' || rank === 'SSH';
   const progress = gaugeProgress(accuracy, isSS, cutoffs);
   const gaugeWidth = ACCURACY_CIRCLE_RADIUS * outerR;
   const gaugeR = outerR - gaugeWidth / 2;

@@ -15,13 +15,30 @@ export type IconName =
   | 'skip-start' | 'rewind' | 'step-back' | 'play' | 'pause'
   | 'step-forward' | 'fast-forward' | 'skip-end'
   | 'reset' | 'power' | 'download-check' | 'link' | 'check' | 'star'
-  | 'mode-single' | 'mode-auto' | 'mode-match' | 'chevron-right';
+  | 'mode-single' | 'mode-std' | 'mode-auto' | 'mode-match' | 'chevron-right'
+  | 'settings' | 'home' | 'folder' | 'upload';
 
 /**
  * Path data per icon. Filled shapes rather than strokes, so they stay crisp at the small sizes
  * the transport row uses without needing vector-effect hints.
  */
 const PATHS: Readonly<Record<IconName, readonly string[]>> = {
+  // Settings gear
+  settings: [
+    'M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z',
+  ],
+  // Home icon
+  home: [
+    'M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z',
+  ],
+  // Folder icon
+  folder: [
+    'M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z',
+  ],
+  // Upload icon
+  upload: [
+    'M9 16h6v-6h4l-7-7-7 7h4zm-4 2h14v2H5z',
+  ],
   // A five-pointed star, for the star-rating badge.
   star: ['M12 2.6l2.9 5.9 6.5.95-4.7 4.6 1.1 6.45L12 17.45 6.2 20.5l1.1-6.45-4.7-4.6 6.5-.95z'],
   // A tick on its own, for "this option is the selected one".
@@ -30,6 +47,9 @@ const PATHS: Readonly<Record<IconName, readonly string[]>> = {
   'chevron-right': ['M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z'],
   // Mode icons (Single, Auto, Match).
   'mode-single': [
+    'M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z',
+  ],
+  'mode-std': [
     'M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z',
   ],
   'mode-auto': [
@@ -112,9 +132,10 @@ export interface IconOptions {
 }
 
 /** Builds one icon. Inherits colour via `currentColor` and size via CSS. */
-export function icon(name: IconName, options: IconOptions = {}): SVGSVGElement {
+export function icon(name: IconName | string, options: IconOptions = {}): SVGSVGElement {
   const svg = document.createElementNS(SVG_NS, 'svg');
-  svg.setAttribute('viewBox', VIEWBOX[name] ?? '0 0 24 24');
+  const viewBoxStr = (VIEWBOX as Record<string, string>)[name] ?? '0 0 24 24';
+  svg.setAttribute('viewBox', viewBoxStr);
   svg.setAttribute('class', options.className ?? 'rv-icon');
   if (options.label !== undefined) {
     svg.setAttribute('role', 'img');
@@ -122,7 +143,8 @@ export function icon(name: IconName, options: IconOptions = {}): SVGSVGElement {
   } else {
     svg.setAttribute('aria-hidden', 'true');
   }
-  for (const d of PATHS[name]) {
+  const paths = (PATHS as Record<string, readonly string[]>)[name] ?? [];
+  for (const d of paths) {
     const path = document.createElementNS(SVG_NS, 'path');
     path.setAttribute('d', d);
     path.setAttribute('fill', 'currentColor');
