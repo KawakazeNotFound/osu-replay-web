@@ -53,13 +53,82 @@ function extractBackgroundFilename(osuText: string): string {
   let inEvents = false;
   for (const rawLine of osuText.split(/\r?\n/)) {
     const line = rawLine.trim();
-    if (line === '[Events]') { inEvents = true; continue; }
+    if (line.toLowerCase() === '[events]') { inEvents = true; continue; }
     if (line.startsWith('[')) { inEvents = false; continue; }
-    if (!inEvents) continue;
-    const m = /^0\s*,\s*0\s*,\s*"([^"]+)"/.exec(line);
-    if (m) return m[1]!;
+    if (!inEvents || line === '' || line.startsWith('//')) continue;
+    // Standard osu! background line formats in [Events]:
+    // 0,0,"bg.jpg",0,0  or  0,0,bg.jpg,0,0  or  Background,0,"bg.jpg"
+    const m = /^(?:0|Background)\s*,\s*0\s*,\s*(?:"([^"]+)"|'([^']+)'|([^,\r\n]+))/i.exec(line);
+    if (m) {
+      const filename = (m[1] || m[2] || m[3] || '').trim();
+      if (filename) return filename;
+    }
   }
   return '';
+}
+
+function findBackgroundImageBytes(
+  files: Record<string, Uint8Array>,
+  bgFilename: string,
+): { bytes: Uint8Array; mime: string } | null {
+  const norm = (s: string) => s.toLowerCase().replace(/\\/g, '/');
+  const base = (s: string) => norm(s).split('/').pop() ?? norm(s);
+
+  const getMime = (name: string): string => {
+    const lower = name.toLowerCase();
+    if (lower.endsWith('.jpg') || lower.endsWith('.jpeg')) return 'image/jpeg';
+    if (lower.endsWith('.png')) return 'image/png';
+    if (lower.endsWith('.webp')) return 'image/webp';
+    return 'image/jpeg';
+  };
+
+  const cleanBg = bgFilename.trim().replace(/^["']|["']$/g, '');
+  const targetNorm = norm(cleanBg);
+  const targetBase = base(cleanBg);
+
+  // 1. Exact normalized path match (e.g. "bg.jpg" or "folder/bg.jpg")
+  if (targetNorm !== '') {
+    for (const [path, bytes] of Object.entries(files)) {
+      if (norm(path) === targetNorm) {
+        return { bytes, mime: getMime(path) };
+      }
+    }
+  }
+
+  // 2. Basename match
+  if (targetBase !== '') {
+    for (const [path, bytes] of Object.entries(files)) {
+      if (base(path) === targetBase) {
+        return { bytes, mime: getMime(path) };
+      }
+    }
+  }
+
+  // 3. Fallback: standard background naming in archive (e.g. bg.jpg, background.png, cover.jpg)
+  const stdPattern = /(?:^|\/)(?:bg|background|cover|banner)\.(?:jpe?g|png|webp)$/i;
+  for (const [path, bytes] of Object.entries(files)) {
+    if (stdPattern.test(path)) {
+      return { bytes, mime: getMime(path) };
+    }
+  }
+
+  // 4. Fallback: Find the largest image in the root directory (excluding skin elements)
+  let bestCandidate: { bytes: Uint8Array; mime: string } | null = null;
+  let maxBytes = 0;
+  for (const [path, bytes] of Object.entries(files)) {
+    const p = norm(path);
+    if (!p.includes('/') && /\.(?:jpe?g|png|webp)$/i.test(p)) {
+      if (/(?:hitcircle|approachcircle|cursor|default-|slider|comboburst|reversearrow|scorebar|star)/i.test(p)) {
+        continue;
+      }
+      if (bytes.byteLength > maxBytes) {
+        maxBytes = bytes.byteLength;
+        bestCandidate = { bytes, mime: getMime(path) };
+      }
+    }
+  }
+
+  return bestCandidate;
 }
 
 /**
@@ -151,17 +220,13 @@ export async function loadBeatmapSet(
   }
 
   let background: ImageBitmap | null = null;
-  if (bgFilename !== '') {
-    const bgBytes = byName.get(bgFilename);
-    if (bgBytes !== undefined) {
-      try {
-        const isJpg = bgFilename.endsWith('.jpg') || bgFilename.endsWith('.jpeg');
-        // fflate output is always plain-ArrayBuffer-backed (never SharedArrayBuffer).
-        const blob  = new Blob([bgBytes as Uint8Array<ArrayBuffer>], { type: isJpg ? 'image/jpeg' : 'image/png' });
-        background  = await createImageBitmap(blob);
-      } catch (err) {
-        console.warn('BeatmapSetLoader: could not decode background image:', err);
-      }
+  const bgMatch = findBackgroundImageBytes(files as Record<string, Uint8Array>, bgFilename);
+  if (bgMatch !== null) {
+    try {
+      const blob = new Blob([bgMatch.bytes as Uint8Array<ArrayBuffer>], { type: bgMatch.mime });
+      background = await createImageBitmap(blob);
+    } catch (err) {
+      console.warn('BeatmapSetLoader: could not decode background image:', err);
     }
   }
 
@@ -222,12 +287,6 @@ export async function extractBeatmapBackground(
 ): Promise<ImageBitmap | null> {
   const files = await unzipAsync(new Uint8Array(buffer));
 
-  const byName = new Map<string, Uint8Array>();
-  for (const [path, bytes] of Object.entries(files)) {
-    const basename = (path.split('/').pop() ?? path).toLowerCase();
-    byName.set(basename, bytes);
-  }
-
   const osuEntries = Object.entries(files).filter(([p]) => p.toLowerCase().endsWith('.osu'));
   if (osuEntries.length === 0) return null;
 
@@ -241,15 +300,12 @@ export async function extractBeatmapBackground(
 
   const osuText    = new TextDecoder('utf-8').decode(matchedBytes);
   const bgFilename = extractBackgroundFilename(osuText).toLowerCase();
-  if (bgFilename === '') return null;
 
-  const bgBytes = byName.get(bgFilename);
-  if (bgBytes === undefined) return null;
+  const bgMatch = findBackgroundImageBytes(files as Record<string, Uint8Array>, bgFilename);
+  if (bgMatch === null) return null;
 
   try {
-    const isJpg = bgFilename.endsWith('.jpg') || bgFilename.endsWith('.jpeg');
-    // fflate output is always plain-ArrayBuffer-backed (never SharedArrayBuffer).
-    const blob  = new Blob([bgBytes as Uint8Array<ArrayBuffer>], { type: isJpg ? 'image/jpeg' : 'image/png' });
+    const blob = new Blob([bgMatch.bytes as Uint8Array<ArrayBuffer>], { type: bgMatch.mime });
     return await createImageBitmap(blob);
   } catch (err) {
     console.warn('extractBeatmapBackground: could not decode background image:', err);
