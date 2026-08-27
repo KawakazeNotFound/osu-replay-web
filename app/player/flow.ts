@@ -497,7 +497,18 @@ export function buildFlow(flowOptions: FlowOptions): FlowHandle {
     loader = null;
     overlay?.hide();
     playbackScreen.hidden = true;
-    resultsScreen.hidden = false;
+    if (current !== null) {
+      reveal?.cancel();
+      reveal = null;
+      uiSounds.stopAll();
+      const handle = buildResultsPanel(current.panel, enterPlayerLoader);
+      resultsScreen.replaceChildren(handle.root);
+      resultsScreen.hidden = false;
+      prepareReveal(handle);
+      reveal = startReveal(handle);
+    } else {
+      resultsScreen.hidden = false;
+    }
   }
 
   function enterPlayerLoader(): void {
@@ -665,14 +676,7 @@ export function buildFlow(flowOptions: FlowOptions): FlowHandle {
     present(replay: LoadedReplay): void {
       this.clear();
       current = replay;
-
-      const handle = buildResultsPanel(replay.panel, enterPlayerLoader);
-      resultsScreen.replaceChildren(handle.root);
-      resultsScreen.hidden = false;
-      playbackScreen.hidden = true;
-
-      prepareReveal(handle);
-      reveal = startReveal(handle);
+      showResults();
     },
     toggleSettings(): void {
       if (overlay !== null) {
