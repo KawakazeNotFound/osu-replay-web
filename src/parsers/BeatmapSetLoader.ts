@@ -67,6 +67,20 @@ function extractBackgroundFilename(osuText: string): string {
   return '';
 }
 
+/**
+ * Locates the background image the `.osu` actually names, and nothing else.
+ *
+ * Only two lookups are allowed: the path as written (separators normalised, case folded,
+ * so `SB\bg.jpg` finds `sb/bg.jpg`), then its basename, because some archives store the
+ * background one folder deeper than the event line claims.
+ *
+ * It deliberately does NOT guess when the named file is missing. Picking "a file called
+ * bg.png" or "the largest image in the root" reaches straight into a storyboard's sprite
+ * set — storyboards keep their frames in the archive root or in `sb/`, and the biggest of
+ * them is usually a full-screen scene plate. Guessing therefore paints a random storyboard
+ * frame across the playfield as a static backdrop. Returning null is correct: the renderer
+ * has a solid-fill path for "this beatmap has no background".
+ */
 function findBackgroundImageBytes(
   files: Record<string, Uint8Array>,
   bgFilename: string,
@@ -79,56 +93,29 @@ function findBackgroundImageBytes(
     if (lower.endsWith('.jpg') || lower.endsWith('.jpeg')) return 'image/jpeg';
     if (lower.endsWith('.png')) return 'image/png';
     if (lower.endsWith('.webp')) return 'image/webp';
+    if (lower.endsWith('.gif')) return 'image/gif';
+    if (lower.endsWith('.bmp')) return 'image/bmp';
     return 'image/jpeg';
   };
 
   const cleanBg = bgFilename.trim().replace(/^["']|["']$/g, '');
+  if (cleanBg === '') return null;
   const targetNorm = norm(cleanBg);
   const targetBase = base(cleanBg);
 
-  // 1. Exact normalized path match (e.g. "bg.jpg" or "folder/bg.jpg")
-  if (targetNorm !== '') {
-    for (const [path, bytes] of Object.entries(files)) {
-      if (norm(path) === targetNorm) {
-        return { bytes, mime: getMime(path) };
-      }
-    }
+  // Exact path as named, separators and case normalised (`bg.jpg`, `folder/bg.jpg`).
+  for (const [path, bytes] of Object.entries(files)) {
+    if (norm(path) === targetNorm) return { bytes, mime: getMime(path) };
   }
 
-  // 2. Basename match
+  // Same filename in a different folder than the event line claims.
   if (targetBase !== '') {
     for (const [path, bytes] of Object.entries(files)) {
-      if (base(path) === targetBase) {
-        return { bytes, mime: getMime(path) };
-      }
+      if (base(path) === targetBase) return { bytes, mime: getMime(path) };
     }
   }
 
-  // 3. Fallback: standard background naming in archive (e.g. bg.jpg, background.png, cover.jpg)
-  const stdPattern = /(?:^|\/)(?:bg|background|cover|banner)\.(?:jpe?g|png|webp)$/i;
-  for (const [path, bytes] of Object.entries(files)) {
-    if (stdPattern.test(path)) {
-      return { bytes, mime: getMime(path) };
-    }
-  }
-
-  // 4. Fallback: Find the largest image in the root directory (excluding skin elements)
-  let bestCandidate: { bytes: Uint8Array; mime: string } | null = null;
-  let maxBytes = 0;
-  for (const [path, bytes] of Object.entries(files)) {
-    const p = norm(path);
-    if (!p.includes('/') && /\.(?:jpe?g|png|webp)$/i.test(p)) {
-      if (/(?:hitcircle|approachcircle|cursor|default-|slider|comboburst|reversearrow|scorebar|star)/i.test(p)) {
-        continue;
-      }
-      if (bytes.byteLength > maxBytes) {
-        maxBytes = bytes.byteLength;
-        bestCandidate = { bytes, mime: getMime(path) };
-      }
-    }
-  }
-
-  return bestCandidate;
+  return null;
 }
 
 /**
@@ -228,6 +215,8 @@ export async function loadBeatmapSet(
     } catch (err) {
       console.warn('BeatmapSetLoader: could not decode background image:', err);
     }
+  } else if (bgFilename !== '') {
+    console.warn(`BeatmapSetLoader: background image "${bgFilename}" not found in archive.`);
   }
 
   const beatmapSounds = new Map<string, AudioBuffer>();
