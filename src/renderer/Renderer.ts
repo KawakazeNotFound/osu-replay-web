@@ -69,6 +69,13 @@ const LOGICAL_W = 1280;
 const LOGICAL_H = 720;
 
 /**
+ * Colour behind the beatmap background: the opaque base a transparent background image sits
+ * on, and the whole canvas when there is no background at all (or the storyboard has taken
+ * its place). Black, as osu! letterboxes and blanks to black.
+ */
+const EMPTY_BACKDROP = '#000000';
+
+/**
  * Everything needed to rebuild this renderer in another JS context (e.g. an offline export
  * worker): plain data + structured-clonable assets only. The sender must strip `skin.sounds`
  * (AudioBuffers can't cross a worker boundary; the draw/build path never reads them) and
@@ -395,7 +402,7 @@ export class Renderer {
       logicalWidth: LOGICAL_W,
       logicalHeight: LOGICAL_H,
       widescreen,
-    });
+    }, storyboard.backgroundPath);
   }
 
   /**
@@ -455,7 +462,7 @@ export class Renderer {
       octx.imageSmoothingEnabled = true;
       octx.imageSmoothingQuality = 'high';
       // Opaque base first — a background PNG with alpha must not leave see-through pixels.
-      octx.fillStyle = '#1a1a2e';
+      octx.fillStyle = EMPTY_BACKDROP;
       octx.fillRect(0, 0, LOGICAL_W, LOGICAL_H);
       octx.drawImage(bg, this._bgDrawX, this._bgDrawY, this._bgDrawW, this._bgDrawH);
       octx.fillStyle = `rgba(10, 10, 20, ${dim})`;
@@ -469,8 +476,15 @@ export class Renderer {
     const { ctx } = this;
     const { options } = this;
 
+    const sb = this.storyboard;
+    const drawSb = sb !== null && options.showStoryboard;
+    // A storyboard that draws the beatmap's own background image itself stands in for the
+    // static one, as in osu!. See PreparedStoryboard.replacesBackground for why the test is a
+    // path match and not "the Background layer has anything on it".
+    const sbReplacesBackground = drawSb && sb.replacesBackground;
+
     // The backdrop (or solid fill) covers the whole canvas opaquely — no clearRect needed.
-    if (this._background !== null) {
+    if (this._background !== null && !sbReplacesBackground) {
       const dim = Math.max(0, Math.min(1, options.backgroundDim));
       const backdrop = this._ensureBackdrop(this._background, dim);
       // 1:1 blit at backing resolution (identity transform): no per-frame filtering.
@@ -479,12 +493,10 @@ export class Renderer {
       ctx.drawImage(backdrop, 0, 0);
       ctx.restore();
     } else {
-      ctx.fillStyle = '#1a1a2e';
+      ctx.fillStyle = EMPTY_BACKDROP;
       ctx.fillRect(0, 0, LOGICAL_W, LOGICAL_H);
     }
 
-    const sb = this.storyboard;
-    const drawSb = sb !== null && options.showStoryboard;
     // Storyboard sprites darken with the background, and warm their textures a beat before
     // they are due so a sprite's first frame is not skipped for want of a decode.
     const sbOptions = { dim: Math.max(0, Math.min(1, options.backgroundDim)), prefetchMs: 2000 };

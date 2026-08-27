@@ -13,6 +13,7 @@
  */
 
 import { SbLayer } from '../storyboard/types.js';
+import { normalisePath } from '../storyboard/parse.js';
 import {
   createSpriteState, evaluateSprite,
   type CompiledDrawable, type SbSpriteState,
@@ -60,6 +61,17 @@ export interface PreparedStoryboard {
   /** Earliest and latest activity, for callers that want to know the storyboard's extent. */
   readonly startTime: number;
   readonly endTime: number;
+  /**
+   * True when the storyboard draws the beatmap's *own* background image itself, as a sprite on
+   * its Background layer. osu! then hides the static background instead of stacking the two —
+   * the storyboard is animating that image, and a second undimmed copy underneath would show
+   * through wherever the sprite is moved, scaled or faded.
+   *
+   * Narrow on purpose: this is a match on the path, not on the layer merely being occupied.
+   * Nearly every storyboard puts decoration on the Background layer, so the looser test hides
+   * the beatmap background for almost every storyboarded map and leaves black behind it.
+   */
+  readonly replacesBackground: boolean;
 }
 
 /**
@@ -68,11 +80,16 @@ export interface PreparedStoryboard {
  *
  * Input order matters and is preserved within each layer: osu! draws same-layer sprites in
  * declaration order, and `parseStoryboard` already puts the `.osb`'s before the `.osu`'s.
+ *
+ * `backgroundPath` is the beatmap's own background filename (`Storyboard.backgroundPath`) and
+ * only decides {@link PreparedStoryboard.replacesBackground}; omit it to keep the static
+ * background always drawn.
  */
 export function prepareStoryboard(
   compiled: readonly CompiledDrawable[],
   assets: StoryboardAssets,
   view: StoryboardView,
+  backgroundPath: string | null = null,
 ): PreparedStoryboard {
   const live = compiled.filter(c => Number.isFinite(c.startTime) && Number.isFinite(c.endTime));
 
@@ -89,7 +106,15 @@ export function prepareStoryboard(
     endTime = Math.max(endTime, c.endTime);
   }
 
-  return { under, over, assets, view, startTime, endTime };
+  // Mirrors lazer's DrawableStoryboard.ReplacesBackground: no background file named, no
+  // replacement. Only a live Background-layer sprite of that exact file stands in for it —
+  // one with no commands never draws, so it cannot.
+  const bgLookup = backgroundPath === null ? '' : normalisePath(backgroundPath);
+  const replacesBackground = bgLookup !== '' && under.some(
+    c => c.source.layer === SbLayer.Background && c.source.lookupPath === bgLookup,
+  );
+
+  return { under, over, assets, view, startTime, endTime, replacesBackground };
 }
 
 /** Fraction of the sprite's width/height that sits left of / above its anchor. */
