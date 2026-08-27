@@ -490,6 +490,9 @@ export function buildFlow(flowOptions: FlowOptions): FlowHandle {
 
   function startPlayback(): void {
     if (current === null) return;
+    reveal?.cancel();
+    reveal = null;
+    uiSounds.stopAll();
     resultsScreen.hidden = true;
     playbackScreen.hidden = false;
 

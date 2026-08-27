@@ -17,6 +17,7 @@
  */
 
 import { TIMING } from './theme.js';
+import { VIRTUAL_SS_PERCENTAGE } from './accuracyGauge.js';
 import {
   after, group, outPow10, outQuad, outQuint, tween,
   type Cancellable,
@@ -141,7 +142,9 @@ export function startReveal(targets: RevealTargets): Cancellable {
   const reachableBadges = targets.badges.filter(b => targets.gaugeProgress > 0 && b.accuracy <= targets.gaugeProgress);
   for (let i = 0; i < reachableBadges.length; i++) {
     const badge = reachableBadges[i]!;
-    const share = badge.accuracy / targets.gaugeProgress;
+    // In osu!lazer AccuracyCircle.cs L300: Math.Min(accuracyX - VIRTUAL_SS_PERCENTAGE, badge.Accuracy) / targetAccuracy
+    const effectiveAccuracy = Math.min(1.0 - VIRTUAL_SS_PERCENTAGE, badge.accuracy);
+    const share = effectiveAccuracy / targets.gaugeProgress;
     const at = TIMING.accuracyTransformDelay
       + inverseEasing(outPow10, share) * TIMING.accuracyTransformDuration;
     const isHighest = i === reachableBadges.length - 1;

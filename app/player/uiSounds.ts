@@ -75,8 +75,30 @@ class UiSoundManager {
   private readonly bufferCache = new Map<string, AudioBuffer>();
   private readonly loadingPromises = new Map<string, Promise<AudioBuffer>>();
   private readonly lastPlayTimes = new Map<string, number>();
+  private readonly activeSources = new Set<AudioBufferSourceNode>();
+  private readonly activeTickingStopFns = new Set<() => void>();
+  private generation = 0;
   private uiVolume = readStoredVolume(VOL_KEYS.ui, 0.25);
   private muted = false;
+
+  /** Stops all currently playing UI sounds immediately. */
+  stopAll(): void {
+    this.generation++;
+    for (const source of this.activeSources) {
+      try {
+        source.stop(0);
+        source.disconnect();
+      } catch {}
+    }
+    this.activeSources.clear();
+
+    for (const stopFn of this.activeTickingStopFns) {
+      try {
+        stopFn();
+      } catch {}
+    }
+    this.activeTickingStopFns.clear();
+  }
 
   /** Sets or shares the Web Audio AudioContext */
   setAudioContext(ctx: AudioContext): void {
@@ -184,7 +206,9 @@ class UiSoundManager {
       void ctx.resume();
     }
 
+    const currentGen = this.generation;
     void this.loadBuffer(sample).then(buffer => {
+      if (this.generation !== currentGen) return;
       if (!this.gainNode || !this.audioContext) return;
       try {
         const source = this.audioContext.createBufferSource();
@@ -203,7 +227,11 @@ class UiSoundManager {
           source.connect(this.gainNode);
         }
 
-        source.start();
+        this.activeSources.add(source);
+        source.onended = () => {
+          this.activeSources.delete(source);
+        };
+        source.start(0);
       } catch (err) {
         console.error('[uiSounds] play error:', err);
       }
@@ -368,15 +396,18 @@ class UiSoundManager {
 
     tick();
 
-    return {
-      stop: () => {
-        stopped = true;
-        if (timerId !== null) {
-          clearTimeout(timerId);
-          timerId = null;
-        }
-      },
+    const stopFn = () => {
+      stopped = true;
+      if (timerId !== null) {
+        clearTimeout(timerId);
+        timerId = null;
+      }
+      this.activeTickingStopFns.delete(stopFn);
     };
+
+    this.activeTickingStopFns.add(stopFn);
+
+    return { stop: stopFn };
   }
 
   playBadgeDink(badgeNum: number, isMax: boolean): void {
