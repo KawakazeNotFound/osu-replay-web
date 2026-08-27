@@ -5,39 +5,64 @@
  * (replicating lazer's HoverSampleDebounceComponent), and high-level interaction helpers.
  */
 
+/**
+ * Every sample this app plays.
+ *
+ * Exhaustive on purpose. This union used to end in `(string & {})`, which keeps autocomplete but
+ * accepts any string — so a mistyped name typechecked and then silently played nothing, and the
+ * `Results/` samples were absent from the list while being played at ten call sites. That gap also
+ * made an audit of which files are actually reachable report sixteen in-use sounds as dead; they
+ * were nearly deleted on the strength of it.
+ *
+ * Names with a prefix (`Results/`, `UI/`) mirror osu-resources' own folders. The loader resolves
+ * by basename against a flat assets/ui-sounds, so the prefix is documentation rather than a path.
+ */
 export type UiSampleName =
+  | 'Results/applause-a'
+  | 'Results/applause-b'
+  | 'Results/applause-c'
+  | 'Results/applause-d'
+  | 'Results/applause-s'
+  | 'Results/badge-dink'
+  | 'Results/badge-dink-max'
+  | 'Results/rank-impact-fail'
+  | 'Results/rank-impact-fail-d'
+  | 'Results/rank-impact-pass'
+  | 'Results/rank-impact-pass-ss'
+  | 'Results/score-panel-focus'
+  | 'Results/score-panel-top-appear'
+  | 'Results/score-tick'
+  | 'Results/swoosh-up'
+  | 'UI/overlay-pop-in'
   | 'button-hover'
   | 'button-select'
   | 'button-sidebar-hover'
   | 'button-sidebar-select'
+  | 'check-off'
+  | 'check-on'
   | 'default-hover'
   | 'default-select'
   | 'default-select-disabled'
-  | 'check-on'
-  | 'check-off'
-  | 'dialog-pop-in'
-  | 'dialog-pop-out'
-  | 'dialog-ok-select'
   | 'dialog-cancel-select'
   | 'dialog-dangerous-select'
-  | 'dialog-dangerous-tick'
-  | 'dropdown-open'
+  | 'dialog-ok-select'
+  | 'dialog-pop-in'
+  | 'dialog-pop-out'
   | 'dropdown-close'
-  | 'menu-open'
-  | 'menu-close'
-  | 'menu-sub-open'
+  | 'dropdown-open'
   | 'generic-error'
-  | 'notification-default'
-  | 'notification-error'
-  | 'notification-done'
+  | 'menu-close'
+  | 'menu-open'
+  | 'menu-sub-open'
   | 'notch-tick'
+  | 'notification-default'
+  | 'notification-done'
+  | 'notification-error'
   | 'osd-change'
-  | 'osd-on'
   | 'osd-off'
+  | 'osd-on'
   | 'overlay-big-pop-in'
-  | 'overlay-big-pop-out'
-  | (string & {});
-
+  | 'overlay-big-pop-out';
 export interface PlaySampleOptions {
   readonly volume?: number;
   readonly pitch?: number;
@@ -433,7 +458,9 @@ class UiSoundManager {
 
   playApplause(rank: string): void {
     const norm = rank.toUpperCase();
-    let sample = 'Results/applause-s';
+    // Typed rather than inferred as string: with the union now exhaustive, this is what makes a
+    // mistyped branch a compile error instead of a silent 404 at the moment of applause.
+    let sample: UiSampleName = 'Results/applause-s';
     if (norm === 'X' || norm === 'XH' || norm === 'SS' || norm === 'SSH' || norm === 'S' || norm === 'SH') {
       sample = 'Results/applause-s';
     } else if (norm === 'A') {
