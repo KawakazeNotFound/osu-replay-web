@@ -28,6 +28,14 @@ import {
 import { isLoggedIn } from './auth.js';
 import { DEFAULT_SKIN, loadSkin } from './skins.js';
 import { downloadMatchReplays, type MatchMap } from './matchRoom.js';
+import {
+  archiveStandaloneOsu, selectLocalDifficulty, type ChooseDifficulty, type LocalDifficulty,
+} from './localBeatmap.js';
+
+export {
+  archiveStandaloneOsu, DifficultyCancelled, selectLocalDifficulty,
+  type LocalDifficulty,
+} from './localBeatmap.js';
 
 /** osu!standard cutoffs, as lazer's ruleset reports them (ScoreProcessor.cs L34-39). */
 const CUTOFFS = { D: 0, C: 0.7, B: 0.8, A: 0.9, S: 0.95, X: 1 } as const;
@@ -43,6 +51,16 @@ export interface LoadOptions {
   readonly log: LogFn;
   /** Skin directory name under /skins; defaults to the captured page's own preselection. */
   readonly skin?: string;
+  /**
+   * Asked which difficulty to play when a local `.osz` holds more than one. Return an index into
+   * the list, or null to abort the load.
+   *
+   * A multi-difficulty archive requires this callback: ranking difficulties needs a star-rating
+   * calculator this engine does not implement, and archive order carries no meaning. The previous
+   * default summed OD and AR and called the result "highest difficulty", which it is not — a
+   * high-AR low-star map would win.
+   */
+  readonly chooseDifficulty?: ChooseDifficulty;
 }
 
 /** Reads a File as an ArrayBuffer. */
@@ -304,8 +322,13 @@ function generateAutoReplayForBeatmap(beatmap: BeatmapData, hash: string): Repla
 }
 
 /**
- * Loads a local beatmap (.osz or .osu file) and synthesises a perfect Auto replay.
- * Works completely offline without needing the map to be submitted or published online!
+ * Loads a local beatmap (`.osz`, `.zip` or a bare `.osu`) and plays it with a synthesised Auto
+ * replay. Entirely offline — the map need not be submitted.
+ *
+ * A bare `.osu` is wrapped into a one-entry archive before it reaches the engine.
+ * `createReplaySession` takes a beatmap *set*, so passing the `.osu` bytes straight through made
+ * `loadBeatmapSet` reject them as `invalid zip data`. There is no audio in that case, which the
+ * engine tolerates — it warns and plays silently.
  */
 export async function loadLocalAuto(
   file: File,
@@ -318,58 +341,54 @@ export async function loadLocalAuto(
   const fileName = file.name.toLowerCase();
 
   let oszBuffer: ArrayBuffer;
-  let beatmap: BeatmapData;
   let osuBytes: Uint8Array;
 
   if (fileName.endsWith('.osz') || fileName.endsWith('.zip')) {
     oszBuffer = fileBuffer;
     const unzipped = await unzipAsync(new Uint8Array(oszBuffer));
 
-    const osuEntries = Object.keys(unzipped).filter(
+    const entries = Object.keys(unzipped).filter(
       name => name.toLowerCase().endsWith('.osu') && !name.startsWith('__MACOSX/'),
     );
-    if (osuEntries.length === 0) {
-      throw new Error('No .osu difficulty file found inside the .osz package');
+    if (entries.length === 0) {
+      throw new Error('no .osu difficulty found inside the archive');
     }
 
-    // Select highest difficulty
-    let bestEntry = osuEntries[0]!;
-    let bestScore = -1;
-    let bestBm: BeatmapData | null = null;
-    let bestBytes: Uint8Array = unzipped[bestEntry]!;
-
-    for (const entry of osuEntries) {
-      const bytes = unzipped[entry]!;
+    // Parse every difficulty so the caller can be shown real metadata rather than filenames.
+    const choices: LocalDifficulty[] = [];
+    const bytes: Uint8Array[] = [];
+    for (const entry of entries) {
+      const raw = unzipped[entry]!;
       try {
-        const text = new TextDecoder().decode(bytes);
-        const bm = parseBeatmap(text);
-        const score = bm.overallDifficulty + bm.approachRate + (bm.mode === 0 ? 10 : 0);
-        if (score > bestScore) {
-          bestScore = score;
-          bestEntry = entry;
-          bestBm = bm;
-          bestBytes = bytes;
-        }
+        const beatmap = parseBeatmap(new TextDecoder().decode(raw));
+        choices.push({
+          entry,
+          title: beatmap.title,
+          artist: beatmap.artist,
+          version: beatmap.version,
+          mode: beatmap.mode,
+          approachRate: beatmap.approachRate,
+          overallDifficulty: beatmap.overallDifficulty,
+          circleSize: beatmap.circleSize,
+          objectCount: beatmap.hitObjects.length + beatmap.maniaHolds.length,
+        });
+        bytes.push(raw);
       } catch {
-        // ignore unparseable
+        // An unparseable difficulty is not offered rather than offered and then failing on select.
       }
     }
+    const index = await selectLocalDifficulty(choices, options.chooseDifficulty, file.name);
 
-    if (!bestBm) {
-      bestBytes = unzipped[osuEntries[0]!]!;
-      bestBm = parseBeatmap(new TextDecoder().decode(bestBytes));
-    }
-
-    beatmap = bestBm;
-    osuBytes = bestBytes;
+    osuBytes = bytes[index]!;
+    log(`using [${choices[index]!.version}]`);
   } else if (fileName.endsWith('.osu')) {
     osuBytes = new Uint8Array(fileBuffer);
-    beatmap = parseBeatmap(new TextDecoder().decode(osuBytes));
-    oszBuffer = fileBuffer;
+    oszBuffer = await archiveStandaloneOsu(file.name, osuBytes);
   } else {
-    throw new Error('Please select a .osz or .osu beatmap file');
+    throw new Error('choose a .osz, .zip or .osu file');
   }
 
+  const beatmap = parseBeatmap(new TextDecoder().decode(osuBytes));
   log(`generating Auto replay for ${beatmap.title} [${beatmap.version}]…`);
   const hash = md5(osuBytes);
   const replay = generateAutoReplayForBeatmap(beatmap, hash);

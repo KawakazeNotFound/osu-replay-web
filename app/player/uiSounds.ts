@@ -36,8 +36,6 @@ export type UiSampleName =
   | 'osd-off'
   | 'overlay-big-pop-in'
   | 'overlay-big-pop-out'
-  | 'cursor-tap'
-  | 'item-swap'
   | (string & {});
 
 export interface PlaySampleOptions {
@@ -75,7 +73,7 @@ class UiSoundManager {
   private audioContext: AudioContext | null = null;
   private gainNode: GainNode | null = null;
   private readonly bufferCache = new Map<string, AudioBuffer>();
-  private readonly loadingPromises = new Map<string, Promise<AudioBuffer | null>>();
+  private readonly loadingPromises = new Map<string, Promise<AudioBuffer>>();
   private readonly lastPlayTimes = new Map<string, number>();
   private uiVolume = readStoredVolume(VOL_KEYS.ui, 0.25);
   private muted = false;
@@ -127,11 +125,13 @@ class UiSoundManager {
   /** Preloads a list of samples in the background. */
   preload(samples: readonly UiSampleName[]): void {
     for (const sample of samples) {
+      // Intentionally leave rejection visible as an unhandled rejection. A missing canonical
+      // asset is a broken build, not an optional sound to hide behind a warning.
       void this.loadBuffer(sample);
     }
   }
 
-  private async loadBuffer(sample: UiSampleName): Promise<AudioBuffer | null> {
+  private async loadBuffer(sample: UiSampleName): Promise<AudioBuffer> {
     if (this.bufferCache.has(sample)) {
       return this.bufferCache.get(sample)!;
     }
@@ -139,51 +139,25 @@ class UiSoundManager {
       return this.loadingPromises.get(sample)!;
     }
 
-    const candidateUrls: string[] = [];
+    // One URL, not a cascade. Every runtime sample resolves inside assets/ui-sounds by basename,
+    // and build-app validates the complete manifest before copying anything. A miss here is a
+    // genuinely broken build, worth surfacing rather than papering over with six more requests.
+    // The previous seven-candidate fallback also forced the build to copy the same bytes to six
+    // destinations so that *something* would answer.
     const baseName = sample.includes('/') ? sample.split('/').pop()! : sample;
-    if (sample.includes('/')) {
-      candidateUrls.push(
-        `/assets/ui-sounds/${sample}.wav`,
-        `/assets/Samples/${sample}.wav`,
-        `/assets/samples/${sample}.wav`,
-        `/assets/ui-sounds/${baseName}.wav`,
-      );
-    } else {
-      candidateUrls.push(
-        `/assets/ui-sounds/${sample}.wav`,
-        `/assets/ui-sounds/Results/${sample}.wav`,
-        `/assets/ui-sounds/UI/${sample}.wav`,
-        `/assets/Samples/Results/${sample}.wav`,
-        `/assets/Samples/UI/${sample}.wav`,
-        `/assets/samples/results/${sample}.wav`,
-        `/assets/samples/ui/${sample}.wav`,
-      );
-    }
+    const url = `/assets/ui-sounds/${baseName}.wav`;
 
     const promise = (async () => {
       try {
-        let res: Response | null = null;
-        for (const candidate of candidateUrls) {
-          try {
-            const r = await fetch(candidate);
-            if (r.ok) {
-              res = r;
-              break;
-            }
-          } catch {}
-        }
-        if (!res || !res.ok) {
-          console.warn(`[uiSounds] failed to fetch sample "${sample}"`);
-          return null;
+        const res = await fetch(url);
+        if (!res.ok) {
+          throw new Error(`[uiSounds] ${url} returned HTTP ${res.status} for sample "${sample}"`);
         }
         const arrayBuf = await res.arrayBuffer();
         const ctx = this.getAudioContext();
         const audioBuf = await ctx.decodeAudioData(arrayBuf);
         this.bufferCache.set(sample, audioBuf);
         return audioBuf;
-      } catch (err) {
-        console.warn(`[uiSounds] failed to decode sample "${sample}":`, err);
-        return null;
       } finally {
         this.loadingPromises.delete(sample);
       }
@@ -211,7 +185,7 @@ class UiSoundManager {
     }
 
     void this.loadBuffer(sample).then(buffer => {
-      if (!buffer || !this.gainNode || !this.audioContext) return;
+      if (!this.gainNode || !this.audioContext) return;
       try {
         const source = this.audioContext.createBufferSource();
         source.buffer = buffer;
@@ -477,44 +451,58 @@ class UiSoundManager {
 }
 
 /** Singleton UI sound manager instance */
-export const uiSounds = new UiSoundManager();
+/**
+ * The one manager, parked on a global key rather than held by module scope.
+ *
+ * Module scope is not the singleton boundary a bundler guarantees. esbuild inlines a shared module
+ * into every entry point that imports it unless code splitting is on, and the dev server compiles
+ * each module as its own bundle where splitting is not even possible — so `new UiSoundManager()`
+ * at module scope ran once per bundle. Measured before this: eleven copies, each preloading, and a
+ * mute toggle that silenced only the copy it happened to be holding.
+ *
+ * Keying off globalThis makes the instance genuinely shared however the code is bundled, which is
+ * the property the mute state and volume actually need.
+ */
+const GLOBAL_KEY = '__rvUiSounds';
+type WithManager = typeof globalThis & { [GLOBAL_KEY]?: UiSoundManager };
 
-// Preload most common UI and Results sounds upfront
-uiSounds.preload([
-  'button-hover',
-  'button-select',
-  'default-hover',
-  'default-select',
-  'default-select-disabled',
-  'check-on',
-  'check-off',
-  'menu-open',
-  'menu-close',
-  'menu-sub-open',
-  'dropdown-open',
-  'dropdown-close',
-  'dialog-pop-in',
-  'dialog-pop-out',
-  'dialog-ok-select',
-  'dialog-cancel-select',
-  'osd-change',
-  'notch-tick',
-  'overlay-big-pop-in',
-  'overlay-big-pop-out',
-  'UI/overlay-pop-in',
-  'Results/score-panel-focus',
-  'Results/score-panel-top-appear',
-  'Results/swoosh-up',
-  'Results/score-tick',
-  'Results/badge-dink',
-  'Results/badge-dink-max',
-  'Results/rank-impact-pass-ss',
-  'Results/rank-impact-pass',
-  'Results/rank-impact-fail',
-  'Results/rank-impact-fail-d',
-  'Results/applause-s',
-  'Results/applause-a',
-  'Results/applause-b',
-  'Results/applause-c',
-  'Results/applause-d',
-]);
+function sharedManager(): UiSoundManager {
+  const host = globalThis as WithManager;
+  host[GLOBAL_KEY] ??= new UiSoundManager();
+  return host[GLOBAL_KEY];
+}
+
+export const uiSounds = sharedManager();
+
+/**
+ * Interaction sounds only, preloaded because they must be instant — a hover or click sound that
+ * arrives after a network round trip reads as a bug.
+ *
+ * Deliberately excluded: everything under Results/. Those play at most once, on a reveal that
+ * begins with a 450 ms delay and runs for three seconds, so `play()` fetching them on demand is
+ * comfortably in time. They are also the heavy ones — the five applause variants alone are 3.6 MB
+ * of the 6.5 MB this list used to pull on first paint, for audio most visitors never reach.
+ */
+if (!(globalThis as WithManager & { __rvUiPreloaded?: boolean }).__rvUiPreloaded) {
+  (globalThis as WithManager & { __rvUiPreloaded?: boolean }).__rvUiPreloaded = true;
+  uiSounds.preload([
+    'button-hover',
+    'button-select',
+    'default-hover',
+    'default-select',
+    'default-select-disabled',
+    'check-on',
+    'check-off',
+    'menu-open',
+    'menu-close',
+    'menu-sub-open',
+    'dropdown-open',
+    'dropdown-close',
+    'dialog-pop-in',
+    'dialog-pop-out',
+    'dialog-ok-select',
+    'dialog-cancel-select',
+    'osd-change',
+    'notch-tick',
+  ]);
+}

@@ -94,6 +94,7 @@ function flowCss(): string {
 }
 .rv-back {
   position: absolute; top: 16px; left: 16px;
+  display: inline-flex; align-items: center; gap: 7px;
   border: none; border-radius: 8px;
   background: rgba(0, 0, 0, 0.55); color: #fff;
   font: inherit; font-size: 13px; padding: 8px 14px; cursor: pointer;
@@ -436,7 +437,9 @@ export function buildFlow(flowOptions: FlowOptions): FlowHandle {
   const back = document.createElement('button');
   back.type = 'button';
   back.className = 'rv-back';
-  back.textContent = '← Results';
+  const backLabel = document.createElement('span');
+  backLabel.textContent = 'Results';
+  back.append(icon('rewind', { className: 'rv-icon' }), backLabel);
   uiSounds.attachHoverClick(back, { hover: 'button', click: false });
   // `showResults` is a hoisted function declaration below, so referencing it here is fine — and
   // without this listener the button was decoration: it rendered and did nothing.

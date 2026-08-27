@@ -161,7 +161,9 @@
 
   <script type="module">
     import { buildFlow } from './player/flow.js';
-    import { loadFromInput, loadLocalReplay, loadAutoFromBeatmap, loadLocalAuto } from './player/load.js';
+    import {
+      DifficultyCancelled, loadFromInput, loadLocalReplay, loadAutoFromBeatmap, loadLocalAuto,
+    } from './player/load.js';
     import { cachedUser, completePendingLogin, fetchMe, isLoggedIn, logout, startLogin }
       from './player/auth.js';
     import { icon, iconCss } from './results/icons.js';
@@ -169,10 +171,13 @@
     import { buildMenuBar, menuBarCss, notify, notificationsCss } from './player/menubar.js';
     import { buildMatchView, matchViewCss } from './player/matchView.js';
     import { uiSounds } from './player/uiSounds.js';
+    import { chooseLocalDifficulty, difficultyPickerCss } from './player/difficultyPicker.js';
 
     // Inject styles for menubar, matchView, notifications, and icons
     const iconStyle = document.createElement('style');
-    iconStyle.textContent = [iconCss(), menuBarCss(), matchViewCss(), notificationsCss()].join('\n');
+    iconStyle.textContent = [
+      iconCss(), menuBarCss(), matchViewCss(), notificationsCss(), difficultyPickerCss(),
+    ].join('\n');
     document.head.append(iconStyle);
 
     const stageEl = document.getElementById('stage');
@@ -235,6 +240,7 @@
       canvas,
       log: say,
       skin: selectedSkin,
+      chooseDifficulty: chooseLocalDifficulty,
     });
 
     async function run(loader) {
@@ -247,6 +253,10 @@
         flow.present(replay);
         say('ready — press Watch replay');
       } catch (err) {
+        if (err instanceof DifficultyCancelled) {
+          say('已取消难度选择', 'info');
+          return;
+        }
         console.error(err);
         say(`failed: ${err instanceof Error ? err.message : String(err)}`);
       }
