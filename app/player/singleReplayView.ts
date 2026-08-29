@@ -381,31 +381,50 @@ export function buildSingleReplayView(options: SingleReplayViewOptions): SingleR
     el.check.className = 'rv-replay-step-check state-active';
     el.barWrap.style.display = 'block';
     el.barFill.style.transition = 'none';
-    el.currentProgress = 0;
-    el.barFill.style.width = '0%';
 
-    // Play stage start sound (bss-stage-0, bss-stage-1, etc.)
+    // 1. Immediately complete 5%
+    el.currentProgress = 0.05;
+    el.barFill.style.width = '5%';
+
+    // Play stage start sound (bss-stage-0..3)
     const stageSoundName = `bss-stage-${Math.min(index, 3)}` as UiSampleName;
-    uiSounds.play(stageSoundName, { volume: 0.8 });
+    uiSounds.play(stageSoundName, { volume: 0.85 });
 
-    // Asymptotic non-linear organic creep towards 78%
-    const targetProgress = 0.78;
-    function frame() {
+    let lastNotchedStep = 1; // 5% is notch 1
+    const startTime = performance.now();
+    const startProgress = 0.05;
+    const targetProgress = 0.85;
+    const durationMs = 1350; // Uniform progress duration to reach 85%
+
+    function frame(now: number) {
       const activeEl = stepElements[index];
       if (!activeEl || activeEl.row.className !== 'rv-replay-step-row state-active') return;
-      activeEl.currentProgress += (targetProgress - activeEl.currentProgress) * 0.038;
+
+      const elapsed = now - startTime;
+      const t = Math.min(1, elapsed / durationMs);
+      // Uniform linear progression from 5% to 85%
+      activeEl.currentProgress = startProgress + t * (targetProgress - startProgress);
       activeEl.barFill.style.width = `${(activeEl.currentProgress * 100).toFixed(1)}%`;
 
-      const now = performance.now();
-      if (now - lastProgressSoundTime > 130 && activeEl.currentProgress < 0.75) {
-        lastProgressSoundTime = now;
-        // Ascending dynamic pitch as progress creeps up (0.85 -> 1.55)
-        const pitch = 0.85 + activeEl.currentProgress * 0.9;
-        uiSounds.play('bss-progress', { pitch, volume: 0.55 });
+      // Play rising pitch sound every 5% step
+      const currentNotch = Math.floor((activeEl.currentProgress + 0.001) / 0.05);
+      if (currentNotch > lastNotchedStep && currentNotch <= 17) {
+        lastNotchedStep = currentNotch;
+        // Pitch scales smoothly from 0.80 up to 1.60 across notches 1..17
+        const pitch = 0.80 + ((currentNotch - 1) / 16) * 0.80;
+        uiSounds.play('bss-progress', { pitch, volume: 0.6 });
       }
 
-      activeEl.animFrameId = requestAnimationFrame(frame);
+      if (t < 1) {
+        activeEl.animFrameId = requestAnimationFrame(frame);
+      } else {
+        // Hold at 85% waiting for backend step completion
+        activeEl.currentProgress = targetProgress;
+        activeEl.barFill.style.width = '85%';
+        activeEl.animFrameId = null;
+      }
     }
+
     el.animFrameId = requestAnimationFrame(frame);
   }
 
@@ -432,12 +451,13 @@ export function buildSingleReplayView(options: SingleReplayViewOptions): SingleR
 
     stopStepAnimation(index);
     el.barWrap.style.display = 'block';
+    // Non-linear snappy rush to 100%
     el.barFill.style.transition = 'width 180ms cubic-bezier(0.16, 1, 0.3, 1)';
     el.barFill.style.width = '100%';
     el.currentProgress = 1;
 
-    // Fast completion rush sound with high pitch
-    uiSounds.play('bss-progress', { pitch: 1.65, volume: 0.65 });
+    // High pitch finishing rush tick
+    uiSounds.play('bss-progress', { pitch: 1.75, volume: 0.65 });
 
     return new Promise(resolve => {
       setTimeout(() => {
