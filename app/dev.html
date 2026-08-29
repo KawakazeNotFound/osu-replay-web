@@ -529,7 +529,8 @@
         const hash = location.hash.replace(/^#\/?/, '').trim().toLowerCase();
         if (hash === 'match') return 'match';
         if (hash === 'auto') return 'auto';
-        return 'replay';
+        if (hash === 'replay') return 'replay';
+        return null;
       },
       isHomePage: () => isHome,
       getSelectedSkin: () => selectedSkin,
@@ -579,13 +580,13 @@
         menuBar.updateActiveMode('replay');
         singleReplayView.open('replay');
       } else {
-        // Home default -> Single Replay Wizard
-        currentMode = 'replay';
+        // Dedicated Blank Home Page: only the top bar is retained
+        currentMode = 'home';
         isHome = true;
         matchView.destroy();
+        singleReplayView.close();
         flow.clear();
-        menuBar.updateActiveMode('replay');
-        singleReplayView.open('replay');
+        menuBar.updateActiveMode(null);
         lastLoader = null;
         pendingOsr = null;
         pendingOsz = null;

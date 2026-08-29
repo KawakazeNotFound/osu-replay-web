@@ -18,7 +18,7 @@ export interface MenuBarOptions {
   readonly onSelectSkin: (skinName: string) => void;
   readonly onImportSkin: (file: File) => void;
   readonly onSelectMode?: (mode: 'replay' | 'auto' | 'match') => void;
-  readonly getActiveMode?: () => 'replay' | 'auto' | 'match';
+  readonly getActiveMode?: () => 'replay' | 'auto' | 'match' | 'home' | null;
   readonly onOpenMatchRoom?: () => void;
   readonly onToggleSettings?: () => void;
   readonly onToggleFullscreen?: () => void;
@@ -33,7 +33,7 @@ export interface MenuBarHandle {
   readonly root: HTMLElement;
   readonly userSlot: HTMLElement;
   readonly statusSlot: HTMLElement;
-  updateActiveMode(mode: 'replay' | 'auto' | 'match'): void;
+  updateActiveMode(mode: 'replay' | 'auto' | 'match' | 'home' | null): void;
   openUrlPrompt(): void;
   updateSkins(): void;
   destroy(): void;
@@ -698,9 +698,9 @@ export function buildMenuBar(options: MenuBarOptions): MenuBarHandle {
     root,
     userSlot,
     statusSlot,
-    updateActiveMode(mode: 'replay' | 'auto' | 'match'): void {
+    updateActiveMode(mode: 'replay' | 'auto' | 'match' | 'home' | null): void {
       for (const [m, btn] of modeButtons.entries()) {
-        btn.classList.toggle('rv-mode-active', m === mode);
+        btn.classList.toggle('rv-mode-active', mode !== null && mode !== 'home' && m === mode);
       }
     },
     openUrlPrompt: openUrlModal,
