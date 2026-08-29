@@ -33,17 +33,29 @@ async function fetchBytes(relativePath) {
 // The asset server matches requests against decoded paths, so the bytes must land under
 // the decoded name — writing 'Skin%20for%20CTB/' verbatim serves 404s for 'Skin for CTB/'.
 function decodePath(pathname) {
-  return pathname.split('/').map(segment => decodeURIComponent(segment)).join('/');
+  const decoded = pathname.split('/').map(segment => decodeURIComponent(segment)).join('/');
+  if (decoded.includes('\0')) throw new Error('capture path contains a NUL byte');
+  return decoded;
+}
+
+function resolveInside(baseDir, relativePath) {
+  const basePath = path.resolve(baseDir);
+  const destination = path.resolve(basePath, relativePath.replaceAll('/', path.sep));
+  const relative = path.relative(basePath, destination);
+  if (relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+    throw new Error(`capture path escapes output directory ${basePath}: ${relativePath}`);
+  }
+  return destination;
 }
 
 async function writeAsset(relativePath, bytes) {
   const normalized = relativePath.replace(/^\/+|\/+$/g, '');
   const outputPath = normalized === ''
-    ? path.join('legacy', 'index.html')
+    ? 'legacy/index.html'
     : relativePath.endsWith('/')
-      ? path.join(normalized, 'index.html')
+      ? `${normalized}/index.html`
       : normalized;
-  const destination = path.join(site, decodePath(outputPath).replaceAll('/', path.sep));
+  const destination = resolveInside(site, decodePath(outputPath));
   await fs.mkdir(path.dirname(destination), { recursive: true });
   let content = bytes;
   if (normalized === '') {

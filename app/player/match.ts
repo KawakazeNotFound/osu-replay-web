@@ -104,27 +104,44 @@ export async function createMatch(inputs: MatchInputs): Promise<MatchHandle> {
   const slots: MatchSlot[] = [];
   let shared: BeatmapAssets | null = null;
 
-  for (const [index, player] of players.entries()) {
-    log(`building ${player.name} (${index + 1}/${players.length})…`);
-    const session = await createReplaySession({
-      canvas: player.canvas,
-      audioContext,
-      replay: player.replay,
-      // First pass decodes; the rest are handed the result.
-      beatmapSet: shared ?? beatmapSet,
-      skin,
-      ...(inputs.lazerDefaultsUrl !== undefined
-        ? { lazerDefaultsUrl: inputs.lazerDefaultsUrl }
-        : {}),
-    });
-    shared ??= session.assets;
-    slots.push({
-      name: player.name !== '' ? player.name : player.replay.username,
-      session,
-      canvas: player.canvas,
-      team: player.team ?? null,
-      audible: index === audibleIndex,
-    });
+  const disposePartiallyBuiltMatch = (): void => {
+    for (const slot of slots) {
+      try {
+        slot.session.destroy();
+      } catch (cleanupError) {
+        log(`failed to clean up ${slot.name}: ${cleanupError instanceof Error ? cleanupError.message : String(cleanupError)}`);
+      }
+    }
+    // CoreSession.destroy deliberately leaves shared beatmap assets owned by this builder.
+    shared?.background?.close();
+  };
+
+  try {
+    for (const [index, player] of players.entries()) {
+      log(`building ${player.name} (${index + 1}/${players.length})…`);
+      const session = await createReplaySession({
+        canvas: player.canvas,
+        audioContext,
+        replay: player.replay,
+        // First pass decodes; the rest are handed the result.
+        beatmapSet: shared ?? beatmapSet,
+        skin,
+        ...(inputs.lazerDefaultsUrl !== undefined
+          ? { lazerDefaultsUrl: inputs.lazerDefaultsUrl }
+          : {}),
+      });
+      shared ??= session.assets;
+      slots.push({
+        name: player.name !== '' ? player.name : player.replay.username,
+        session,
+        canvas: player.canvas,
+        team: player.team ?? null,
+        audible: index === audibleIndex,
+      });
+    }
+  } catch (error) {
+    disposePartiallyBuiltMatch();
+    throw error;
   }
 
   const audible = slots[audibleIndex]!;

@@ -568,14 +568,14 @@
       } else if (hash === 'auto') {
         currentMode = 'auto';
         isHome = false;
-        matchView.destroy();
+        matchView.close();
         flow.clear();
         menuBar.updateActiveMode('auto');
         singleReplayView.open('auto');
       } else if (hash === 'replay') {
         currentMode = 'replay';
         isHome = false;
-        matchView.destroy();
+        matchView.close();
         flow.clear();
         menuBar.updateActiveMode('replay');
         singleReplayView.open('replay');
@@ -583,7 +583,7 @@
         // Dedicated Blank Home Page: only the top bar is retained
         currentMode = 'home';
         isHome = true;
-        matchView.destroy();
+        matchView.close();
         singleReplayView.close();
         flow.clear();
         menuBar.updateActiveMode(null);

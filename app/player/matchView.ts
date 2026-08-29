@@ -36,6 +36,8 @@ export interface MatchViewHandle {
   openRoomDialog(): void;
   loadAndPlayMap(map: MatchMap): Promise<void>;
   toggleSettings(): void;
+  /** Stops playback and detaches the view while keeping it reusable for a later route entry. */
+  close(): void;
   destroy(): void;
 }
 
@@ -946,17 +948,22 @@ export function buildMatchView(options: MatchViewOptions): MatchViewHandle {
     showSetupScreen();
   };
 
+  const close = (): void => {
+    stopCurrentMatch();
+    root.hidden = true;
+    root.remove();
+  };
+
   return {
     root,
     openRoomDialog,
     loadAndPlayMap,
     toggleSettings,
+    close,
     destroy(): void {
       window.removeEventListener('keydown', onKeyDown);
       root.removeEventListener('wheel', onWheel);
-      stopCurrentMatch();
-      root.hidden = true;
-      root.remove();
+      close();
     },
   };
 }
@@ -1569,4 +1576,3 @@ export function matchViewCss(): string {
 }
 `;
 }
-
