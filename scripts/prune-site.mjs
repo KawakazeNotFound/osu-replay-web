@@ -98,10 +98,51 @@ export async function analyseSite(siteDir = SITE_DIR) {
 }
 
 /**
+ * Every hashed name referenced from a page or script that has no file behind it.
+ *
+ * The post-condition of a prune, checked rather than assumed: deleting a file the site still asks
+ * for is the one way this script can do real damage, and it would show up as a blank page long
+ * after the build that caused it. A dangling reference here fails the build instead.
+ *
+ * Boundary-aware, unlike the reachability scan: `export-worker-3VEUX4SI.js` *contains*
+ * `worker-3VEUX4SI.js`, so a bare substring search invents references that were never there. The
+ * reachability scan can afford to be loose because a spurious match only keeps a file; this one
+ * cannot, because a spurious match would report a break that does not exist.
+ */
+export async function danglingReferences(siteDir = SITE_DIR) {
+  const all = await filesUnder(siteDir);
+  const present = new Set(
+    all.filter(rel => rel.endsWith('.js')).map(rel => path.basename(rel)),
+  );
+
+  const dangling = new Map();
+  for (const rel of all) {
+    if (rel.endsWith('.map')) continue;
+    if (!rel.endsWith('.html') && !rel.endsWith('.js')) continue;
+    let text;
+    try {
+      text = await fs.readFile(path.join(siteDir, rel), 'utf8');
+    } catch {
+      continue;
+    }
+    for (const match of text.matchAll(/(?:^|["'/(\s=,])([A-Za-z0-9_]+-[A-Z0-9]{8}\.js)/g)) {
+      const name = match[1];
+      if (present.has(name)) continue;
+      if (!dangling.has(name)) dangling.set(name, []);
+      dangling.get(name).push(rel);
+    }
+  }
+  return dangling;
+}
+
+/**
  * Deletes the unreachable hashed files and their sourcemaps. Returns what it removed.
  *
  * Sourcemaps are not candidates in their own right — nothing references a `.js.map` by name except
  * the `//# sourceMappingURL` comment in the file being deleted — so each one goes with its script.
+ *
+ * Throws if the result leaves a dangling reference, which would mean the reachability scan missed
+ * a way the site names a file.
  */
 export async function pruneSite({ siteDir = SITE_DIR, dryRun = false } = {}) {
   const { total, kept, dead } = await analyseSite(siteDir);
@@ -110,6 +151,17 @@ export async function pruneSite({ siteDir = SITE_DIR, dryRun = false } = {}) {
     for (const rel of dead) {
       await fs.rm(path.join(siteDir, rel), { force: true });
       await fs.rm(path.join(siteDir, `${rel}.map`), { force: true });
+    }
+
+    const dangling = await danglingReferences(siteDir);
+    if (dangling.size > 0) {
+      const detail = [...dangling]
+        .map(([name, refs]) => `  ${name} — referenced by ${refs.join(', ')}`)
+        .join('\n');
+      throw new Error(
+        `prune-site removed a file the site still references:\n${detail}\n`
+        + 'Re-run the builds (npm run capture:upstream && npm run build:app) to restore site/.',
+      );
     }
   }
 

@@ -9,7 +9,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
-import { analyseSite, pruneSite } from '../scripts/prune-site.mjs';
+import { analyseSite, danglingReferences, pruneSite } from '../scripts/prune-site.mjs';
 
 /** Writes a throwaway site/ tree from `{ relativePath: contents }` and returns its directory. */
 async function fixture(files: Record<string, string>): Promise<string> {
@@ -114,4 +114,47 @@ test('a dry run reports without touching the tree', async () => {
   const { dead } = await pruneSite({ siteDir: dir, dryRun: true });
   assert.deepEqual(dead, ['chunk-BBBBBBBB.js']);
   assert.deepEqual((await fs.readdir(dir)).sort(), ['chunk-BBBBBBBB.js', 'index.html']);
+});
+
+test('a longer name is not read as a reference to its own tail', async () => {
+  // `export-worker-3VEUX4SI.js` contains `worker-3VEUX4SI.js`. A bare substring search reports
+  // that shorter name as a broken reference and fails a build that is perfectly fine.
+  const dir = await fixture({
+    'legacy/index.html': '<script type="module" src="/export-worker-3VEUX4SI.js"></script>',
+    'export-worker-3VEUX4SI.js': 'onmessage=()=>{};',
+  });
+
+  assert.equal((await danglingReferences(dir)).size, 0);
+});
+
+test('a genuinely missing file is reported against the pages that want it', async () => {
+  const dir = await fixture({
+    'index.html': '<script type="module" src="/chunk-MISSINGX.js"></script>',
+  });
+
+  const dangling = await danglingReferences(dir);
+  assert.deepEqual([...dangling.keys()], ['chunk-MISSINGX.js']);
+  assert.deepEqual(dangling.get('chunk-MISSINGX.js'), ['index.html']);
+});
+
+test('a prune that would break the site fails loudly instead', async () => {
+  // A page naming a chunk in a way the reachability scan cannot see would delete it. Simulated
+  // here by pointing the check at a tree that is already inconsistent.
+  const dir = await fixture({
+    'index.html': '<p>nothing references anything</p>',
+    'chunk-AAAAAAAA.js': 'import"./chunk-BBBBBBBB.js";',
+  });
+  // chunk-AAAAAAAA is unreachable and goes; it was the only thing naming chunk-BBBBBBBB, which
+  // does not exist — so nothing dangles and the prune succeeds.
+  await pruneSite({ siteDir: dir });
+  assert.deepEqual((await fs.readdir(dir)).sort(), ['index.html']);
+
+  const broken = await fixture({
+    'index.html': '<script src="/chunk-CCCCCCCC.js"></script>',
+  });
+  await assert.rejects(
+    pruneSite({ siteDir: broken }),
+    /still references/,
+    'a tree missing a file its page names must not be reported as a clean prune',
+  );
 });
