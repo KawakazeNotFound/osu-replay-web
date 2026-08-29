@@ -391,7 +391,6 @@ export function buildMatchView(options: MatchViewOptions): MatchViewHandle {
     gridStage.replaceChildren();
     isPlaying = false;
     settingsBtn.style.display = 'none';
-    root.hidden = true;
   };
 
   const playPauseToggle = (): void => {
@@ -758,9 +757,16 @@ export function buildMatchView(options: MatchViewOptions): MatchViewHandle {
     options.log('Match playing!');
   };
 
-  // ---- 1. Setup Wizard Screen Elements (osu!lazer Screen / Wizard style) ----
+  // ---- 1. Setup Wizard Screen Elements (osu!lazer Screen / Wizard style from Image 2) ----
+  const setupContent = document.createElement('div');
+  setupContent.className = 'rv-match-setup-content';
+
+  // 1. Top Hanging Header Banner Card ("多人房间回放")
   const setupHeader = document.createElement('header');
   setupHeader.className = 'rv-match-dialog-header';
+
+  const headerLeft = document.createElement('div');
+  headerLeft.className = 'rv-match-dialog-header-left';
 
   const headerText = document.createElement('div');
   headerText.className = 'rv-match-dialog-header-text';
@@ -774,6 +780,7 @@ export function buildMatchView(options: MatchViewOptions): MatchViewHandle {
   setupSubtitle.textContent = t('和全世界的玩家一起重温精彩对决！', 'Relive multiplayer match showdowns with players worldwide!');
 
   headerText.append(setupTitle, setupSubtitle);
+  headerLeft.append(headerText);
 
   const closeBtn = document.createElement('button');
   closeBtn.type = 'button';
@@ -786,9 +793,9 @@ export function buildMatchView(options: MatchViewOptions): MatchViewHandle {
     options.onExit();
   });
 
-  setupHeader.append(headerText, closeBtn);
+  setupHeader.append(headerLeft, closeBtn);
 
-  // Center Card Body (Settings / Form)
+  // 2. Main Setup Content Card ("房间设定")
   const setupBody = document.createElement('div');
   setupBody.className = 'rv-match-dialog-body';
 
@@ -826,25 +833,35 @@ export function buildMatchView(options: MatchViewOptions): MatchViewHandle {
 
   const notice = document.createElement('div');
   notice.className = 'rv-match-notice';
+  const noticeText = document.createElement('span');
+  noticeText.className = 'rv-match-notice-text';
   if (isZh()) {
-    notice.innerHTML = `<span class="rv-match-notice-accent">注意：</span>多人房间回放依赖 <strong class="rv-match-highlight">osu! API</strong> 获取公开对战记录。未登录状态下可解析房间并浏览谱面列表，<strong class="rv-match-highlight">登录 osu! 账号</strong>后可自动下载并播放所有玩家的回放。`;
+    noticeText.innerHTML = `<strong class="rv-match-notice-accent">注意：</strong>多人房间回放依赖 <strong class="rv-match-highlight">osu! API</strong> 获取公开对战记录。未登录状态下可解析房间并浏览谱面列表，<strong class="rv-match-highlight">登录 osu! 账号</strong>后可自动下载并播放所有玩家的回放。`;
   } else {
-    notice.innerHTML = `<span class="rv-match-notice-accent">Note:</span> Multiplayer match replay relies on <strong class="rv-match-highlight">osu! API</strong> for public records. You can browse map lists without login, and <strong class="rv-match-highlight">sign in to osu!</strong> to download and play all participant replays.`;
+    noticeText.innerHTML = `<strong class="rv-match-notice-accent">Note:</strong> Multiplayer match replay relies on <strong class="rv-match-highlight">osu! API</strong> for public records. You can browse map lists without login, and <strong class="rv-match-highlight">sign in to osu!</strong> to download and play all participant replays.`;
   }
+  notice.append(noticeText);
 
   setupBody.append(sectionHeading, inputGroup, statusMsg, notice);
+  setupContent.append(setupHeader, setupBody);
 
-  // Bottom Action Footer Bar
+  // 3. Bottom Full-Width Action Footer Bar (Lazer slanted parallelogram style)
   const setupFooter = document.createElement('footer');
-  setupFooter.className = 'rv-match-dialog-footer';
+  setupFooter.className = 'rv-match-dialog-footer-bar';
+
+  const actionsWrap = document.createElement('div');
+  actionsWrap.className = 'rv-match-footer-actions';
 
   const backSetupBtn = document.createElement('button');
   backSetupBtn.type = 'button';
-  backSetupBtn.className = 'rv-match-btn-back';
-  const backIcon = icon('arrow-left', { className: 'rv-icon' });
+  backSetupBtn.className = 'rv-match-btn-back-lazer';
+  const backSkew = document.createElement('span');
+  backSkew.className = 'rv-match-btn-skew-content';
+  const backIcon = icon('chevron-left', { className: 'rv-icon rv-match-back-chevron' });
   const backText = document.createElement('span');
   backText.textContent = t('返回', 'Back');
-  backSetupBtn.append(backIcon, backText);
+  backSkew.append(backIcon, backText);
+  backSetupBtn.append(backSkew);
   uiSounds.attachHoverClick(backSetupBtn, { hover: 'button', click: false });
   backSetupBtn.addEventListener('click', () => {
     uiSounds.playClick('dialog-cancel');
@@ -853,14 +870,18 @@ export function buildMatchView(options: MatchViewOptions): MatchViewHandle {
 
   const fetchBtn = document.createElement('button');
   fetchBtn.type = 'button';
-  fetchBtn.className = 'rv-match-btn-submit';
+  fetchBtn.className = 'rv-match-btn-submit-lazer';
+  const fetchSkew = document.createElement('span');
+  fetchSkew.className = 'rv-match-btn-skew-content';
   const fetchText = document.createElement('span');
   fetchText.textContent = t('获取比赛房间！', 'Fetch Match Room!');
-  fetchBtn.append(fetchText);
+  fetchSkew.append(fetchText);
+  fetchBtn.append(fetchSkew);
   uiSounds.attachHoverClick(fetchBtn, { hover: 'button', click: false });
 
-  setupFooter.append(backSetupBtn, fetchBtn);
-  setupScreen.append(setupHeader, setupBody, setupFooter);
+  actionsWrap.append(backSetupBtn, fetchBtn);
+  setupFooter.append(actionsWrap);
+  setupScreen.append(setupContent, setupFooter);
 
   const onFetch = async (): Promise<void> => {
     const val = roomInput.value.trim();
@@ -1201,7 +1222,7 @@ export function matchViewCss(): string {
   display: none !important;
 }
 
-/* In-page Setup Wizard Screen (osu!lazer Screen / Wizard Style) */
+/* In-page Setup Wizard Screen (osu!lazer Screen / Wizard Style from Image 2) */
 .rv-match-setup-screen {
   position: absolute;
   inset: 0;
@@ -1209,11 +1230,9 @@ export function matchViewCss(): string {
   display: flex;
   flex-direction: column;
   justify-content: space-between;
-  align-items: center;
-  background: radial-gradient(circle at 50% 32%, #182824 0%, #0c1312 100%);
-  padding: 24px 20px;
-  box-sizing: border-box;
-  overflow-y: auto;
+  align-items: stretch;
+  background: radial-gradient(circle at 50% 28%, #1c2b26 0%, #0d1412 100%);
+  overflow: hidden;
   user-select: none;
   animation: rvMatchBackdropFadeIn 240ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
@@ -1221,25 +1240,46 @@ export function matchViewCss(): string {
   display: none !important;
 }
 
-/* Top Floating Header Banner */
+.rv-match-setup-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  padding: 0 24px 20px;
+  overflow-y: auto;
+  box-sizing: border-box;
+}
+
+/* Top Hanging Header Banner Card ("多人房间回放") */
 .rv-match-dialog-header {
-  width: 680px;
-  max-width: 94vw;
-  background: #182622;
-  border: 1px solid rgba(78, 217, 200, 0.22);
-  border-radius: 10px;
-  padding: 12px 20px;
+  width: 860px;
+  max-width: 90vw;
+  background: #354b43;
+  border: none;
+  border-bottom: 4px solid #23332d;
+  border-radius: 0 0 10px 10px;
+  padding: 12px 24px;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.45);
   animation: rvMatchHeaderSlideDown 280ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
-  user-select: none;
   box-sizing: border-box;
+  flex-shrink: 0;
+  margin-bottom: 16px;
 }
-.rv-dialog-closing .rv-match-dialog-header {
-  animation: rvMatchHeaderSlideUp 180ms cubic-bezier(0.7, 0, 0.84, 0) forwards;
+.rv-match-dialog-header-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+.rv-match-title-icon {
+  font-size: 24px;
+  color: #4ed9c8;
+  flex-shrink: 0;
 }
 .rv-match-dialog-header-text {
   display: flex;
@@ -1249,15 +1289,15 @@ export function matchViewCss(): string {
 }
 .rv-match-dialog-title {
   margin: 0;
-  font-size: 15px;
+  font-size: 16px;
   font-weight: 700;
   color: #ffffff;
   letter-spacing: -0.01em;
 }
 .rv-match-dialog-subtitle {
   margin: 0;
-  font-size: 11.5px;
-  color: rgba(255, 255, 255, 0.68);
+  font-size: 12px;
+  color: #9dc2b3;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1265,10 +1305,10 @@ export function matchViewCss(): string {
 .rv-match-dialog-close-btn {
   width: 32px;
   height: 32px;
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 6px;
-  color: rgba(255, 255, 255, 0.75);
+  color: #ffffff;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1277,33 +1317,33 @@ export function matchViewCss(): string {
   flex-shrink: 0;
 }
 .rv-match-dialog-close-btn:hover {
-  background: rgba(235, 70, 116, 0.22);
-  border-color: rgba(235, 70, 116, 0.45);
+  background: rgba(235, 70, 116, 0.3);
+  border-color: rgba(235, 70, 116, 0.5);
   color: #ffffff;
-  transform: scale(1.05);
+  transform: scale(1.06);
 }
 .rv-match-dialog-close-btn:active {
-  transform: scale(0.95);
+  transform: scale(0.94);
 }
 
-/* Center Body Card */
+/* Center Setup Content Card ("房间设定") */
 .rv-match-dialog-body {
-  width: 680px;
-  max-width: 94vw;
-  background: #141c1a;
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  width: 860px;
+  max-width: 90vw;
+  background: #16201d;
+  border: 1px solid rgba(255, 255, 255, 0.06);
   border-radius: 12px;
-  box-shadow: 0 20px 48px rgba(0, 0, 0, 0.6);
-  padding: 28px 32px;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.6);
+  padding: 32px 36px;
   display: flex;
   flex-direction: column;
-  gap: 18px;
-  margin: auto 0;
+  align-items: stretch;
+  justify-content: flex-start;
+  gap: 20px;
   animation: rvMatchBodyPopIn 300ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
   box-sizing: border-box;
-}
-.rv-dialog-closing .rv-match-dialog-body {
-  animation: rvMatchBodyPopOut 180ms cubic-bezier(0.7, 0, 0.84, 0) forwards;
+  min-height: 440px;
+  flex: 1;
 }
 .rv-match-section-heading {
   display: flex;
@@ -1311,7 +1351,7 @@ export function matchViewCss(): string {
 }
 .rv-match-section-title {
   margin: 0;
-  font-size: 17px;
+  font-size: 18px;
   font-weight: 700;
   color: #ffffff;
   letter-spacing: -0.01em;
@@ -1324,26 +1364,26 @@ export function matchViewCss(): string {
 .rv-match-input-label {
   font-size: 12px;
   font-weight: 600;
-  color: rgba(255, 255, 255, 0.7);
+  color: #90a8a0;
   user-select: none;
 }
 .rv-match-input-wrap {
-  background: #0d1413;
-  border: 1.5px solid rgba(255, 255, 255, 0.12);
+  background: #0e1614;
+  border: 1.5px solid rgba(255, 255, 255, 0.14);
   border-radius: 8px;
-  padding: 12px 14px;
+  padding: 12px 16px;
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
   transition: border-color 150ms ease, box-shadow 150ms ease, background 150ms ease;
 }
 .rv-match-input-wrap:focus-within {
   border-color: #2feaa8;
-  box-shadow: 0 0 0 3px rgba(47, 234, 168, 0.18), 0 0 16px rgba(47, 234, 168, 0.12);
-  background: #101917;
+  box-shadow: 0 0 0 3px rgba(47, 234, 168, 0.2), 0 0 16px rgba(47, 234, 168, 0.15);
+  background: #111b18;
 }
 .rv-match-input-icon {
-  color: rgba(255, 255, 255, 0.4);
+  color: rgba(255, 255, 255, 0.45);
   font-size: 16px;
   flex-shrink: 0;
   transition: color 150ms ease;
@@ -1362,7 +1402,7 @@ export function matchViewCss(): string {
   min-width: 0;
 }
 .rv-match-input-field::placeholder {
-  color: rgba(255, 255, 255, 0.3);
+  color: rgba(255, 255, 255, 0.35);
 }
 .rv-match-dialog-status {
   font-size: 12.5px;
@@ -1379,13 +1419,10 @@ export function matchViewCss(): string {
   font-weight: 600;
 }
 .rv-match-notice {
-  background: rgba(255, 204, 34, 0.05);
-  border-left: 3px solid #ffcc22;
-  border-radius: 0 8px 8px 0;
-  padding: 12px 16px;
-  font-size: 12px;
+  margin-top: auto;
+  font-size: 12.5px;
   line-height: 1.6;
-  color: rgba(255, 255, 255, 0.8);
+  color: #ffcc22;
   user-select: none;
 }
 .rv-match-notice-accent {
@@ -1397,53 +1434,67 @@ export function matchViewCss(): string {
   font-weight: 700;
 }
 
-/* Bottom Action Footer Bar */
-.rv-match-dialog-footer {
-  width: 680px;
-  max-width: 94vw;
+/* Bottom Action Footer Bar (Lazer Edge-to-Edge Parallelogram Buttons with Solid Flat Color from Image 2) */
+.rv-match-dialog-footer-bar {
+  flex: 0 0 54px;
+  height: 54px;
+  background: #111816;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
-  animation: rvMatchFooterSlideUp 280ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  padding: 0 20px;
+  position: relative;
+  z-index: 30;
   user-select: none;
   box-sizing: border-box;
+  animation: rvMatchFooterSlideUp 280ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
-.rv-dialog-closing .rv-match-dialog-footer {
-  animation: rvMatchFooterSlideDown 180ms cubic-bezier(0.7, 0, 0.84, 0) forwards;
+.rv-match-footer-actions {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  height: 100%;
 }
-.rv-match-btn-back {
-  background: #eb4674;
+.rv-match-btn-back-lazer {
+  background: #db2878;
   color: #ffffff;
-  border: none;
-  border-radius: 6px;
-  padding: 12px 28px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-bottom: 2px solid rgba(255, 255, 255, 0.35);
+  border-right: 1.5px solid rgba(255, 255, 255, 0.25);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.35);
+  height: 42px;
+  width: 170px;
   font-size: 14px;
   font-weight: 700;
   font-family: inherit;
   cursor: pointer;
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  transition: background 120ms ease, transform 120ms cubic-bezier(0.16, 1, 0.3, 1), box-shadow 120ms ease;
-  box-shadow: 0 4px 14px rgba(235, 70, 116, 0.35);
+  justify-content: center;
+  transform: skewX(-12deg);
+  border-radius: 8px;
+  transition: background 120ms ease, transform 120ms ease;
   flex-shrink: 0;
 }
-.rv-match-btn-back:hover {
-  background: #ff5987;
-  transform: translateY(-2px);
-  box-shadow: 0 6px 20px rgba(235, 70, 116, 0.5);
+.rv-match-btn-back-lazer:hover {
+  background: #e63889;
+  transform: skewX(-12deg) translateY(-1px);
 }
-.rv-match-btn-back:active {
-  transform: scale(0.96) translateY(0);
+.rv-match-btn-back-lazer:active {
+  background: #c71e6c;
+  transform: skewX(-12deg) translateY(0);
 }
-.rv-match-btn-submit {
+.rv-match-btn-submit-lazer {
   flex: 1;
   background: #2feaa8;
-  color: #0c1c17;
-  border: none;
-  border-radius: 6px;
-  padding: 12px 24px;
+  color: #082218;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-bottom: 2px solid rgba(255, 255, 255, 0.45);
+  border-right: 1.5px solid rgba(255, 255, 255, 0.3);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.35);
+  height: 42px;
   font-size: 15px;
   font-weight: 800;
   font-family: inherit;
@@ -1451,21 +1502,31 @@ export function matchViewCss(): string {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  transition: background 120ms ease, transform 120ms cubic-bezier(0.16, 1, 0.3, 1), box-shadow 120ms ease;
-  box-shadow: 0 4px 16px rgba(47, 234, 168, 0.35);
+  transform: skewX(-12deg);
+  border-radius: 8px;
+  transition: background 120ms ease, transform 120ms ease;
 }
-.rv-match-btn-submit:hover:not(:disabled) {
-  background: #46ffbc;
-  transform: translateY(-2px);
-  box-shadow: 0 6px 24px rgba(47, 234, 168, 0.55);
+.rv-match-btn-submit-lazer:hover:not(:disabled) {
+  background: #46f8b6;
+  transform: skewX(-12deg) translateY(-1px);
 }
-.rv-match-btn-submit:active:not(:disabled) {
-  transform: scale(0.98) translateY(0);
+.rv-match-btn-submit-lazer:active:not(:disabled) {
+  background: #24d393;
+  transform: skewX(-12deg) translateY(0);
 }
-.rv-match-btn-submit:disabled {
-  opacity: 0.6;
+.rv-match-btn-submit-lazer:disabled {
+  opacity: 0.5;
   cursor: not-allowed;
+}
+.rv-match-btn-skew-content {
+  transform: skewX(12deg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+.rv-match-back-chevron {
+  font-size: 18px;
 }
 
 /* Lazer Animation Keyframes */

@@ -492,6 +492,15 @@
       onExit: () => {
         navigateToRoute('home');
       },
+      onSelectMode: mode => {
+        navigateToRoute(mode);
+      },
+      getActiveMode: () => {
+        const hash = location.hash.replace(/^#\/?/, '').trim().toLowerCase();
+        if (hash === 'match') return 'match';
+        if (hash === 'auto') return 'auto';
+        return 'replay';
+      },
       isHomePage: () => isHome,
       getSelectedSkin: () => selectedSkin,
       getAvailableSkins: () => getAllSkinNames(),
@@ -541,17 +550,20 @@
         isHome = false;
         subHeader.hidden = true;
         flow.clear();
+        menuBar.updateActiveMode('match');
         matchView.openRoomDialog();
       } else if (hash === 'auto') {
         currentMode = 'auto';
         isHome = false;
         matchView.destroy();
         flow.clear();
+        menuBar.updateActiveMode('auto');
         updateSubHeaderForMode('auto');
       } else if (hash === 'replay') {
         currentMode = 'replay';
         isHome = false;
         matchView.destroy();
+        menuBar.updateActiveMode('replay');
         updateSubHeaderForMode('replay');
       } else {
         // Home
@@ -560,6 +572,7 @@
         subHeader.hidden = true;
         matchView.destroy();
         flow.clear();
+        menuBar.updateActiveMode('replay');
         lastLoader = null;
         pendingOsr = null;
         pendingOsz = null;

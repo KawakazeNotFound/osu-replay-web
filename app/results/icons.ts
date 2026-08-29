@@ -15,14 +15,28 @@ export type IconName =
   | 'skip-start' | 'rewind' | 'step-back' | 'play' | 'pause'
   | 'step-forward' | 'fast-forward' | 'skip-end'
   | 'reset' | 'power' | 'download-check' | 'link' | 'check' | 'star'
-  | 'mode-single' | 'mode-std' | 'mode-auto' | 'mode-match' | 'chevron-right'
-  | 'settings' | 'home' | 'folder' | 'upload' | 'arrow-left' | 'close';
+  | 'mode-single' | 'mode-std' | 'mode-auto' | 'mode-match' | 'chevron-right' | 'chevron-left'
+  | 'settings' | 'home' | 'folder' | 'upload' | 'arrow-left' | 'close'
+  | 'bell' | 'clock' | 'trophy' | 'chat' | 'globe' | 'music' | 'code' | 'rss' | 'monitor' | 'warning'
+  | 'palette' | 'fullscreen';
 
 /**
  * Path data per icon. Filled shapes rather than strokes, so they stay crisp at the small sizes
  * the transport row uses without needing vector-effect hints.
  */
 const PATHS: Readonly<Record<IconName, readonly string[]>> = {
+  palette: ['M12 2C6.49 2 2 6.49 2 12c0 4.97 3.66 9.07 8.44 9.87.55.09 1-.34 1-.9v-1.42c0-.55.45-1 1-1h1.56c3.87 0 7-3.13 7-7 0-5.51-4.49-10-10-10zm-5.5 9c-.83 0-1.5-.67-1.5-1.5S5.67 8 6.5 8 8 8.67 8 9.5 7.33 11 6.5 11zm3-4C8.67 7 8 6.33 8 5.5S8.67 4 9.5 4s1.5.67 1.5 1.5S10.33 7 9.5 7zm5 0c-.83 0-1.5-.67-1.5-1.5S13.67 4 14.5 4s1.5.67 1.5 1.5S15.33 7 14.5 7zm3 4c-.83 0-1.5-.67-1.5-1.5S16.67 8 17.5 8s1.5.67 1.5 1.5-.67 1.5-1.5 1.5z'],
+  fullscreen: ['M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z'],
+  bell: ['M12 22c1.1 0 2-.9 2-2h-4c0 1.1.89 2 2 2zm6-6v-5c0-3.07-1.63-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68C7.64 5.36 6 7.92 6 11v5l-2 2v1h16v-1l-2-2zm-2 1H8v-6c0-2.48 1.51-4.5 4-4.5s4 2.02 4 4.5v6z'],
+  clock: ['M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm.5-13H11v6l5.25 3.15.75-1.23-4.5-2.67z'],
+  trophy: ['M19 5h-2V3H7v2H5c-1.1 0-2 .9-2 2v1c0 2.55 1.92 4.63 4.39 4.94A5.01 5.01 0 0 0 11 15.9V19H7v2h10v-2h-4v-3.1c1.8-.4 3.23-1.8 3.61-3.6A5.002 5.002 0 0 0 21 8V7c0-1.1-.9-2-2-2zM5 8V7h2v3.82C5.84 10.4 5 9.3 5 8zm14 0c0 1.3-.84 2.4-2 2.82V7h2v1z'],
+  chat: ['M20 2H4c-1.1 0-1.99.9-1.99 2L2 22l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zM6 9h12v2H6V9zm8 5H6v-2h8v2zm4-6H6V6h12v2z'],
+  globe: ['M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z'],
+  music: ['M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z'],
+  code: ['M9.4 16.6L4.8 12l4.6-4.6L8 6l-6 6 6 6 1.4-1.4zm5.2 0l4.6-4.6-4.6-4.6L16 6l6 6-6 6-1.4-1.4z'],
+  rss: ['M4 4.44v2.83c7.03 0 12.73 5.7 12.73 12.73h2.83c0-8.59-6.97-15.56-15.56-15.56zm0 5.66v2.83c3.9 0 7.07 3.17 7.07 7.07h2.83c0-5.47-4.43-9.9-9.9-9.9zM6.12 15.88c-1.17 0-2.12.95-2.12 2.12s.95 2.12 2.12 2.12 2.12-.95 2.12-2.12-.95-2.12-2.12-2.12z'],
+  monitor: ['M20 3H4c-1.1 0-2 .9-2 2v11c0 1.1.9 2 2 2h6l-2 3v1h8v-1l-2-3h6c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 13H4V5h16v11z'],
+  warning: ['M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z'],
   // Close / cross icon
   close: [
     'M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z',
@@ -49,8 +63,9 @@ const PATHS: Readonly<Record<IconName, readonly string[]>> = {
   star: ['M12 2.6l2.9 5.9 6.5.95-4.7 4.6 1.1 6.45L12 17.45 6.2 20.5l1.1-6.45-4.7-4.6 6.5-.95z'],
   // A tick on its own, for "this option is the selected one".
   check: ['M9 16.2 4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4z'],
-  // Chevron right arrow for submenus.
+  // Chevron arrows
   'chevron-right': ['M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z'],
+  'chevron-left': ['M15.41 7.41L14 6l-6 6 6 6 1.41-1.41L10.83 12z'],
   // Mode icons (Single, Auto, Match).
   'mode-single': [
     'M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z',

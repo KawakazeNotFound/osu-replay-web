@@ -33,6 +33,7 @@ export interface MenuBarHandle {
   readonly root: HTMLElement;
   readonly userSlot: HTMLElement;
   readonly statusSlot: HTMLElement;
+  updateActiveMode(mode: 'replay' | 'auto' | 'match'): void;
   openUrlPrompt(): void;
   updateSkins(): void;
   destroy(): void;
@@ -42,13 +43,14 @@ export function buildMenuBar(options: MenuBarOptions): MenuBarHandle {
   const root = document.createElement('header');
   root.className = 'rv-top-bar';
 
-  // ---- Left container: Brand + Menu Items ----
+  // ---- Left container: Brand + Home + Mode Tabs ----
   const leftGroup = document.createElement('div');
   leftGroup.className = 'rv-menu-left';
 
-  // Brand / Logo
+  // 1. Brand Logo: Replay Viewer with circular icon
   const brand = document.createElement('div');
   brand.className = 'rv-menu-brand';
+  brand.title = t('主页面', 'Home');
 
   const logoIcon = document.createElement('div');
   logoIcon.className = 'rv-menu-logo-icon';
@@ -64,24 +66,152 @@ export function buildMenuBar(options: MenuBarOptions): MenuBarHandle {
   brandText.innerHTML = 'Replay <span class="rv-brand-accent">Viewer</span>';
 
   brand.append(logoIcon, brandText);
+  uiSounds.attachHoverClick(brand, { hover: 'button', click: false });
+  brand.addEventListener('click', () => {
+    uiSounds.playClick('button');
+    options.onExit?.();
+  });
   leftGroup.append(brand);
 
-  // Menu bar items container
-  const menuBarItems = document.createElement('nav');
-  menuBarItems.className = 'rv-menu-items';
-  leftGroup.append(menuBarItems);
+  // 2. Home icon button
+  const homeBtn = document.createElement('button');
+  homeBtn.type = 'button';
+  homeBtn.className = 'rv-top-icon-btn rv-top-home-btn';
+  homeBtn.title = t('主页面', 'Home');
+  homeBtn.append(icon('home', { className: 'rv-icon' }));
+  uiSounds.attachHoverClick(homeBtn, { hover: 'button', click: false });
+  homeBtn.addEventListener('click', () => {
+    uiSounds.playClick('button');
+    options.onExit?.();
+  });
+  leftGroup.append(homeBtn);
 
-  // ---- Right container: User Profile ----
+  // 3. Mode Tabs (Single Replay, Auto Play, Multiplayer Match)
+  const modeTabs = document.createElement('div');
+  modeTabs.className = 'rv-top-mode-tabs';
+
+  const modeButtons = new Map<'replay' | 'auto' | 'match', HTMLButtonElement>();
+  const modesList: Array<{ id: 'replay' | 'auto' | 'match'; icon: IconName; label: string }> = [
+    { id: 'replay', icon: 'mode-single', label: t('单人回放', 'Single Replay') },
+    { id: 'auto', icon: 'mode-auto', label: t('自动演示', 'Auto Play') },
+    { id: 'match', icon: 'mode-match', label: t('多人比赛', 'Multiplayer Match') },
+  ];
+
+  for (const m of modesList) {
+    const tab = document.createElement('button');
+    tab.type = 'button';
+    tab.className = `rv-top-mode-tab rv-mode-${m.id}`;
+    if (options.getActiveMode?.() === m.id) {
+      tab.classList.add('rv-mode-active');
+    }
+    tab.title = m.label;
+    tab.append(icon(m.icon, { className: 'rv-icon' }));
+    uiSounds.attachHoverClick(tab, { hover: 'button', click: false });
+    tab.addEventListener('click', () => {
+      uiSounds.playClick('button');
+      for (const [modeKey, btn] of modeButtons.entries()) {
+        btn.classList.toggle('rv-mode-active', modeKey === m.id);
+      }
+      options.onSelectMode?.(m.id);
+    });
+    modeButtons.set(m.id, tab);
+    modeTabs.append(tab);
+  }
+  leftGroup.append(modeTabs);
+
+  // ---- Right container: Palette + Fullscreen + Separator + User Profile + Live Clock + Settings ----
   const rightGroup = document.createElement('div');
   rightGroup.className = 'rv-menu-right';
+
+  const utilGroup = document.createElement('div');
+  utilGroup.className = 'rv-top-util-group';
+
+  // Palette button: opens preset skin dropdown menu
+  const paletteBtn = document.createElement('button');
+  paletteBtn.type = 'button';
+  paletteBtn.className = 'rv-top-icon-btn rv-top-palette-btn';
+  paletteBtn.title = t('预设皮肤', 'Preset Skins');
+  paletteBtn.append(icon('palette', { className: 'rv-icon' }));
+  uiSounds.attachHoverClick(paletteBtn, { hover: 'button', click: false });
+  paletteBtn.addEventListener('click', () => {
+    openTopMenu(paletteBtn, getPaletteMenuItems);
+  });
+  utilGroup.append(paletteBtn);
+
+  // Fullscreen button
+  const fullscreenBtn = document.createElement('button');
+  fullscreenBtn.type = 'button';
+  fullscreenBtn.className = 'rv-top-icon-btn rv-top-fullscreen-btn';
+  fullscreenBtn.title = t('全屏模式', 'Toggle Fullscreen');
+  fullscreenBtn.append(icon('fullscreen', { className: 'rv-icon' }));
+  uiSounds.attachHoverClick(fullscreenBtn, { hover: 'button', click: false });
+  fullscreenBtn.addEventListener('click', () => {
+    uiSounds.playClick('button');
+    options.onToggleFullscreen?.();
+  });
+  utilGroup.append(fullscreenBtn);
+
+  rightGroup.append(utilGroup);
+
+  const divider = document.createElement('div');
+  divider.className = 'rv-top-divider';
+  rightGroup.append(divider);
 
   const statusSlot = document.createElement('span');
   statusSlot.className = 'rv-menu-status';
 
   const userSlot = document.createElement('div');
   userSlot.className = 'rv-menu-user';
-
   rightGroup.append(userSlot);
+
+  // Live Clock & Session Runtime counter widget
+  const clockWidget = document.createElement('div');
+  clockWidget.className = 'rv-top-clock-widget';
+
+  const clockIcon = icon('clock', { className: 'rv-icon rv-clock-icon' });
+  const clockTextWrap = document.createElement('div');
+  clockTextWrap.className = 'rv-clock-text-wrap';
+
+  const clockTime = document.createElement('span');
+  clockTime.className = 'rv-clock-time';
+
+  const clockRuntime = document.createElement('span');
+  clockRuntime.className = 'rv-clock-runtime';
+
+  clockTextWrap.append(clockTime, clockRuntime);
+  clockWidget.append(clockIcon, clockTextWrap);
+  rightGroup.append(clockWidget);
+
+  const startTime = Date.now();
+  const updateClock = (): void => {
+    const now = new Date();
+    const h = String(now.getHours()).padStart(2, '0');
+    const m = String(now.getMinutes()).padStart(2, '0');
+    const s = String(now.getSeconds()).padStart(2, '0');
+    clockTime.textContent = `${h}:${m}:${s}`;
+
+    const elapsedSec = Math.floor((Date.now() - startTime) / 1000);
+    const eh = String(Math.floor(elapsedSec / 3600)).padStart(2, '0');
+    const em = String(Math.floor((elapsedSec % 3600) / 60)).padStart(2, '0');
+    const es = String(elapsedSec % 60).padStart(2, '0');
+    clockRuntime.textContent = `${t('已运行', 'Running')} ${eh}:${em}:${es}`;
+  };
+  updateClock();
+  const clockInterval = window.setInterval(updateClock, 1000);
+
+  // Settings button (Replaces the bell notification button on the far right)
+  const settingsBtn = document.createElement('button');
+  settingsBtn.type = 'button';
+  settingsBtn.className = 'rv-top-icon-btn rv-top-settings-btn';
+  settingsBtn.title = t('设置与菜单', 'Settings & Menu');
+  const gear = icon('settings', { className: 'rv-icon rv-top-gear-icon' });
+  settingsBtn.append(gear);
+  uiSounds.attachHoverClick(settingsBtn, { hover: 'button', click: false });
+  settingsBtn.addEventListener('click', () => {
+    openTopMenu(settingsBtn, getFullMenuItems);
+  });
+  rightGroup.append(settingsBtn);
+
   root.append(leftGroup, rightGroup);
 
   // ---- Hidden File Inputs ----
@@ -227,8 +357,6 @@ export function buildMenuBar(options: MenuBarOptions): MenuBarHandle {
     let activeRow: HTMLElement | null = null;
     let closeTimer: number | null = null;
 
-    // If a menu tier has leaf items with no submenus and > 7 items (like 12 preset skins),
-    // wrap the rows in a scroll container with custom lazer scrollbar.
     const hasAnyChildren = items.some(it => it.children !== undefined);
     const container = (items.length > 7 && !hasAnyChildren) ? document.createElement('div') : menuEl;
     if (container !== menuEl) {
@@ -238,9 +366,9 @@ export function buildMenuBar(options: MenuBarOptions): MenuBarHandle {
 
     for (const item of items) {
       if (item.isDivider === true) {
-        const divider = document.createElement('div');
-        divider.className = 'rv-menu-divider';
-        container.append(divider);
+        const dividerEl = document.createElement('div');
+        dividerEl.className = 'rv-menu-divider';
+        container.append(dividerEl);
         continue;
       }
 
@@ -271,10 +399,10 @@ export function buildMenuBar(options: MenuBarOptions): MenuBarHandle {
       row.append(labelWrapper);
 
       if (item.badge !== undefined) {
-        const badge = document.createElement('span');
-        badge.className = 'rv-menu-badge';
-        badge.textContent = item.badge;
-        row.append(badge);
+        const badgeEl = document.createElement('span');
+        badgeEl.className = 'rv-menu-badge';
+        badgeEl.textContent = item.badge;
+        row.append(badgeEl);
       } else if (item.children !== undefined) {
         const arrow = document.createElement('span');
         arrow.className = 'rv-menu-arrow';
@@ -378,8 +506,20 @@ export function buildMenuBar(options: MenuBarOptions): MenuBarHandle {
     uiSounds.playMenu('open');
 
     const dropdown = renderDropdown(getItems(), 1);
-    dropdown.style.left = `${btn.offsetLeft}px`;
-    dropdown.style.top = `${btn.offsetTop + btn.offsetHeight}px`;
+    const rect = btn.getBoundingClientRect();
+    const rootRect = root.getBoundingClientRect();
+    dropdown.style.top = `${rect.bottom - rootRect.top}px`;
+
+    // If button is on the right side of the screen, align dropdown to the right edge of button
+    const estimatedWidth = 200;
+    if (rect.left + estimatedWidth > window.innerWidth) {
+      dropdown.style.right = `${window.innerWidth - rect.right}px`;
+      dropdown.style.left = 'auto';
+    } else {
+      dropdown.style.left = `${rect.left - rootRect.left}px`;
+      dropdown.style.right = 'auto';
+    }
+
     root.append(dropdown);
     activeDropdown = dropdown;
   };
@@ -392,6 +532,24 @@ export function buildMenuBar(options: MenuBarOptions): MenuBarHandle {
       isChecked: skinName === selected,
       onClick: () => options.onSelectSkin(skinName),
     }));
+  };
+
+  const getPaletteMenuItems = (): readonly MenuItemSpec[] => {
+    const selected = options.getSelectedSkin();
+    const presetItems: MenuItemSpec[] = options.getAvailableSkins().map(skinName => ({
+      label: skinName,
+      isChecked: skinName === selected,
+      onClick: () => options.onSelectSkin(skinName),
+    }));
+
+    return [
+      ...presetItems,
+      { isDivider: true, label: '' },
+      {
+        label: t('导入皮肤 (.osk / .zip)…', 'Import Skin (.osk / .zip)…'),
+        onClick: () => oskFileInput.click(),
+      },
+    ];
   };
 
   const getModeItems = (): readonly MenuItemSpec[] => {
@@ -494,35 +652,53 @@ export function buildMenuBar(options: MenuBarOptions): MenuBarHandle {
     },
   ];
 
-  const addTopButton = (label: string, getItems: () => readonly MenuItemSpec[]): void => {
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.className = 'rv-top-menu-btn';
-    btn.textContent = label;
-
-    btn.addEventListener('click', () => openTopMenu(btn, getItems));
-    btn.addEventListener('pointerenter', () => {
-      uiSounds.playHover('button');
-      if (activeMenuBtn !== null && activeMenuBtn !== btn) {
-        openTopMenu(btn, getItems);
-      }
-    });
-
-    menuBarItems.append(btn);
-  };
-
-  addTopButton(t('文件', 'File'), getFileMenuItems);
-  addTopButton(t('查看', 'View'), getViewMenuItems);
+  const getFullMenuItems = (): readonly MenuItemSpec[] => [
+    { label: t('文件', 'File'), children: getFileMenuItems },
+    { label: t('查看', 'View'), children: getViewMenuItems },
+    { isDivider: true, label: '' },
+    {
+      label: t('全屏模式', 'Toggle Fullscreen'),
+      badge: 'F11',
+      onClick: () => options.onToggleFullscreen?.(),
+    },
+    {
+      label: t('旧版播放器', 'Legacy Viewer'),
+      onClick: () => {
+        window.location.href = '/legacy/';
+      },
+    },
+    {
+      label: t('重新加载', 'Reload'),
+      onClick: () => options.onReload?.(),
+    },
+    { isDivider: true, label: '' },
+    {
+      label: t('回放设置面板', 'Replay Settings Panel'),
+      icon: 'settings',
+      onClick: () => options.onToggleSettings?.(),
+    },
+    {
+      label: t('主页面', 'Home'),
+      isDanger: true,
+      onClick: () => options.onExit?.(),
+    },
+  ];
 
   return {
     root,
     userSlot,
     statusSlot,
+    updateActiveMode(mode: 'replay' | 'auto' | 'match'): void {
+      for (const [m, btn] of modeButtons.entries()) {
+        btn.classList.toggle('rv-mode-active', m === mode);
+      }
+    },
     openUrlPrompt: openUrlModal,
     updateSkins(): void {
       // Re-render skin list if dropdown is open
     },
     destroy(): void {
+      clearInterval(clockInterval);
       closeAllMenus();
       root.remove();
     },
@@ -531,11 +707,11 @@ export function buildMenuBar(options: MenuBarOptions): MenuBarHandle {
 
 export function menuBarCss(): string {
   return `
-/* Top Navigation / Menu Bar (osu!lazer editor style) */
+/* Top Navigation / Menu Bar (osu!lazer Top Header style from Image 2) */
 .rv-top-bar {
-  flex: 0 0 38px;
-  height: 38px;
-  background: #253330;
+  flex: 0 0 46px;
+  height: 46px;
+  background: #15221e;
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
   display: flex;
   align-items: stretch;
@@ -546,24 +722,32 @@ export function menuBarCss(): string {
   color: #d8e6e4;
   position: relative;
   z-index: 100;
+  padding: 0 4px;
 }
 
 .rv-menu-left {
   display: flex;
-  align-items: stretch;
+  align-items: center;
+  gap: 6px;
 }
 
+/* Brand Logo */
 .rv-menu-brand {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 0 16px;
-  background: #1c2624;
-  border-right: 1px solid rgba(255, 255, 255, 0.06);
+  padding: 0 12px;
+  height: 36px;
+  border-radius: 4px;
   font-weight: 700;
   font-size: 13px;
   letter-spacing: 0.02em;
   color: #ffffff;
+  cursor: pointer;
+  transition: background 120ms ease;
+}
+.rv-menu-brand:hover {
+  background: rgba(255, 255, 255, 0.08);
 }
 .rv-menu-logo-icon {
   color: #4ed9c8;
@@ -574,43 +758,143 @@ export function menuBarCss(): string {
   color: #4ed9c8;
 }
 
-.rv-menu-items {
-  display: flex;
-  align-items: stretch;
-}
-
-.rv-top-menu-btn {
+/* Settings button with gear */
+.rv-top-settings-btn {
   background: transparent;
   border: none;
-  color: #d0dedc;
-  font-family: inherit;
-  font-size: 13px;
-  font-weight: 600;
-  padding: 0 16px;
-  cursor: pointer;
+  color: #a2b8b2;
   display: flex;
   align-items: center;
-  transition: background 80ms ease, color 80ms ease;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
 }
-.rv-top-menu-btn:hover {
-  background: #384a46;
+.rv-top-settings-btn:hover,
+.rv-top-settings-btn.rv-menu-btn-active {
+  background: rgba(255, 255, 255, 0.08);
   color: #ffffff;
 }
-.rv-top-menu-btn.rv-menu-btn-active {
-  background: #465c57;
+.rv-top-gear-icon {
+  font-size: 18px;
+}
+
+/* Nav icon buttons */
+.rv-top-icon-btn {
+  background: transparent;
+  border: none;
+  color: #a2b8b2;
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 18px;
+  transition: all 120ms ease;
+}
+.rv-top-icon-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
   color: #ffffff;
 }
 
+/* Mode tabs with active underline indicator */
+.rv-top-mode-tabs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 4px;
+}
+.rv-top-mode-tab {
+  background: transparent;
+  border: none;
+  color: #8fa6a0;
+  width: 40px;
+  height: 46px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  cursor: pointer;
+  position: relative;
+  transition: color 120ms ease;
+}
+.rv-top-mode-tab:hover {
+  color: #ffffff;
+}
+.rv-top-mode-tab.rv-mode-active {
+  color: #2feaa8;
+}
+.rv-top-mode-tab.rv-mode-active::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 6px;
+  right: 6px;
+  height: 3px;
+  background: #2feaa8;
+  border-radius: 3px 3px 0 0;
+  box-shadow: 0 0 8px #2feaa8;
+}
+
+/* Right header group */
 .rv-menu-right {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 0 14px;
+  padding: 0 10px;
 }
-.rv-menu-status {
-  font-size: 12px;
-  color: rgba(255, 255, 255, 0.7);
-  white-space: nowrap;
+
+.rv-top-util-group {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.rv-top-divider {
+  width: 1px;
+  height: 20px;
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.rv-menu-user {
+  display: flex;
+  align-items: center;
+}
+
+/* Live Clock & Session Runtime counter widget */
+.rv-top-clock-widget {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 8px;
+  color: #ffffff;
+  user-select: none;
+}
+.rv-clock-icon {
+  font-size: 18px;
+  color: #a4c2ba;
+}
+.rv-clock-text-wrap {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.15;
+}
+.rv-clock-time {
+  font-size: 13px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: #ffffff;
+  letter-spacing: -0.01em;
+}
+.rv-clock-runtime {
+  font-size: 9.5px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: #ff6688;
 }
 
 /* Dropdown Menu & Submenus (osu!lazer sharp flat style) */
