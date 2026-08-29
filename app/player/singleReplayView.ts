@@ -25,6 +25,7 @@ export interface SingleReplayViewHandle {
   open(mode: 'replay' | 'auto'): void;
   close(): void;
   setStatus(msg: string, type?: 'info' | 'loading' | 'error' | 'success'): void;
+  markError(msg?: string): void;
   setPendingFiles(osr: File | null, osz: File | null): void;
   handleProgress(msg: string): void;
   finishProgress(): Promise<void>;
@@ -554,17 +555,33 @@ export function buildSingleReplayView(options: SingleReplayViewOptions): SingleR
     stepsCard.hidden = false;
     isFinishing = false;
     isCompleted = false;
-    stopStepAnimation(stepIdx);
-    for (let i = 0; i < stepIdx; i++) {
+    const targetIdx = Math.max(0, Math.min(stepIdx, stepElements.length - 1));
+    for (let i = 0; i < stepElements.length; i++) {
+      stopStepAnimation(i);
+    }
+    for (let i = 0; i < targetIdx; i++) {
       completeStepInstant(i);
     }
-    const el = stepElements[stepIdx];
+    for (let i = targetIdx + 1; i < stepElements.length; i++) {
+      const pendingEl = stepElements[i];
+      if (pendingEl) {
+        pendingEl.row.className = 'rv-replay-step-row state-pending';
+        pendingEl.check.className = 'rv-replay-step-check state-pending';
+        pendingEl.barWrap.style.display = 'none';
+        pendingEl.check.innerHTML = `
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="10"></circle>
+          </svg>
+        `;
+      }
+    }
+    const el = stepElements[targetIdx];
     if (el) {
       el.row.className = 'rv-replay-step-row state-error';
       el.check.className = 'rv-replay-step-check state-error';
       el.barWrap.style.display = 'none';
       el.check.innerHTML = `
-        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+        <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round">
           <line x1="18" y1="6" x2="6" y2="18"></line>
           <line x1="6" y1="6" x2="18" y2="18"></line>
         </svg>
@@ -771,12 +788,16 @@ export function buildSingleReplayView(options: SingleReplayViewOptions): SingleR
     statusMsg.textContent = msg;
     statusMsg.className = 'rv-replay-dialog-status rv-status-error';
     playBtn.disabled = false;
+    markStepError(currentStepIdx);
   }
 
   function setNormalStatus(msg: string, type: 'info' | 'loading' | 'error' | 'success' = 'info'): void {
     statusMsg.textContent = msg;
     statusMsg.className = `rv-replay-dialog-status rv-status-${type}`;
     playBtn.disabled = type === 'loading';
+    if (type === 'error') {
+      markStepError(currentStepIdx);
+    }
   }
 
   playBtn.addEventListener('click', () => {
@@ -837,6 +858,13 @@ export function buildSingleReplayView(options: SingleReplayViewOptions): SingleR
     },
     setStatus(msg: string, type: 'info' | 'loading' | 'error' | 'success' = 'info'): void {
       setNormalStatus(msg, type);
+    },
+    markError(msg?: string): void {
+      if (msg) {
+        setErrorStatus(msg);
+      } else {
+        markStepError(currentStepIdx);
+      }
     },
     setPendingFiles(osr: File | null, osz: File | null): void {
       pendingOsr = osr;
@@ -1283,6 +1311,8 @@ function singleReplayCss(): string {
 .rv-replay-step-check.state-error {
   background: #ff4455;
   color: #ffffff;
+  border: none;
+  animation: rvStepCheckPop 220ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 
 @keyframes rvReplayCheckPulse {
