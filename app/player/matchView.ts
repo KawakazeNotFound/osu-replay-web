@@ -21,7 +21,7 @@ import {
   buildSettingsOverlay, type SettingsOverlayHandle, type SettingsSection, type SliderHandle,
 } from './settings.js';
 import { uiSounds, VOL_KEYS, readStoredVolume, writeStoredVolume } from './uiSounds.js';
-import { t } from './i18n.js';
+import { t, isZh } from './i18n.js';
 
 export interface MatchViewOptions {
   readonly host: HTMLElement;
@@ -746,67 +746,140 @@ export function buildMatchView(options: MatchViewOptions): MatchViewHandle {
     options.log('Match playing!');
   };
 
-  // ---- Room Picker Modal Dialog ----
+  // ---- Room Picker Modal Dialog (osu!lazer Screen / Wizard Dialog style) ----
   const openRoomDialog = (): void => {
     root.hidden = false;
     if (!options.host.contains(root)) options.host.append(root);
     uiSounds.playDialog('pop-in');
+
     const backdrop = document.createElement('div');
-    backdrop.className = 'rv-modal-backdrop';
+    backdrop.className = 'rv-match-dialog-backdrop';
 
-    const box = document.createElement('div');
-    box.className = 'rv-modal-box rv-match-modal-box';
+    // 1. Top Floating Header Banner
+    const header = document.createElement('header');
+    header.className = 'rv-match-dialog-header';
 
-    const title = document.createElement('h3');
-    title.className = 'rv-modal-title';
+    const headerText = document.createElement('div');
+    headerText.className = 'rv-match-dialog-header-text';
+
+    const title = document.createElement('h2');
+    title.className = 'rv-match-dialog-title';
     title.textContent = t('多人房间回放', 'Multiplayer Match Room');
 
-    const desc = document.createElement('p');
-    desc.className = 'rv-modal-desc';
-    desc.textContent = t('输入 osu! 比赛链接或房间 ID:', 'Enter Match URL or Room ID:');
+    const subtitle = document.createElement('p');
+    subtitle.className = 'rv-match-dialog-subtitle';
+    subtitle.textContent = t('和全世界的玩家一起重温精彩对决！', 'Relive multiplayer match showdowns with players worldwide!');
 
-    const inputRow = document.createElement('div');
-    inputRow.className = 'rv-match-input-row';
+    headerText.append(title, subtitle);
 
+    const closeBtn = document.createElement('button');
+    closeBtn.type = 'button';
+    closeBtn.className = 'rv-match-dialog-close-btn';
+    closeBtn.setAttribute('aria-label', t('关闭', 'Close'));
+    closeBtn.append(icon('close', { className: 'rv-icon' }));
+    uiSounds.attachHoverClick(closeBtn, { hover: 'button', click: false });
+
+    header.append(headerText, closeBtn);
+
+    // 2. Center Card Body (Settings / Form)
+    const body = document.createElement('div');
+    body.className = 'rv-match-dialog-body';
+
+    const sectionHeading = document.createElement('div');
+    sectionHeading.className = 'rv-match-section-heading';
+    const sectionTitle = document.createElement('h3');
+    sectionTitle.className = 'rv-match-section-title';
+    sectionTitle.textContent = t('房间设定', 'Match Setup');
+    sectionHeading.append(sectionTitle);
+
+    const inputGroup = document.createElement('div');
+    inputGroup.className = 'rv-match-input-group';
+
+    const inputLabel = document.createElement('label');
+    inputLabel.className = 'rv-match-input-label';
+    inputLabel.htmlFor = 'rv-match-room-input';
+    inputLabel.textContent = t('比赛链接或房间 ID', 'Match URL or Room ID');
+
+    const inputWrap = document.createElement('div');
+    inputWrap.className = 'rv-match-input-wrap';
+
+    const inputIcon = icon('link', { className: 'rv-icon rv-match-input-icon' });
     const input = document.createElement('input');
+    input.id = 'rv-match-room-input';
     input.type = 'text';
-    input.className = 'rv-modal-input';
-    input.placeholder = 'https://osu.ppy.sh/community/matches/114979109 or 114979109';
+    input.className = 'rv-match-input-field';
+    input.placeholder = t('输入比赛链接（如 https://osu.ppy.sh/community/matches/114979109）或纯数字房间 ID', 'https://osu.ppy.sh/community/matches/114979109 or 114979109');
+    uiSounds.attachHoverClick(input, { hover: 'default', click: false });
+
+    inputWrap.append(inputIcon, input);
+    inputGroup.append(inputLabel, inputWrap);
+
+    const statusMsg = document.createElement('div');
+    statusMsg.className = 'rv-match-dialog-status';
+
+    const notice = document.createElement('div');
+    notice.className = 'rv-match-notice';
+    if (isZh()) {
+      notice.innerHTML = `<span class="rv-match-notice-accent">注意：</span>多人房间回放依赖 <strong class="rv-match-highlight">osu! API</strong> 获取公开对战记录。未登录状态下可解析房间并浏览谱面列表，<strong class="rv-match-highlight">登录 osu! 账号</strong>后可自动下载并播放所有玩家的回放。`;
+    } else {
+      notice.innerHTML = `<span class="rv-match-notice-accent">Note:</span> Multiplayer match replay relies on <strong class="rv-match-highlight">osu! API</strong> for public records. You can browse map lists without login, and <strong class="rv-match-highlight">sign in to osu!</strong> to download and play all participant replays.`;
+    }
+
+    body.append(sectionHeading, inputGroup, statusMsg, notice);
+
+    // 3. Bottom Action Footer Bar
+    const footer = document.createElement('footer');
+    footer.className = 'rv-match-dialog-footer';
+
+    const backBtn = document.createElement('button');
+    backBtn.type = 'button';
+    backBtn.className = 'rv-match-btn-back';
+    const backIcon = icon('arrow-left', { className: 'rv-icon' });
+    const backText = document.createElement('span');
+    backText.textContent = t('返回', 'Back');
+    backBtn.append(backIcon, backText);
+    uiSounds.attachHoverClick(backBtn, { hover: 'button', click: false });
 
     const fetchBtn = document.createElement('button');
     fetchBtn.type = 'button';
-    fetchBtn.className = 'rv-modal-btn rv-modal-btn-primary';
-    fetchBtn.textContent = t('获取房间', 'Fetch Room');
+    fetchBtn.className = 'rv-match-btn-submit';
+    const fetchText = document.createElement('span');
+    fetchText.textContent = t('获取比赛房间！', 'Fetch Match Room!');
+    fetchBtn.append(fetchText);
     uiSounds.attachHoverClick(fetchBtn, { hover: 'button', click: false });
 
-    inputRow.append(input, fetchBtn);
+    footer.append(backBtn, fetchBtn);
 
-    const statusMsg = document.createElement('div');
-    statusMsg.className = 'rv-match-modal-status';
+    backdrop.append(header, body, footer);
+    document.body.append(backdrop);
 
-    const actions = document.createElement('div');
-    actions.className = 'rv-modal-actions';
-
-    const cancelBtn = document.createElement('button');
-    cancelBtn.type = 'button';
-    cancelBtn.className = 'rv-modal-btn rv-modal-btn-cancel';
-    cancelBtn.textContent = t('关闭', 'Close');
-    uiSounds.attachHoverClick(cancelBtn, { hover: 'button', click: false });
-
+    let isClosing = false;
     const closeDialog = (): void => {
+      if (isClosing) return;
+      isClosing = true;
       uiSounds.playDialog('pop-out');
-      backdrop.remove();
+      backdrop.classList.add('rv-dialog-closing');
+      setTimeout(() => {
+        backdrop.remove();
+      }, 160);
     };
 
-    cancelBtn.addEventListener('click', () => {
+    closeBtn.addEventListener('click', () => {
       uiSounds.playClick('dialog-cancel');
       closeDialog();
     });
 
-    actions.append(cancelBtn);
-    box.append(title, desc, inputRow, statusMsg, actions);
-    backdrop.append(box);
-    document.body.append(backdrop);
+    backBtn.addEventListener('click', () => {
+      uiSounds.playClick('dialog-cancel');
+      closeDialog();
+    });
+
+    backdrop.addEventListener('pointerdown', e => {
+      if (e.target === backdrop) {
+        uiSounds.playClick('dialog-cancel');
+        closeDialog();
+      }
+    });
 
     const onFetch = async (): Promise<void> => {
       const val = input.value.trim();
@@ -814,13 +887,15 @@ export function buildMatchView(options: MatchViewOptions): MatchViewHandle {
       if (roomId === null) {
         uiSounds.playError();
         statusMsg.textContent = t('请输入有效的比赛链接或纯数字房间 ID', 'Please enter a valid match URL or numeric room ID');
-        statusMsg.className = 'rv-match-modal-status rv-status-error';
+        statusMsg.className = 'rv-match-dialog-status rv-status-error';
+        input.focus();
         return;
       }
 
       uiSounds.playClick('dialog-ok');
       statusMsg.textContent = t('正在获取比赛房间信息…', 'Fetching match room data…');
-      statusMsg.className = 'rv-match-modal-status';
+      statusMsg.className = 'rv-match-dialog-status rv-status-loading';
+      fetchBtn.disabled = true;
 
       try {
         const room = await fetchMatchRoom(roomId);
@@ -837,9 +912,10 @@ export function buildMatchView(options: MatchViewOptions): MatchViewHandle {
           options.log(`Room "${room.name}" has no maps.`);
         }
       } catch (err) {
+        fetchBtn.disabled = false;
         uiSounds.playError();
         statusMsg.textContent = `${t('获取失败: ', 'Failed to fetch: ')}${err instanceof Error ? err.message : String(err)}`;
-        statusMsg.className = 'rv-match-modal-status rv-status-error';
+        statusMsg.className = 'rv-match-dialog-status rv-status-error';
       }
     };
 
@@ -852,7 +928,7 @@ export function buildMatchView(options: MatchViewOptions): MatchViewHandle {
       }
     });
 
-    setTimeout(() => input.focus(), 50);
+    setTimeout(() => input.focus(), 60);
   };
 
   return {
@@ -1119,22 +1195,308 @@ export function matchViewCss(): string {
   cursor: pointer;
 }
 
-/* Match Room Modal */
-.rv-match-modal-box {
-  width: 480px;
-  max-width: 90vw;
-}
-.rv-match-input-row {
+/* Match Room Modal (osu!lazer Screen / Dialog Style) */
+.rv-match-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
   display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  align-items: center;
+  background: rgba(8, 14, 12, 0.76);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  padding: 24px 20px;
+  box-sizing: border-box;
+  animation: rvMatchBackdropFadeIn 240ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+.rv-match-dialog-backdrop.rv-dialog-closing {
+  animation: rvMatchBackdropFadeOut 180ms cubic-bezier(0.7, 0, 0.84, 0) forwards;
+  pointer-events: none;
+}
+
+/* Top Floating Header Banner */
+.rv-match-dialog-header {
+  width: 680px;
+  max-width: 94vw;
+  background: #182622;
+  border: 1px solid rgba(78, 217, 200, 0.22);
+  border-radius: 10px;
+  padding: 12px 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
+  animation: rvMatchHeaderSlideDown 280ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  user-select: none;
+  box-sizing: border-box;
+}
+.rv-dialog-closing .rv-match-dialog-header {
+  animation: rvMatchHeaderSlideUp 180ms cubic-bezier(0.7, 0, 0.84, 0) forwards;
+}
+.rv-match-dialog-header-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.rv-match-dialog-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+  color: #ffffff;
+  letter-spacing: -0.01em;
+}
+.rv-match-dialog-subtitle {
+  margin: 0;
+  font-size: 11.5px;
+  color: rgba(255, 255, 255, 0.68);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.rv-match-dialog-close-btn {
+  width: 32px;
+  height: 32px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 6px;
+  color: rgba(255, 255, 255, 0.75);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 120ms ease;
+  flex-shrink: 0;
+}
+.rv-match-dialog-close-btn:hover {
+  background: rgba(235, 70, 116, 0.22);
+  border-color: rgba(235, 70, 116, 0.45);
+  color: #ffffff;
+  transform: scale(1.05);
+}
+.rv-match-dialog-close-btn:active {
+  transform: scale(0.95);
+}
+
+/* Center Body Card */
+.rv-match-dialog-body {
+  width: 680px;
+  max-width: 94vw;
+  background: #141c1a;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  box-shadow: 0 20px 48px rgba(0, 0, 0, 0.6);
+  padding: 28px 32px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  margin: auto 0;
+  animation: rvMatchBodyPopIn 300ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  box-sizing: border-box;
+}
+.rv-dialog-closing .rv-match-dialog-body {
+  animation: rvMatchBodyPopOut 180ms cubic-bezier(0.7, 0, 0.84, 0) forwards;
+}
+.rv-match-section-heading {
+  display: flex;
+  align-items: center;
+}
+.rv-match-section-title {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 700;
+  color: #ffffff;
+  letter-spacing: -0.01em;
+}
+.rv-match-input-group {
+  display: flex;
+  flex-direction: column;
   gap: 8px;
 }
-.rv-match-modal-status {
-  font-size: 12.5px;
-  padding: 4px 0;
-  min-height: 18px;
+.rv-match-input-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.7);
+  user-select: none;
 }
-.rv-status-error { color: #ff5566; }
-.rv-status-success { color: #4ed9c8; }
+.rv-match-input-wrap {
+  background: #0d1413;
+  border: 1.5px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  padding: 12px 14px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  transition: border-color 150ms ease, box-shadow 150ms ease, background 150ms ease;
+}
+.rv-match-input-wrap:focus-within {
+  border-color: #2feaa8;
+  box-shadow: 0 0 0 3px rgba(47, 234, 168, 0.18), 0 0 16px rgba(47, 234, 168, 0.12);
+  background: #101917;
+}
+.rv-match-input-icon {
+  color: rgba(255, 255, 255, 0.4);
+  font-size: 16px;
+  flex-shrink: 0;
+  transition: color 150ms ease;
+}
+.rv-match-input-wrap:focus-within .rv-match-input-icon {
+  color: #2feaa8;
+}
+.rv-match-input-field {
+  flex: 1;
+  background: transparent;
+  border: none;
+  color: #ffffff;
+  font-size: 14px;
+  font-family: inherit;
+  outline: none;
+  min-width: 0;
+}
+.rv-match-input-field::placeholder {
+  color: rgba(255, 255, 255, 0.3);
+}
+.rv-match-dialog-status {
+  font-size: 12.5px;
+  min-height: 18px;
+  line-height: 1.4;
+  transition: all 150ms ease;
+}
+.rv-match-dialog-status.rv-status-error {
+  color: #ff5566;
+  font-weight: 600;
+}
+.rv-match-dialog-status.rv-status-loading {
+  color: #4ed9c8;
+  font-weight: 600;
+}
+.rv-match-notice {
+  background: rgba(255, 204, 34, 0.05);
+  border-left: 3px solid #ffcc22;
+  border-radius: 0 8px 8px 0;
+  padding: 12px 16px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: rgba(255, 255, 255, 0.8);
+  user-select: none;
+}
+.rv-match-notice-accent {
+  color: #ffcc22;
+  font-weight: 700;
+}
+.rv-match-highlight {
+  color: #ffcc22;
+  font-weight: 700;
+}
+
+/* Bottom Action Footer Bar */
+.rv-match-dialog-footer {
+  width: 680px;
+  max-width: 94vw;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  animation: rvMatchFooterSlideUp 280ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  user-select: none;
+  box-sizing: border-box;
+}
+.rv-dialog-closing .rv-match-dialog-footer {
+  animation: rvMatchFooterSlideDown 180ms cubic-bezier(0.7, 0, 0.84, 0) forwards;
+}
+.rv-match-btn-back {
+  background: #eb4674;
+  color: #ffffff;
+  border: none;
+  border-radius: 6px;
+  padding: 12px 28px;
+  font-size: 14px;
+  font-weight: 700;
+  font-family: inherit;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  transition: background 120ms ease, transform 120ms cubic-bezier(0.16, 1, 0.3, 1), box-shadow 120ms ease;
+  box-shadow: 0 4px 14px rgba(235, 70, 116, 0.35);
+  flex-shrink: 0;
+}
+.rv-match-btn-back:hover {
+  background: #ff5987;
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(235, 70, 116, 0.5);
+}
+.rv-match-btn-back:active {
+  transform: scale(0.96) translateY(0);
+}
+.rv-match-btn-submit {
+  flex: 1;
+  background: #2feaa8;
+  color: #0c1c17;
+  border: none;
+  border-radius: 6px;
+  padding: 12px 24px;
+  font-size: 15px;
+  font-weight: 800;
+  font-family: inherit;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  transition: background 120ms ease, transform 120ms cubic-bezier(0.16, 1, 0.3, 1), box-shadow 120ms ease;
+  box-shadow: 0 4px 16px rgba(47, 234, 168, 0.35);
+}
+.rv-match-btn-submit:hover:not(:disabled) {
+  background: #46ffbc;
+  transform: translateY(-2px);
+  box-shadow: 0 6px 24px rgba(47, 234, 168, 0.55);
+}
+.rv-match-btn-submit:active:not(:disabled) {
+  transform: scale(0.98) translateY(0);
+}
+.rv-match-btn-submit:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* Lazer Animation Keyframes */
+@keyframes rvMatchBackdropFadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes rvMatchBackdropFadeOut {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+@keyframes rvMatchHeaderSlideDown {
+  from { opacity: 0; transform: translateY(-24px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes rvMatchHeaderSlideUp {
+  from { opacity: 1; transform: translateY(0); }
+  to { opacity: 0; transform: translateY(-24px); }
+}
+@keyframes rvMatchBodyPopIn {
+  from { opacity: 0; transform: scale(0.94) translateY(12px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+@keyframes rvMatchBodyPopOut {
+  from { opacity: 1; transform: scale(1) translateY(0); }
+  to { opacity: 0; transform: scale(0.94) translateY(12px); }
+}
+@keyframes rvMatchFooterSlideUp {
+  from { opacity: 0; transform: translateY(24px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes rvMatchFooterSlideDown {
+  from { opacity: 1; transform: translateY(0); }
+  to { opacity: 0; transform: translateY(24px); }
+}
+
 .rv-row-disabled {
   opacity: 0.45;
   cursor: not-allowed;
