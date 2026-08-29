@@ -8,6 +8,7 @@
  */
 
 import { accessToken } from './auth.js';
+import type { ReplayData } from '../../src/index.js';
 
 /** Thrown when a request needs a session there is none for. */
 export class NotLoggedInError extends Error {
@@ -40,6 +41,37 @@ export function parseScoreRef(input: string): ScoreRef | null {
     id: url[2]!,
     ruleset: url[1] !== undefined ? url[1].toLowerCase() as ScoreRef['ruleset'] : null,
   };
+}
+
+/** Ruleset path segment by `ReplayData.mode`, in osu!'s own order. */
+const RULESET_BY_MODE = ['osu', 'taiko', 'fruits', 'mania'] as const;
+
+/**
+ * The online score a `.osr` was submitted as, or null when it was never submitted.
+ *
+ * This is what lets a locally opened replay show a real pp figure: pp is not in the file, and
+ * deriving it needs a difficulty calculator this engine does not implement, so the number has to
+ * come from the score osu! already recorded. Anything downloaded from osu! — or exported after
+ * submitting — carries the id.
+ *
+ * The two clients write it in different places. lazer puts it in the trailing score block's
+ * `online_id` and leaves the legacy header field at -1; stable writes the legacy field and has no
+ * block at all. Both are signed, and non-positive when there is no online score, so a plain
+ * `> 0` is the test for "was this submitted" in either.
+ *
+ * Legacy stable ids 404 on `/api/v2/scores/{id}` without the ruleset segment, so it is derived
+ * from the replay's own mode. lazer's solo ids resolve bare and are left that way — the replay's
+ * mode is the ruleset it was *played* in, which for a convert is not the beatmap's, and guessing
+ * a segment there would turn a working id into a 404.
+ */
+export function scoreRefFromReplay(replay: ReplayData): ScoreRef | null {
+  const lazerId = replay.scoreInfo?.online_id;
+  if (lazerId !== undefined && lazerId > 0) return { id: String(lazerId), ruleset: null };
+
+  if (replay.replayId > 0n) {
+    return { id: replay.replayId.toString(), ruleset: RULESET_BY_MODE[replay.mode] ?? null };
+  }
+  return null;
 }
 
 /**

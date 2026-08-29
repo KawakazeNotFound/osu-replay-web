@@ -22,7 +22,7 @@ import {
 import { JUDGEMENT_COLOUR, type ResultsPanelData, type StatisticEntry } from '../results/panel.js';
 import type { LoadedReplay } from './flow.js';
 import {
-  downloadReplay, fetchBeatmapOsu, fetchScoreMeta, parseScoreRef,
+  downloadReplay, fetchBeatmapOsu, fetchScoreMeta, parseScoreRef, scoreRefFromReplay,
   type ScoreMeta,
 } from './osuApi.js';
 import { isLoggedIn } from './auth.js';
@@ -328,6 +328,23 @@ function formatPlayedOn(iso: string | null): string | null {
   return `${day} ${month} ${date.getFullYear()} ${time}`;
 }
 
+/**
+ * Star rating for a beatmap we hold locally. It is not written in the `.osu` — osu! computes it,
+ * and this engine has no difficulty calculator — so it comes from the mirrors' index either way.
+ * A hash lookup only, no download.
+ *
+ * Absence is not a failure here: unlike the resolve-the-beatmap path, the archive is already in
+ * hand, so an unindexed or unsubmitted map just leaves the rating unknown.
+ */
+async function starRatingForHash(hash: string): Promise<number | null> {
+  try {
+    return (await resolveBeatmapInfo(hash)).starRating;
+  } catch (err) {
+    console.warn('star rating unavailable for this beatmap hash:', err);
+    return null;
+  }
+}
+
 /** Shared session construction, so every entry point agrees on skin and defaults. */
 async function buildSession(
   replay: ReplayData,
@@ -360,26 +377,52 @@ export async function loadLocalReplay(
   const osrBuffer = osrFile instanceof File ? await readFile(osrFile) : osrFile;
   const replay = await parseReplay(osrBuffer);
 
+  // Started before the beatmap work and awaited after the session is built, so the round trip
+  // overlaps the unzip and decode instead of adding to them. Every part of it is optional: an
+  // unsubmitted replay carries no score id, the request needs a login, and the score may be on
+  // an unranked map with no pp at all. None of that is a reason to fail a load that otherwise
+  // works, so it degrades to null the way loadOnlineScore's own metadata fetch does.
+  const scoreRef = scoreRefFromReplay(replay);
+  const metaPromise: Promise<ScoreMeta | null> = scoreRef !== null && isLoggedIn()
+    ? fetchScoreMeta(scoreRef).catch((err: unknown) => {
+        console.warn('score metadata unavailable for this replay:', err);
+        return null;
+      })
+    : Promise.resolve(null);
+
   let oszBuffer: ArrayBuffer;
-  let resolvedStarRating: number | null = null;
+  let mirrorStarRating: number | null = null;
   if (oszFile !== null) {
     log('reading local beatmap (.osz)…');
-    oszBuffer = oszFile instanceof File ? await readFile(oszFile) : oszFile;
+    // The rating lookup rides alongside reading the archive rather than after it: it is a
+    // metadata request that has nothing to wait for.
+    const [buffer, starRating] = await Promise.all([
+      oszFile instanceof File ? readFile(oszFile) : Promise.resolve(oszFile),
+      starRatingForHash(replay.beatmapHash),
+    ]);
+    oszBuffer = buffer;
+    mirrorStarRating = starRating;
   } else {
     log('finding beatmap online by hash…');
     const info = await resolveBeatmapInfo(replay.beatmapHash);
-    resolvedStarRating = info.starRating;
+    mirrorStarRating = info.starRating;
     oszBuffer = await downloadBeatmapSet(info.setId, log);
   }
 
   const session = await buildSession(replay, oszBuffer, options);
+  const meta = await metaPromise;
 
   return {
     session,
     startAtMs: 0,
     panel: resultsDataFromSession(session, {
       fromHeader: true,
-      starRating: resolvedStarRating,
+      avatarUrl: meta?.avatarUrl ?? null,
+      pp: meta?.pp ?? null,
+      // Both sources report the same nomod figure (see fetchScoreMeta), so either will do —
+      // prefer whichever answered.
+      starRating: meta?.starRating ?? mirrorStarRating,
+      playedOn: formatPlayedOn(meta?.endedAt ?? null),
     }),
   };
 }
@@ -480,13 +523,20 @@ export async function loadLocalAuto(
   const beatmap = parseBeatmap(new TextDecoder().decode(osuBytes));
   log(`generating Auto replay for ${beatmap.title} [${beatmap.version}]…`);
   const hash = md5(osuBytes);
+  // Started here and awaited after the session is built: the beatmap is already local, so this
+  // lookup has nothing to wait for and no reason to delay playback.
+  const starRatingPromise = starRatingForHash(hash);
   const replay = generateAutoReplayForBeatmap(beatmap, hash);
   const session = await buildSession(replay, oszBuffer, options);
 
   return {
     session,
     startAtMs: 0,
-    panel: resultsDataFromSession(session, { fromHeader: false }),
+    // No online score behind an Auto replay, so pp stays unknown however the map was obtained.
+    panel: resultsDataFromSession(session, {
+      fromHeader: false,
+      starRating: await starRatingPromise,
+    }),
   };
 }
 
@@ -508,7 +558,10 @@ export async function loadAutoFromBeatmap(
 
   log('finding the beatmap set…');
   const hash = md5(osuBytes);
-  const oszBuffer = await downloadBeatmapSet(await setIdForHash(hash), log);
+  // resolveBeatmapInfo rather than setIdForHash: the same lookup already carries the star rating,
+  // which the .osu does not, so keeping both costs no extra request.
+  const info = await resolveBeatmapInfo(hash);
+  const oszBuffer = await downloadBeatmapSet(info.setId, log);
 
   const replay = generateAutoReplayForBeatmap(beatmap, hash);
   const session = await buildSession(replay, oszBuffer, options);
@@ -516,8 +569,9 @@ export async function loadAutoFromBeatmap(
   return {
     session,
     startAtMs: 0,
-    // Synthesised: no header totals to trust, so counts come from the analysis.
-    panel: resultsDataFromSession(session, { fromHeader: false }),
+    // Synthesised: no header totals to trust, so counts come from the analysis. There is no
+    // online score behind an Auto replay, so pp stays unknown.
+    panel: resultsDataFromSession(session, { fromHeader: false, starRating: info.starRating }),
   };
 }
 
