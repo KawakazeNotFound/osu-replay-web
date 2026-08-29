@@ -11,6 +11,7 @@
 
 import type { CoreSession } from '../../src/index.js';
 import type { ResultsPanelData } from '../results/panel.js';
+import { getDifficultyColor } from '../results/theme.js';
 import { uiSounds } from './uiSounds.js';
 import { t } from './i18n.js';
 
@@ -88,35 +89,33 @@ export function playerLoaderCss(): string {
   transition: opacity 300ms cubic-bezier(0.64, 0, 0.78, 0), transform 600ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
-/* osu! Logo */
+/* Replay Viewer Brand Emblem */
 .pl-logo-wrapper {
-  margin-bottom: 12px;
+  margin-bottom: 14px;
 }
 .pl-logo {
-  width: 88px;
-  height: 88px;
+  width: 78px;
+  height: 78px;
   border-radius: 50%;
-  background: #eb4674;
-  border: 3.5px solid rgba(255, 255, 255, 0.95);
-  box-shadow: 0 4px 26px rgba(235, 70, 116, 0.55), inset 0 0 12px rgba(255, 255, 255, 0.25);
+  background: linear-gradient(135deg, #182e27, #0e1e19);
+  border: 3px solid #2feaa8;
+  box-shadow: 0 0 26px rgba(47, 234, 168, 0.45), inset 0 0 14px rgba(47, 234, 168, 0.2);
   display: flex;
   align-items: center;
   justify-content: center;
+  color: #2feaa8;
   animation: plLogoBeat 800ms ease-in-out infinite;
 }
-.pl-logo-text {
-  font-size: 30px;
-  font-weight: 700;
-  color: #ffffff;
-  letter-spacing: -0.5px;
-  transform: rotate(-6deg);
-  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+.pl-logo svg {
+  width: 40px;
+  height: 40px;
+  filter: drop-shadow(0 2px 8px rgba(47, 234, 168, 0.6));
 }
 
 @keyframes plLogoBeat {
   0% { transform: scale(1); }
-  35% { transform: scale(1.05); }
-  70% { transform: scale(0.99); }
+  35% { transform: scale(1.06); }
+  70% { transform: scale(0.98); }
   100% { transform: scale(1); }
 }
 
@@ -537,10 +536,12 @@ export function buildPlayerLoader(options: PlayerLoaderOptions): PlayerLoaderHan
   logoWrapper.className = 'pl-logo-wrapper';
   const logo = document.createElement('div');
   logo.className = 'pl-logo';
-  const logoText = document.createElement('span');
-  logoText.className = 'pl-logo-text';
-  logoText.textContent = 'osu!';
-  logo.append(logoText);
+  logo.innerHTML = `
+    <svg viewBox="0 0 24 24" width="40" height="40" fill="currentColor">
+      <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2.2" fill="none" />
+      <polygon points="9.5,7.5 16.5,12 9.5,16.5" />
+    </svg>
+  `;
   logoWrapper.append(logo);
 
   const metadata = document.createElement('div');
@@ -573,17 +574,25 @@ export function buildPlayerLoader(options: PlayerLoaderOptions): PlayerLoaderHan
   metaDiff.className = 'pl-meta-difficulty';
   metaDiff.textContent = panel.difficulty || 'Normal';
 
+  const diffColor = getDifficultyColor(panel.starRating);
+
   const metaBadgeRow = document.createElement('div');
   metaBadgeRow.className = 'pl-meta-badge-row';
   const starBadge = document.createElement('div');
   starBadge.className = 'pl-star-badge';
+  starBadge.style.background = diffColor.bg;
+  starBadge.style.color = diffColor.text;
+  if (diffColor.isHigh) {
+    starBadge.style.boxShadow = '0 0 10px rgba(255, 215, 0, 0.45)';
+    starBadge.style.border = '1px solid rgba(255, 215, 0, 0.7)';
+  }
   const starIcon = document.createElement('span');
   starIcon.className = 'pl-star-icon';
   starIcon.textContent = '★';
   const starVal = document.createElement('span');
   starVal.textContent = (panel.starRating !== null && panel.starRating !== undefined)
     ? panel.starRating.toFixed(2)
-    : '4.44';
+    : '0.00';
   starBadge.append(starIcon, starVal);
   metaBadgeRow.append(starBadge);
 

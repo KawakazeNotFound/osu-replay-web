@@ -17,7 +17,7 @@ import { uiSounds } from '../player/uiSounds.js';
 import { t } from '../player/i18n.js';
 import {
   FONT, HIT_RESULT_COLOUR, LAYOUT, PANEL, PANEL_COLOUR, PERFECT_GRADIENT, RANK_COLOUR,
-  formatAccuracy, formatPP, formatScore,
+  formatAccuracy, formatPP, formatScore, getDifficultyColor,
 } from './theme.js';
 
 /** A statistic shown as a big number under an uppercase pill, optionally with a `/max`. */
@@ -185,8 +185,15 @@ export function buildResultsPanel(
   // 4. Star rating row. Omitted entirely when unknown, rather than showing a placeholder that
   //    would read as a real difficulty value.
   if (data.starRating !== null) {
+    const diffColor = getDifficultyColor(data.starRating);
     const starRow = div('rs-star-row');
     const badge = div('rs-star-badge');
+    badge.style.background = diffColor.bg;
+    badge.style.color = diffColor.text;
+    if (diffColor.isHigh) {
+      badge.style.boxShadow = '0 0 10px rgba(255, 215, 0, 0.45)';
+      badge.style.border = '1px solid rgba(255, 215, 0, 0.7)';
+    }
     // Drawn rather than the `★` glyph, which some platforms render as a full-colour emoji.
     badge.append(icon('star', { className: 'rv-icon rs-star-glyph' }));
     badge.append(text('span', 'rs-star-value', data.starRating.toFixed(2)));

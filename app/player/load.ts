@@ -195,7 +195,9 @@ export function resultsDataFromSession(
     // which is what PERFECT actually means — so use that, and leave the denominator out.
     beatmapMaxCombo: meta.fromHeader && replay.perfect ? maxCombo : null,
     pp: meta.pp ?? null,
-    starRating: meta.starRating ?? null,
+    starRating: (meta.starRating !== undefined && meta.starRating !== null)
+      ? meta.starRating
+      : estimateStarRating(beatmap),
     judgements,
     subJudgements,
     playedOn: meta.playedOn ?? null,
@@ -236,16 +238,39 @@ async function downloadBeatmapSet(setId: number, log: LogFn): Promise<ArrayBuffe
   throw new Error(`no mirror could supply beatmap set ${setId} — ${failures.join(' | ')}`);
 }
 
-/** Resolves a beatmap MD5 to its set id via osu.direct/Nerinyan/Sayobot index. */
-async function setIdForHash(hash: string): Promise<number> {
+/** Estimates star rating from parsed beatmap attributes if official star rating is absent. */
+export function estimateStarRating(beatmap: BeatmapData): number {
+  const od = beatmap.overallDifficulty || 5;
+  const cs = beatmap.circleSize || 4;
+  const ar = beatmap.approachRate || 5;
+  const totalObjects = beatmap.hitObjects?.length ?? 0;
+  if (totalObjects === 0) return 0.0;
+
+  const firstTime = beatmap.hitObjects[0]?.time ?? 0;
+  const lastTime = beatmap.hitObjects[totalObjects - 1]?.time ?? 60000;
+  const drainDurationSeconds = Math.max(10, (lastTime - firstTime) / 1000);
+  const density = totalObjects / drainDurationSeconds; // objects per second
+
+  // Base difficulty formula combining density, CS, AR, and OD
+  let sr = 0.5 + (density * 0.48) + (od * 0.12) + (cs * 0.10) + (ar > 8 ? (ar - 8) * 0.15 : 0);
+  return Math.max(0.1, Math.min(10.0, Math.round(sr * 100) / 100));
+}
+
+/** Resolves a beatmap MD5 to its set id and star rating via osu.direct/Sayobot/Nerinyan. */
+async function resolveBeatmapInfo(hash: string): Promise<{ setId: number; starRating: number | null }> {
   // 1. Try osu.direct
   try {
     const response = await fetch(`https://osu.direct/api/v2/md5/${hash}`, {
       headers: { accept: 'application/json' },
     });
     if (response.ok) {
-      const data = await response.json() as { beatmapset_id?: number };
-      if (typeof data.beatmapset_id === 'number') return data.beatmapset_id;
+      const data = await response.json() as { beatmapset_id?: number; difficulty_rating?: number };
+      if (typeof data.beatmapset_id === 'number') {
+        return {
+          setId: data.beatmapset_id,
+          starRating: typeof data.difficulty_rating === 'number' ? data.difficulty_rating : null,
+        };
+      }
     }
   } catch (err) {
     console.warn('osu.direct hash lookup failed:', err);
@@ -255,8 +280,13 @@ async function setIdForHash(hash: string): Promise<number> {
   try {
     const response = await fetch(`https://api.sayobot.cn/v2/beatmapinfo?K=${hash}&T=1`);
     if (response.ok) {
-      const data = await response.json() as { data?: { sid?: number } };
-      if (typeof data?.data?.sid === 'number') return data.data.sid;
+      const data = await response.json() as { data?: { sid?: number; star?: number } };
+      if (typeof data?.data?.sid === 'number') {
+        return {
+          setId: data.data.sid,
+          starRating: typeof data.data.star === 'number' ? data.data.star : null,
+        };
+      }
     }
   } catch (err) {
     console.warn('sayobot hash lookup failed:', err);
@@ -266,14 +296,25 @@ async function setIdForHash(hash: string): Promise<number> {
   try {
     const response = await fetch(`https://api.nerinyan.moe/api/map/${hash}`);
     if (response.ok) {
-      const data = await response.json() as { beatmapset_id?: number };
-      if (typeof data.beatmapset_id === 'number') return data.beatmapset_id;
+      const data = await response.json() as { beatmapset_id?: number; difficulty_rating?: number };
+      if (typeof data.beatmapset_id === 'number') {
+        return {
+          setId: data.beatmapset_id,
+          starRating: typeof data.difficulty_rating === 'number' ? data.difficulty_rating : null,
+        };
+      }
     }
   } catch (err) {
     console.warn('nerinyan hash lookup failed:', err);
   }
 
   throw new Error('the mirror index does not have this beatmap hash; please provide the .osz file');
+}
+
+/** Resolves a beatmap MD5 to its set id via osu.direct/Nerinyan/Sayobot index. */
+async function setIdForHash(hash: string): Promise<number> {
+  const info = await resolveBeatmapInfo(hash);
+  return info.setId;
 }
 
 /** osu!'s own played-on wording: `Played on 25 August 2026 6:42 PM`. */
@@ -320,13 +361,15 @@ export async function loadLocalReplay(
   const replay = await parseReplay(osrBuffer);
 
   let oszBuffer: ArrayBuffer;
+  let resolvedStarRating: number | null = null;
   if (oszFile !== null) {
     log('reading local beatmap (.osz)…');
     oszBuffer = oszFile instanceof File ? await readFile(oszFile) : oszFile;
   } else {
     log('finding beatmap online by hash…');
-    const setId = await setIdForHash(replay.beatmapHash);
-    oszBuffer = await downloadBeatmapSet(setId, log);
+    const info = await resolveBeatmapInfo(replay.beatmapHash);
+    resolvedStarRating = info.starRating;
+    oszBuffer = await downloadBeatmapSet(info.setId, log);
   }
 
   const session = await buildSession(replay, oszBuffer, options);
@@ -334,7 +377,10 @@ export async function loadLocalReplay(
   return {
     session,
     startAtMs: 0,
-    panel: resultsDataFromSession(session, { fromHeader: true }),
+    panel: resultsDataFromSession(session, {
+      fromHeader: true,
+      starRating: resolvedStarRating,
+    }),
   };
 }
 

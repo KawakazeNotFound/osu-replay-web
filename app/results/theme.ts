@@ -174,3 +174,69 @@ export function rankLetter(rank: string): string {
   if (rank === 'X' || rank === 'XH') return 'SS';
   return rank;
 }
+
+interface ColorStop {
+  stars: number;
+  r: number;
+  g: number;
+  b: number;
+}
+
+/**
+ * osu!lazer official difficulty color spectrum (`OsuColour.STAR_DIFFICULTY_SPECTRUM`).
+ * Maps 0.1* -> 10.0* to seamless RGB transitions.
+ */
+export const STAR_SPECTRUM: readonly ColorStop[] = [
+  { stars: 0.1, r: 0x42, g: 0x90, b: 0xfb }, // #4290fb (Easy)
+  { stars: 1.25, r: 0x4f, g: 0xc0, b: 0xff }, // #4fc0ff
+  { stars: 2.0, r: 0x4f, g: 0xff, b: 0xd5 }, // #4fffd5 (Normal)
+  { stars: 2.5, r: 0x7c, g: 0xff, b: 0x4f }, // #7cff4f
+  { stars: 3.3, r: 0xf6, g: 0xf0, b: 0x5c }, // #f6f05c (Hard)
+  { stars: 4.2, r: 0xff, g: 0x80, b: 0x68 }, // #ff8068 (Insane)
+  { stars: 4.9, r: 0xff, g: 0x4e, b: 0x6f }, // #ff4e6f
+  { stars: 5.8, r: 0xc6, g: 0x45, b: 0xb8 }, // #c645b8 (Expert)
+  { stars: 6.7, r: 0x65, g: 0x63, b: 0xde }, // #6563de (Master)
+  { stars: 7.7, r: 0x18, g: 0x15, b: 0x8e }, // #18158e (Grandmaster)
+  { stars: 9.0, r: 0x12, g: 0x12, b: 0x18 }, // #121218 (Extra)
+  { stars: 10.0, r: 0x00, g: 0x00, b: 0x00 }, // Black
+];
+
+export interface DifficultyColorInfo {
+  readonly bg: string;
+  readonly text: string;
+  readonly isHigh: boolean;
+}
+
+export function getDifficultyColor(starRating: number | null | undefined): DifficultyColorInfo {
+  if (starRating === null || starRating === undefined || Number.isNaN(starRating)) {
+    return { bg: '#4290fb', text: '#ffffff', isHigh: false };
+  }
+
+  const s = Math.max(0.1, Math.min(10.0, starRating));
+
+  let lower = STAR_SPECTRUM[0]!;
+  let upper = STAR_SPECTRUM[STAR_SPECTRUM.length - 1]!;
+
+  for (let i = 0; i < STAR_SPECTRUM.length - 1; i++) {
+    const a = STAR_SPECTRUM[i]!;
+    const b = STAR_SPECTRUM[i + 1]!;
+    if (s >= a.stars && s <= b.stars) {
+      lower = a;
+      upper = b;
+      break;
+    }
+  }
+
+  const range = upper.stars - lower.stars;
+  const t = range <= 0 ? 0 : (s - lower.stars) / range;
+
+  const r = Math.round(lower.r + t * (upper.r - lower.r));
+  const g = Math.round(lower.g + t * (upper.g - lower.g));
+  const b = Math.round(lower.b + t * (upper.b - lower.b));
+
+  const hex = `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
+  const isHigh = starRating >= 8.5;
+  const textColor = (s >= 2.0 && s <= 3.8) ? '#111827' : '#ffffff';
+
+  return { bg: hex, text: textColor, isHigh };
+}
