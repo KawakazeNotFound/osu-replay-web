@@ -73,20 +73,7 @@ export function buildMenuBar(options: MenuBarOptions): MenuBarHandle {
   });
   leftGroup.append(brand);
 
-  // 2. Home icon button
-  const homeBtn = document.createElement('button');
-  homeBtn.type = 'button';
-  homeBtn.className = 'rv-top-icon-btn rv-top-home-btn';
-  homeBtn.title = t('主页面', 'Home');
-  homeBtn.append(icon('home', { className: 'rv-icon' }));
-  uiSounds.attachHoverClick(homeBtn, { hover: 'button', click: false });
-  homeBtn.addEventListener('click', () => {
-    uiSounds.playClick('button');
-    options.onExit?.();
-  });
-  leftGroup.append(homeBtn);
-
-  // 3. Mode Tabs (Single Replay, Auto Play, Multiplayer Match)
+  // 2. Mode Tabs (Single Replay, Auto Play, Multiplayer Match)
   const modeTabs = document.createElement('div');
   modeTabs.className = 'rv-top-mode-tabs';
 
@@ -436,10 +423,33 @@ export function buildMenuBar(options: MenuBarOptions): MenuBarHandle {
 
           const subItems = typeof item.children === 'function' ? item.children() : item.children!;
           const childMenu = renderDropdown(subItems, depth + 1);
-          childMenu.style.top = `${row.offsetTop}px`;
-          childMenu.style.left = `${row.offsetLeft + row.offsetWidth}px`;
           menuEl.append(childMenu);
           activeChildMenu = childMenu;
+
+          // Intelligent positioning: check if expanding to the right would overflow the screen
+          const menuRect = menuEl.getBoundingClientRect();
+          const rowRect = row.getBoundingClientRect();
+          const estimatedSubWidth = childMenu.offsetWidth || 190;
+
+          if (menuRect.right + estimatedSubWidth > window.innerWidth || menuRect.left > window.innerWidth / 2) {
+            // Open towards the left!
+            childMenu.style.left = 'auto';
+            childMenu.style.right = `${menuEl.offsetWidth}px`;
+            childMenu.classList.add('rv-submenu-left');
+          } else {
+            // Open towards the right!
+            childMenu.style.left = `${row.offsetLeft + row.offsetWidth}px`;
+            childMenu.style.right = 'auto';
+            childMenu.classList.remove('rv-submenu-left');
+          }
+
+          // Smart vertical clamping: ensure submenu does not overflow bottom edge
+          let topPos = row.offsetTop;
+          const estimatedSubHeight = childMenu.offsetHeight || (subItems.length * 32);
+          if (rowRect.top + estimatedSubHeight > window.innerHeight - 10) {
+            topPos = Math.max(0, row.offsetTop - estimatedSubHeight + row.offsetHeight);
+          }
+          childMenu.style.top = `${topPos}px`;
         };
 
         row.addEventListener('pointerenter', () => {
@@ -924,6 +934,11 @@ export function menuBarCss(): string {
   animation: rvSubmenuUnroll 160ms cubic-bezier(0.05, 0.9, 0.1, 1) forwards;
 }
 
+.rv-dropdown-menu.rv-submenu.rv-submenu-left {
+  transform-origin: top right;
+  animation: rvSubmenuUnrollLeft 160ms cubic-bezier(0.05, 0.9, 0.1, 1) forwards;
+}
+
 /* Scroll container for long list of presets */
 .rv-menu-scroll-container {
   max-height: 360px;
@@ -958,6 +973,17 @@ export function menuBarCss(): string {
 }
 
 @keyframes rvSubmenuUnroll {
+  0% {
+    transform: scaleX(0.7) scaleY(0.7);
+    opacity: 0.3;
+  }
+  100% {
+    transform: scaleX(1) scaleY(1);
+    opacity: 1;
+  }
+}
+
+@keyframes rvSubmenuUnrollLeft {
   0% {
     transform: scaleX(0.7) scaleY(0.7);
     opacity: 0.3;

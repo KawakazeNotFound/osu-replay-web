@@ -27,6 +27,7 @@ const ENTRIES = [
   'player/match.ts',
   'player/matchRoom.ts',
   'player/matchView.ts',
+  'player/singleReplayView.ts',
   'player/difficultyPicker.ts',
   'player/uiSounds.ts',
   'player/notifications.ts',

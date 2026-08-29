@@ -236,15 +236,44 @@ async function downloadBeatmapSet(setId: number, log: LogFn): Promise<ArrayBuffe
   throw new Error(`no mirror could supply beatmap set ${setId} — ${failures.join(' | ')}`);
 }
 
-/** Resolves a beatmap MD5 to its set id via osu.direct's public index. */
+/** Resolves a beatmap MD5 to its set id via osu.direct/Nerinyan/Sayobot index. */
 async function setIdForHash(hash: string): Promise<number> {
-  const response = await fetch(`https://osu.direct/api/v2/md5/${hash}`, {
-    headers: { accept: 'application/json' },
-  });
-  if (!response.ok) throw new Error(`md5 lookup failed (HTTP ${response.status})`);
-  const setId = (await response.json() as { beatmapset_id?: number }).beatmapset_id;
-  if (typeof setId !== 'number') throw new Error('the mirror does not index this beatmap');
-  return setId;
+  // 1. Try osu.direct
+  try {
+    const response = await fetch(`https://osu.direct/api/v2/md5/${hash}`, {
+      headers: { accept: 'application/json' },
+    });
+    if (response.ok) {
+      const data = await response.json() as { beatmapset_id?: number };
+      if (typeof data.beatmapset_id === 'number') return data.beatmapset_id;
+    }
+  } catch (err) {
+    console.warn('osu.direct hash lookup failed:', err);
+  }
+
+  // 2. Try Sayobot
+  try {
+    const response = await fetch(`https://api.sayobot.cn/v2/beatmapinfo?K=${hash}&T=1`);
+    if (response.ok) {
+      const data = await response.json() as { data?: { sid?: number } };
+      if (typeof data?.data?.sid === 'number') return data.data.sid;
+    }
+  } catch (err) {
+    console.warn('sayobot hash lookup failed:', err);
+  }
+
+  // 3. Try Nerinyan
+  try {
+    const response = await fetch(`https://api.nerinyan.moe/api/map/${hash}`);
+    if (response.ok) {
+      const data = await response.json() as { beatmapset_id?: number };
+      if (typeof data.beatmapset_id === 'number') return data.beatmapset_id;
+    }
+  } catch (err) {
+    console.warn('nerinyan hash lookup failed:', err);
+  }
+
+  throw new Error('the mirror index does not have this beatmap hash; please provide the .osz file');
 }
 
 /** osu!'s own played-on wording: `Played on 25 August 2026 6:42 PM`. */
@@ -279,25 +308,32 @@ async function buildSession(
   });
 }
 
-/** A .osr with its .osz — no network at all. */
+/** A .osr with an optional .osz (if omitted, beatmap is automatically resolved from online mirror via hash). */
 export async function loadLocalReplay(
-  osrFile: File,
-  oszFile: File | null,
+  osrFile: File | ArrayBuffer,
+  oszFile: File | ArrayBuffer | null,
   options: LoadOptions,
 ): Promise<LoadedReplay> {
-  if (oszFile === null) {
-    throw new Error('a .osz is required alongside the .osr in this dev page');
-  }
-  options.log('reading files…');
-  const [osrBuffer, oszBuffer] = await Promise.all([readFile(osrFile), readFile(oszFile)]);
+  const { log } = options;
+  log('reading replay (.osr)…');
+  const osrBuffer = osrFile instanceof File ? await readFile(osrFile) : osrFile;
   const replay = await parseReplay(osrBuffer);
+
+  let oszBuffer: ArrayBuffer;
+  if (oszFile !== null) {
+    log('reading local beatmap (.osz)…');
+    oszBuffer = oszFile instanceof File ? await readFile(oszFile) : oszFile;
+  } else {
+    log('finding beatmap online by hash…');
+    const setId = await setIdForHash(replay.beatmapHash);
+    oszBuffer = await downloadBeatmapSet(setId, log);
+  }
+
   const session = await buildSession(replay, oszBuffer, options);
 
   return {
     session,
     startAtMs: 0,
-    // A local replay carries no pp and no star rating, and the panel hides both rather than
-    // inventing them.
     panel: resultsDataFromSession(session, { fromHeader: true }),
   };
 }

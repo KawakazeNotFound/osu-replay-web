@@ -170,6 +170,7 @@
     import { DEFAULT_SKIN, getAllSkinNames, importCustomSkinFile } from '/player/skins.js';
     import { buildMenuBar, menuBarCss, notify, notificationsCss } from '/player/menubar.js';
     import { buildMatchView, matchViewCss } from '/player/matchView.js';
+    import { buildSingleReplayView } from '/player/singleReplayView.js';
     import { uiSounds } from '/player/uiSounds.js';
     import { chooseLocalDifficulty, difficultyPickerCss } from '/player/difficultyPicker.js';
     import { t } from '/player/i18n.js';
@@ -250,6 +251,7 @@
         say(t('正在加载…', 'loading…'));
         const replay = await loader(loadOptions());
         isHome = false;
+        singleReplayView.close();
         subSettingsBtn.style.display = 'inline-flex';
         flow.present(replay);
         say(t('准备就绪 — 点击观看回放', 'ready — press Watch replay'));
@@ -259,7 +261,10 @@
           return;
         }
         console.error(err);
-        say(`${t('加载失败: ', 'failed: ')}${err instanceof Error ? err.message : String(err)}`);
+        const errMsg = err instanceof Error ? err.message : String(err);
+        singleReplayView.setStatus(errMsg, 'error');
+        say(`${t('加载失败: ', 'failed: ')}${errMsg}`);
+        throw err;
       }
     }
 
@@ -416,6 +421,28 @@
       },
     });
 
+    const singleReplayView = buildSingleReplayView({
+      host: stageEl,
+      onExit: () => {
+        navigateToRoute('home');
+      },
+      onLoadOsr: async (osrFile, oszFile) => {
+        pendingOsr = osrFile;
+        pendingOsz = oszFile;
+        await run(options => loadLocalReplay(osrFile, oszFile, options));
+      },
+      onLoadAutoOsz: async oszFile => {
+        await run(options => loadLocalAuto(oszFile, options));
+      },
+      onLoadUrl: async url => {
+        if (currentMode === 'auto') {
+          await run(options => loadAutoFromBeatmap(url, options));
+        } else {
+          await run(options => loadFromInput(url, options));
+        }
+      },
+    });
+
     const menuBar = buildMenuBar({
       onSelectMode: mode => {
         navigateToRoute(mode);
@@ -437,6 +464,7 @@
           void run(options => loadLocalAuto(file, options));
         } else {
           pendingOsz = file;
+          singleReplayView.setPendingFiles(pendingOsr, pendingOsz);
           if (pendingOsr !== null) {
             say(t(`已载入 ${file.name}，正在启动本地回放…`, `Loaded ${file.name}, starting local replay...`));
             void run(options => loadLocalReplay(pendingOsr, pendingOsz, options));
@@ -447,12 +475,9 @@
       },
       onImportOsr: file => {
         pendingOsr = file;
-        if (pendingOsz !== null) {
-          say(t(`已载入 ${file.name}，正在启动本地回放…`, `Loaded ${file.name}, starting local replay...`));
-          void run(options => loadLocalReplay(pendingOsr, pendingOsz, options));
-        } else {
-          say(t(`已载入 .osr 回放: ${file.name}，请继续导入 .osz 谱面包`, `Loaded .osr: ${file.name} (now import .osz beatmap)`));
-        }
+        singleReplayView.setPendingFiles(pendingOsr, pendingOsz);
+        say(t(`已载入 ${file.name}，正在解析回放并查找谱面…`, `Loaded ${file.name}, parsing replay & resolving beatmap...`));
+        void run(options => loadLocalReplay(pendingOsr, pendingOsz, options));
       },
       onSelectSkin: skinName => {
         selectedSkin = skinName;
@@ -510,27 +535,7 @@
     document.body.insertBefore(subHeader, stageEl);
 
     function updateSubHeaderForMode(mode) {
-      if (mode === 'auto') {
-        subBackLabel.textContent = t('退出演示', 'Exit Auto');
-        subTitle.textContent = t('自动演示', 'Auto Play');
-        subDesc.textContent = t(
-          '导入本地未发布 .osz 谱面或输入在线链接/ID，自动生成满分演示',
-          'Import local .osz or enter online URL/ID to generate auto play',
-        );
-        subImportLabel.textContent = t('导入谱面… (.osz)', 'Import Beatmap… (.osz)');
-        subHeader.hidden = false;
-      } else if (mode === 'replay') {
-        subBackLabel.textContent = t('退出回放', 'Exit Replay');
-        subTitle.textContent = t('单人回放', 'Single Replay');
-        subDesc.textContent = t(
-          '导入本地 .osr + .osz 或输入成绩链接/ID进行回放',
-          'Import local .osr + .osz or enter score URL/ID for replay',
-        );
-        subImportLabel.textContent = t('从本地导入…', 'Import Local…');
-        subHeader.hidden = false;
-      } else {
-        subHeader.hidden = true;
-      }
+      subHeader.hidden = true;
     }
 
     function navigateToRoute(route) {
@@ -545,10 +550,12 @@
     function applyCurrentRoute() {
       const hash = location.hash.replace(/^#\/?/, '').trim().toLowerCase();
       subSettingsBtn.style.display = 'none';
+      subHeader.hidden = true;
+
       if (hash === 'match') {
         currentMode = 'match';
         isHome = false;
-        subHeader.hidden = true;
+        singleReplayView.close();
         flow.clear();
         menuBar.updateActiveMode('match');
         matchView.openRoomDialog();
@@ -558,25 +565,25 @@
         matchView.destroy();
         flow.clear();
         menuBar.updateActiveMode('auto');
-        updateSubHeaderForMode('auto');
+        singleReplayView.open('auto');
       } else if (hash === 'replay') {
         currentMode = 'replay';
         isHome = false;
         matchView.destroy();
+        flow.clear();
         menuBar.updateActiveMode('replay');
-        updateSubHeaderForMode('replay');
+        singleReplayView.open('replay');
       } else {
-        // Home
+        // Home default -> Single Replay Wizard
         currentMode = 'replay';
         isHome = true;
-        subHeader.hidden = true;
         matchView.destroy();
         flow.clear();
         menuBar.updateActiveMode('replay');
+        singleReplayView.open('replay');
         lastLoader = null;
         pendingOsr = null;
         pendingOsz = null;
-        say(t('已返回主页面', 'Returned to home page'));
       }
     }
 
