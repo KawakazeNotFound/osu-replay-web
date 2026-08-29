@@ -80,6 +80,17 @@ npx wrangler deploy
 if upstream's proxy URL changes (rather than silently shipping a build that talks to the
 wrong host), and warns if no client id is configured.
 
+Both builds write content-hashed JS into `site/`, and both name it `chunk-<HASH>.js`, so a
+rebuild leaves the previous generation behind and `wrangler deploy` ships every dead copy —
+78 of them had accumulated before this was noticed. `build:app` now ends by pruning them, and
+`npm run prune:site` (add `--dry-run` to look first) does it on its own. It goes by
+reachability rather than by filename, because a filename does not say which build wrote it:
+anything whose content-hashed name appears nowhere in any page or reachable script cannot be
+requested and is therefore dead. A stable name like `player/load.js` is never a candidate.
+
+> Reminder for frontend work: those stable names mean a browser will happily keep serving a
+> cached `player/load.js` after a rebuild. Hard-reload before concluding a change did not land.
+
 ## How the Worker splits traffic
 
 `assets.run_worker_first` in `wrangler.jsonc` lists only `/osu-proxy/*` and `/auth-ping`;

@@ -8,6 +8,7 @@
 import esbuild from 'esbuild';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { pruneSite } from './prune-site.mjs';
 
 const APP_DIR = 'app';
 const SITE_DIR = 'site';
@@ -163,5 +164,13 @@ try {
 await fs.rm(path.join(SITE_DIR, 'rosu-pp'), { recursive: true, force: true });
 await fs.mkdir(path.join(SITE_DIR, 'rosu-pp'), { recursive: true });
 await fs.copyFile(wasmFrom, path.join(SITE_DIR, 'rosu-pp', WASM_NAME));
+
+// Content-hashed names mean every rebuild writes new chunks beside the old ones, and neither
+// build can clean up by pattern: `chunk-*.js` does not say whether esbuild or the captured page
+// wrote it. Runs last, once the pages exist, because reachability is measured from them.
+const { total, kept, dead } = await pruneSite({ siteDir: SITE_DIR });
+if (dead.length > 0) {
+  console.log(`pruned ${dead.length} unreachable chunk(s) of ${total} (${kept} still referenced)`);
+}
 
 console.log('built modern replay viewer into site/ (default /, /replay, /preview, and /app/dev)');
