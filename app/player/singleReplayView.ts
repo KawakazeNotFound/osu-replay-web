@@ -45,6 +45,15 @@ function ensureSingleReplayCss(): void {
 export function buildSingleReplayView(options: SingleReplayViewOptions): SingleReplayViewHandle {
   ensureSingleReplayCss();
 
+  uiSounds.preload([
+    'bss-stage-0',
+    'bss-stage-1',
+    'bss-stage-2',
+    'bss-stage-3',
+    'bss-progress',
+    'bss-complete',
+  ]);
+
   let currentMode: 'replay' | 'auto' = 'replay';
   let pendingOsr: File | null = null;
   let pendingOsz: File | null = null;
@@ -388,10 +397,11 @@ export function buildSingleReplayView(options: SingleReplayViewOptions): SingleR
       activeEl.barFill.style.width = `${(activeEl.currentProgress * 100).toFixed(1)}%`;
 
       const now = performance.now();
-      if (now - lastProgressSoundTime > 340 && activeEl.currentProgress < 0.75) {
+      if (now - lastProgressSoundTime > 130 && activeEl.currentProgress < 0.75) {
         lastProgressSoundTime = now;
-        const pitch = 1.0 + activeEl.currentProgress * 0.45;
-        uiSounds.play('bss-progress', { pitch, volume: 0.4 });
+        // Ascending dynamic pitch as progress creeps up (0.85 -> 1.55)
+        const pitch = 0.85 + activeEl.currentProgress * 0.9;
+        uiSounds.play('bss-progress', { pitch, volume: 0.55 });
       }
 
       activeEl.animFrameId = requestAnimationFrame(frame);
@@ -426,6 +436,9 @@ export function buildSingleReplayView(options: SingleReplayViewOptions): SingleR
     el.barFill.style.width = '100%';
     el.currentProgress = 1;
 
+    // Fast completion rush sound with high pitch
+    uiSounds.play('bss-progress', { pitch: 1.65, volume: 0.65 });
+
     return new Promise(resolve => {
       setTimeout(() => {
         el.barWrap.style.display = 'none';
@@ -441,8 +454,13 @@ export function buildSingleReplayView(options: SingleReplayViewOptions): SingleR
     });
   }
 
+  let isFinishing = false;
+  let isCompleted = false;
+
   function resetSteps(): void {
     stepsCard.hidden = true;
+    isFinishing = false;
+    isCompleted = false;
     for (let i = 0; i < stepElements.length; i++) {
       stopStepAnimation(i);
       const el = stepElements[i];
@@ -463,6 +481,8 @@ export function buildSingleReplayView(options: SingleReplayViewOptions): SingleR
   function startSteps(): void {
     stepsCard.hidden = false;
     currentStepIdx = 0;
+    isFinishing = false;
+    isCompleted = false;
     startStepActive(0);
     for (let i = 1; i < stepElements.length; i++) {
       stopStepAnimation(i);
@@ -478,6 +498,7 @@ export function buildSingleReplayView(options: SingleReplayViewOptions): SingleR
   let currentStepIdx = 0;
 
   async function advanceToStep(stepIdx: number): Promise<void> {
+    if (isCompleted || isFinishing) return;
     stepsCard.hidden = false;
     if (stepIdx === currentStepIdx) return;
 
@@ -493,6 +514,8 @@ export function buildSingleReplayView(options: SingleReplayViewOptions): SingleR
   }
 
   async function finishAllSteps(): Promise<void> {
+    if (isCompleted || isFinishing) return;
+    isFinishing = true;
     stepsCard.hidden = false;
     for (let i = currentStepIdx; i < stepElements.length; i++) {
       await completeStepWithRush(i);
@@ -500,13 +523,17 @@ export function buildSingleReplayView(options: SingleReplayViewOptions): SingleR
     for (let i = 0; i < stepElements.length; i++) {
       completeStepInstant(i);
     }
-    uiSounds.play('bss-complete', { volume: 0.9 });
+    uiSounds.play('bss-complete', { volume: 0.95 });
     // Wait for the completion animation & bss-complete chime before moving on
-    await new Promise(r => setTimeout(r, 480));
+    await new Promise(r => setTimeout(r, 520));
+    isFinishing = false;
+    isCompleted = true;
   }
 
   function markStepError(stepIdx: number): void {
     stepsCard.hidden = false;
+    isFinishing = false;
+    isCompleted = false;
     stopStepAnimation(stepIdx);
     for (let i = 0; i < stepIdx; i++) {
       completeStepInstant(i);
@@ -536,8 +563,6 @@ export function buildSingleReplayView(options: SingleReplayViewOptions): SingleR
       void advanceToStep(2);
     } else if (lower.includes('building session') || lower.includes('会话') || lower.includes('渲染') || lower.includes('构建')) {
       void advanceToStep(3);
-    } else if (lower.includes('ready') || lower.includes('完成') || lower.includes('就绪') || lower.includes('准备就绪')) {
-      void finishAllSteps();
     }
   }
 
@@ -672,8 +697,6 @@ export function buildSingleReplayView(options: SingleReplayViewOptions): SingleR
         setLoadingStatus(t(`正在载入谱面 "${pendingOsz.name}"…`, `Loading beatmap "${pendingOsz.name}"…`));
         try {
           await options.onLoadAutoOsz(pendingOsz);
-          finishAllSteps();
-          root.hidden = true;
         } catch (err) {
           markStepError(currentStepIdx);
           setErrorStatus(err instanceof Error ? err.message : String(err));
@@ -687,8 +710,6 @@ export function buildSingleReplayView(options: SingleReplayViewOptions): SingleR
         setLoadingStatus(t(`正在解析回放 "${pendingOsr.name}" 并查找谱面…`, `Parsing replay "${pendingOsr.name}" & resolving beatmap…`));
         try {
           await options.onLoadOsr(pendingOsr, pendingOsz);
-          finishAllSteps();
-          root.hidden = true;
         } catch (err) {
           markStepError(currentStepIdx);
           setErrorStatus(err instanceof Error ? err.message : String(err));
@@ -704,8 +725,6 @@ export function buildSingleReplayView(options: SingleReplayViewOptions): SingleR
       setLoadingStatus(t(`正在获取在线数据 "${urlVal}"…`, `Fetching online data "${urlVal}"…`));
       try {
         await options.onLoadUrl(urlVal);
-        finishAllSteps();
-        root.hidden = true;
       } catch (err) {
         markStepError(currentStepIdx);
         setErrorStatus(err instanceof Error ? err.message : String(err));

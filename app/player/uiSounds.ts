@@ -275,8 +275,8 @@ class UiSoundManager {
         const source = this.audioContext.createBufferSource();
         source.buffer = buffer;
 
-        if (options?.pitch && options.pitch !== 1) {
-          source.playbackRate.setValueAtTime(options.pitch, this.audioContext.currentTime);
+        if (options?.pitch && options.pitch > 0) {
+          source.playbackRate.value = options.pitch;
         }
 
         if (options?.volume && options.volume !== 1) {
