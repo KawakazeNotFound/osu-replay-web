@@ -1257,7 +1257,7 @@ export function matchViewCss(): string {
   flex-direction: column;
   justify-content: space-between;
   align-items: stretch;
-  background: radial-gradient(circle at 50% 28%, #1c2b26 0%, #0d1412 100%);
+  background: #000000;
   overflow: hidden;
   user-select: none;
   animation: rvMatchBackdropFadeIn 240ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
