@@ -110,6 +110,12 @@ const assetPairs = [
   [path.join('assets', 'skin'), path.join(SITE_DIR, 'assets', 'skin')],
   [path.join('assets', 'lazer-defaults'), path.join(SITE_DIR, 'assets', 'lazer-defaults')],
   [path.join('assets', 'ui-sounds'), path.join(SITE_DIR, 'assets', 'ui-sounds')],
+  [path.join('assets', 'skin'), path.join(SITE_DIR, 'app', 'assets', 'skin')],
+  [path.join('assets', 'lazer-defaults'), path.join(SITE_DIR, 'app', 'assets', 'lazer-defaults')],
+  [path.join('assets', 'ui-sounds'), path.join(SITE_DIR, 'app', 'assets', 'ui-sounds')],
+  [path.join('assets', 'skin'), path.join(APP_DIR, 'assets', 'skin')],
+  [path.join('assets', 'lazer-defaults'), path.join(APP_DIR, 'assets', 'lazer-defaults')],
+  [path.join('assets', 'ui-sounds'), path.join(APP_DIR, 'assets', 'ui-sounds')],
 ];
 
 const requiredUiSounds = [

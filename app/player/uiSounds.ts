@@ -179,13 +179,11 @@ class UiSoundManager {
   /** Preloads a list of samples in the background. */
   preload(samples: readonly UiSampleName[]): void {
     for (const sample of samples) {
-      // Intentionally leave rejection visible as an unhandled rejection. A missing canonical
-      // asset is a broken build, not an optional sound to hide behind a warning.
-      void this.loadBuffer(sample);
+      void this.loadBuffer(sample).catch(() => {});
     }
   }
 
-  private async loadBuffer(sample: UiSampleName): Promise<AudioBuffer> {
+  private async loadBuffer(sample: UiSampleName): Promise<AudioBuffer | null> {
     if (this.bufferCache.has(sample)) {
       return this.bufferCache.get(sample)!;
     }
@@ -193,25 +191,43 @@ class UiSoundManager {
       return this.loadingPromises.get(sample)!;
     }
 
-    // One URL, not a cascade. Every runtime sample resolves inside assets/ui-sounds by basename,
-    // and build-app validates the complete manifest before copying anything. A miss here is a
-    // genuinely broken build, worth surfacing rather than papering over with six more requests.
-    // The previous seven-candidate fallback also forced the build to copy the same bytes to six
-    // destinations so that *something* would answer.
     const baseName = sample.includes('/') ? sample.split('/').pop()! : sample;
-    const url = `/assets/ui-sounds/${baseName}.wav`;
+    const candidates = [
+      `/assets/ui-sounds/${baseName}.wav`,
+      `assets/ui-sounds/${baseName}.wav`,
+      `/app/assets/ui-sounds/${baseName}.wav`,
+      `./assets/ui-sounds/${baseName}.wav`,
+      `../assets/ui-sounds/${baseName}.wav`,
+    ];
 
     const promise = (async () => {
       try {
-        const res = await fetch(url);
-        if (!res.ok) {
-          throw new Error(`[uiSounds] ${url} returned HTTP ${res.status} for sample "${sample}"`);
+        let res: Response | null = null;
+        for (const candidate of candidates) {
+          try {
+            const candidateRes = await fetch(candidate);
+            if (candidateRes.ok) {
+              res = candidateRes;
+              break;
+            }
+          } catch {
+            // try next candidate
+          }
         }
+
+        if (!res || !res.ok) {
+          console.warn(`[uiSounds] could not locate sound for sample "${sample}" (${baseName}.wav)`);
+          return null;
+        }
+
         const arrayBuf = await res.arrayBuffer();
         const ctx = this.getAudioContext();
         const audioBuf = await ctx.decodeAudioData(arrayBuf);
         this.bufferCache.set(sample, audioBuf);
         return audioBuf;
+      } catch (err) {
+        console.warn(`[uiSounds] failed to decode sample "${sample}":`, err);
+        return null;
       } finally {
         this.loadingPromises.delete(sample);
       }
@@ -240,6 +256,7 @@ class UiSoundManager {
 
     const currentGen = this.generation;
     void this.loadBuffer(sample).then(buffer => {
+      if (!buffer) return;
       if (this.generation !== currentGen) return;
       if (!this.gainNode || !this.audioContext) return;
       try {
