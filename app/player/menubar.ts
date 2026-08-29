@@ -847,7 +847,6 @@ export function menuBarCss(): string {
   height: 3px;
   background: #2feaa8;
   border-radius: 3px 3px 0 0;
-  box-shadow: 0 0 8px #2feaa8;
 }
 
 /* Right header group */
@@ -1137,7 +1136,7 @@ export function menuBarCss(): string {
 }
 .rv-modal-input:focus {
   border-color: #4ed9c8;
-  box-shadow: 0 0 8px rgba(78, 217, 200, 0.3);
+  box-shadow: none;
 }
 .rv-modal-actions {
   display: flex;
@@ -1169,7 +1168,7 @@ export function menuBarCss(): string {
 }
 .rv-modal-btn-primary:hover {
   background: #63ecd9;
-  box-shadow: 0 0 10px rgba(78, 217, 200, 0.4);
+  box-shadow: none;
 }
 `;
 }

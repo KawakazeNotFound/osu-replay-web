@@ -191,7 +191,6 @@ export function buildResultsPanel(
     badge.style.background = diffColor.bg;
     badge.style.color = diffColor.text;
     if (diffColor.isHigh) {
-      badge.style.boxShadow = '0 0 10px rgba(255, 215, 0, 0.45)';
       badge.style.border = '1px solid rgba(255, 215, 0, 0.7)';
     }
     // Drawn rather than the `★` glyph, which some platforms render as a full-colour emoji.

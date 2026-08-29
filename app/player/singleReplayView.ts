@@ -907,7 +907,7 @@ function singleReplayCss(): string {
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.45);
+  box-shadow: none;
   animation: rvReplayHeaderSlideDown 280ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
   box-sizing: border-box;
   flex-shrink: 0;
@@ -976,7 +976,7 @@ function singleReplayCss(): string {
   background: #16201d;
   border: 1px solid rgba(255, 255, 255, 0.06);
   border-radius: 12px;
-  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.6);
+  box-shadow: none;
   padding: 28px 36px;
   display: flex;
   flex-direction: column;
@@ -1015,7 +1015,6 @@ function singleReplayCss(): string {
   height: 3px;
   background: #2feaa8;
   border-radius: 2px;
-  box-shadow: 0 0 8px rgba(47, 234, 168, 0.6);
 }
 
 /* Big Drag & Drop Hero Card */
@@ -1031,12 +1030,10 @@ function singleReplayCss(): string {
 }
 .rv-replay-drop-card:hover {
   border-color: #2feaa8;
-  box-shadow: 0 0 14px rgba(47, 234, 168, 0.2);
 }
 .rv-replay-drop-card.dragover {
   border-color: #46f8b6;
   background: #14241f;
-  box-shadow: 0 0 24px rgba(70, 248, 182, 0.35);
   transform: scale(1.01);
 }
 
@@ -1157,11 +1154,11 @@ function singleReplayCss(): string {
   display: flex;
   align-items: center;
   gap: 12px;
-  transition: border-color 150ms ease, box-shadow 150ms ease, background 150ms ease;
+  transition: border-color 150ms ease, background 150ms ease;
 }
 .rv-replay-input-wrap:focus-within {
   border-color: #2feaa8;
-  box-shadow: 0 0 0 3px rgba(47, 234, 168, 0.2), 0 0 16px rgba(47, 234, 168, 0.15);
+  box-shadow: none;
   background: #111b18;
 }
 .rv-replay-input-icon {
@@ -1250,7 +1247,6 @@ function singleReplayCss(): string {
   width: 0%;
   background: linear-gradient(90deg, #2feaa8, #5cffcc);
   border-radius: 4px;
-  box-shadow: 0 0 8px rgba(47, 234, 168, 0.4);
 }
 
 .rv-replay-step-check {
@@ -1265,7 +1261,6 @@ function singleReplayCss(): string {
 .rv-replay-step-check.state-done {
   background: #2feaa8;
   color: #062217;
-  box-shadow: 0 0 8px rgba(47, 234, 168, 0.4);
   animation: rvStepCheckPop 220ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 .rv-replay-step-check.state-active {
@@ -1288,7 +1283,6 @@ function singleReplayCss(): string {
 .rv-replay-step-check.state-error {
   background: #ff4455;
   color: #ffffff;
-  box-shadow: 0 0 8px rgba(255, 68, 85, 0.4);
 }
 
 @keyframes rvReplayCheckPulse {
@@ -1360,7 +1354,7 @@ function singleReplayCss(): string {
   border: 1px solid rgba(255, 255, 255, 0.15);
   border-bottom: 2px solid rgba(255, 255, 255, 0.35);
   border-right: 1.5px solid rgba(255, 255, 255, 0.25);
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.35);
+  box-shadow: none;
   height: 42px;
   width: 170px;
   font-size: 14px;
@@ -1391,7 +1385,7 @@ function singleReplayCss(): string {
   border: 1px solid rgba(255, 255, 255, 0.2);
   border-bottom: 2px solid rgba(255, 255, 255, 0.45);
   border-right: 1.5px solid rgba(255, 255, 255, 0.3);
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.35);
+  box-shadow: none;
   height: 42px;
   font-size: 15px;
   font-weight: 800;

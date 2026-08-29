@@ -99,7 +99,6 @@ export function playerLoaderCss(): string {
   border-radius: 50%;
   background: linear-gradient(135deg, #182e27, #0e1e19);
   border: 3px solid #2feaa8;
-  box-shadow: 0 0 26px rgba(47, 234, 168, 0.45), inset 0 0 14px rgba(47, 234, 168, 0.2);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -109,7 +108,6 @@ export function playerLoaderCss(): string {
 .pl-logo svg {
   width: 40px;
   height: 40px;
-  filter: drop-shadow(0 2px 8px rgba(47, 234, 168, 0.6));
 }
 
 @keyframes plLogoBeat {
@@ -156,7 +154,6 @@ export function playerLoaderCss(): string {
   border-radius: 10px;
   overflow: hidden;
   margin: 12px 0 10px;
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.65);
   border: 1px solid rgba(255, 255, 255, 0.16);
   background: #181822;
   position: relative;
@@ -223,7 +220,6 @@ export function playerLoaderCss(): string {
   border-radius: 999px;
   font-size: 12.5px;
   font-weight: 700;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.45);
   opacity: 0;
   transform: scale(0.7);
   transition: opacity 350ms cubic-bezier(0.34, 1.56, 0.64, 1), transform 350ms cubic-bezier(0.34, 1.56, 0.64, 1);
@@ -395,7 +391,6 @@ export function playerLoaderCss(): string {
   height: 14px;
   border-radius: 50%;
   background: #ffffff;
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.5);
   transform: translate(-50%, -50%);
   pointer-events: none;
   transition: transform 80ms ease;
@@ -435,7 +430,6 @@ export function playerLoaderCss(): string {
   height: 14px;
   border-radius: 50%;
   background: #ffffff;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
   transition: transform 150ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 .pl-toggle-switch.pl-checked .pl-toggle-handle {
@@ -462,7 +456,6 @@ export function playerLoaderCss(): string {
   font-family: inherit;
   font-size: 13.5px;
   font-weight: 700;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
 }
 .pl-back-btn:hover {
   background: #f06292;
@@ -583,7 +576,6 @@ export function buildPlayerLoader(options: PlayerLoaderOptions): PlayerLoaderHan
   starBadge.style.background = diffColor.bg;
   starBadge.style.color = diffColor.text;
   if (diffColor.isHigh) {
-    starBadge.style.boxShadow = '0 0 10px rgba(255, 215, 0, 0.45)';
     starBadge.style.border = '1px solid rgba(255, 215, 0, 0.7)';
   }
   const starIcon = document.createElement('span');

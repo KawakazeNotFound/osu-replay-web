@@ -21,7 +21,7 @@ export function difficultyPickerCss(): string {
   display: flex; flex-direction: column; overflow: hidden;
   color: #fff; background: #211a25;
   border: 1px solid rgba(255, 255, 255, 0.13); border-radius: 14px;
-  box-shadow: 0 22px 70px rgba(0, 0, 0, 0.55);
+  box-shadow: none;
 }
 .rv-difficulty-heading { padding: 22px 24px 14px; }
 .rv-difficulty-title { margin: 0; font-size: 22px; line-height: 1.25; }

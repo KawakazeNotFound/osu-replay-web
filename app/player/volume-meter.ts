@@ -369,7 +369,7 @@ export function volumeMeterCss(): string {
   transform: scale(1);
 }
 .ps-hud-row:hover .ps-hud-disc {
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.7), inset 0 0 0 1.5px rgba(255, 204, 34, 0.5);
+  border: 1.5px solid rgba(255, 204, 34, 0.5);
 }
 .ps-hud-disc {
   position: relative;
@@ -379,12 +379,11 @@ export function volumeMeterCss(): string {
   background: rgba(18, 18, 24, 0.9);
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.65), inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.08);
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  transition: box-shadow 150ms ease;
 }
 .ps-hud-svg {
   position: absolute;
@@ -404,11 +403,9 @@ export function volumeMeterCss(): string {
   stroke-width: 4;
   stroke-linecap: round;
   transition: stroke-dashoffset 80ms ease;
-  filter: drop-shadow(0 0 4px rgba(255, 204, 34, 0.5));
 }
 .ps-hud-seek-fill {
   stroke: #55ccff;
-  filter: drop-shadow(0 0 4px rgba(85, 204, 255, 0.5));
 }
 .ps-hud-value {
   font-family: inherit;
@@ -438,7 +435,6 @@ export function volumeMeterCss(): string {
   backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);
   border: 1px solid rgba(255, 255, 255, 0.1);
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
   font-size: 12.5px;
   font-weight: 600;
   color: #ffffff;

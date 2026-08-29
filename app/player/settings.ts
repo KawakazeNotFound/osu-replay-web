@@ -466,8 +466,7 @@ export function settingsOverlayCss(): string {
   display: flex; flex-direction: column; gap: 12px;
   transition: background 200ms cubic-bezier(0.2, 0, 0, 1),
               border-color 200ms ease,
-              backdrop-filter 200ms ease,
-              box-shadow 200ms ease;
+              backdrop-filter 200ms ease;
 }
 .ps-card:hover,
 .ps-card:focus-within {
@@ -475,7 +474,7 @@ export function settingsOverlayCss(): string {
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
   border-color: rgba(255, 255, 255, 0.12);
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+  box-shadow: none;
 }
 .ps-card-title {
   margin: 0;
@@ -519,7 +518,7 @@ export function settingsOverlayCss(): string {
   padding: 0 4px;
   box-sizing: border-box;
   outline: none;
-  box-shadow: 0 0 6px rgba(255, 204, 34, 0.35);
+  box-shadow: none;
 }
 .ps-reset {
   width: 18px; height: 18px; flex: 0 0 auto;
@@ -565,20 +564,19 @@ export function settingsOverlayCss(): string {
   height: 14px;
   border-radius: 7px;
   background: ${ACCENT};
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.45);
   transform: translate(-50%, -50%);
   pointer-events: none;
-  transition: transform 80ms ease, box-shadow 120ms ease;
+  transition: transform 80ms ease;
 }
 .ps-slider-container:hover .ps-slider-nub {
-  box-shadow: 0 0 8px rgba(255, 204, 34, 0.6);
+  box-shadow: none;
 }
 .ps-slider-container.ps-dragging .ps-slider-nub {
   transform: translate(-50%, -50%) scale(1.05);
-  box-shadow: 0 0 10px rgba(255, 204, 34, 0.85);
+  box-shadow: none;
 }
 .ps-slider-container:focus-visible .ps-slider-track {
-  box-shadow: 0 0 0 2px rgba(255, 204, 34, 0.4);
+  box-shadow: none;
 }
 
 /* Volume link divider between Music volume and Effects volume */
@@ -619,7 +617,7 @@ export function settingsOverlayCss(): string {
   color: ${ACCENT};
   border-color: rgba(255, 204, 34, 0.55);
   background: rgba(255, 204, 34, 0.14);
-  box-shadow: 0 0 8px rgba(255, 204, 34, 0.25);
+  box-shadow: none;
 }
 .ps-volume-link-btn.ps-linked .rv-icon {
   color: ${ACCENT};

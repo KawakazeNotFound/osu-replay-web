@@ -281,17 +281,17 @@ export function notificationsCss(): string {
   overflow: hidden;
   background: #2e2838;
   color: #ffffff;
-  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.45), 0 1px 3px rgba(0, 0, 0, 0.3);
+  box-shadow: none;
   font-family: "Torus", "Quicksand", system-ui, -apple-system, sans-serif;
   font-size: 13px;
   cursor: pointer;
-  transition: transform 120ms ease, box-shadow 120ms ease;
+  transition: transform 120ms ease;
   transform-origin: right center;
 }
 
 .rv-notification:hover {
   transform: translateY(-1px) scale(1.01);
-  box-shadow: 0 6px 22px rgba(0, 0, 0, 0.55);
+  box-shadow: none;
 }
 
 .rv-notif-error {

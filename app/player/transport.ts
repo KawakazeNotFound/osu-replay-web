@@ -218,7 +218,6 @@ export function transportCss(): string {
   font-size: 17px; line-height: 1;
   padding: 6px 7px; border-radius: 6px; cursor: pointer;
   display: inline-flex; align-items: center; justify-content: center;
-  filter: drop-shadow(0 1px 3px rgba(0, 0, 0, 0.6));
   transition: background 120ms ease;
 }
 .pt-button:hover { background: rgba(255, 255, 255, 0.14); }
@@ -271,7 +270,6 @@ export function transportCss(): string {
   width: 12px; height: 12px; border-radius: 50%;
   background: ${accent};
   transform: translate(-50%, -50%);
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.5);
   pointer-events: none;
 }
 `;

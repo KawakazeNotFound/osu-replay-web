@@ -1264,7 +1264,7 @@ export function matchViewCss(): string {
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.45);
+  box-shadow: none;
   animation: rvMatchHeaderSlideDown 280ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
   box-sizing: border-box;
   flex-shrink: 0;
@@ -1333,7 +1333,7 @@ export function matchViewCss(): string {
   background: #16201d;
   border: 1px solid rgba(255, 255, 255, 0.06);
   border-radius: 12px;
-  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.6);
+  box-shadow: none;
   padding: 32px 36px;
   display: flex;
   flex-direction: column;
@@ -1375,11 +1375,11 @@ export function matchViewCss(): string {
   display: flex;
   align-items: center;
   gap: 12px;
-  transition: border-color 150ms ease, box-shadow 150ms ease, background 150ms ease;
+  transition: border-color 150ms ease, background 150ms ease;
 }
 .rv-match-input-wrap:focus-within {
   border-color: #2feaa8;
-  box-shadow: 0 0 0 3px rgba(47, 234, 168, 0.2), 0 0 16px rgba(47, 234, 168, 0.15);
+  box-shadow: none;
   background: #111b18;
 }
 .rv-match-input-icon {
@@ -1463,7 +1463,7 @@ export function matchViewCss(): string {
   border: 1px solid rgba(255, 255, 255, 0.15);
   border-bottom: 2px solid rgba(255, 255, 255, 0.35);
   border-right: 1.5px solid rgba(255, 255, 255, 0.25);
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.35);
+  box-shadow: none;
   height: 42px;
   width: 170px;
   font-size: 14px;
@@ -1493,7 +1493,7 @@ export function matchViewCss(): string {
   border: 1px solid rgba(255, 255, 255, 0.2);
   border-bottom: 2px solid rgba(255, 255, 255, 0.45);
   border-right: 1.5px solid rgba(255, 255, 255, 0.3);
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.35);
+  box-shadow: none;
   height: 42px;
   font-size: 15px;
   font-weight: 800;
