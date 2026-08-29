@@ -9,7 +9,7 @@
  */
 
 import { icon, type IconName } from '../results/icons.js';
-import { uiSounds } from './uiSounds.js';
+import { uiSounds, type UiSampleName } from './uiSounds.js';
 import { t, isZh } from './i18n.js';
 
 export interface SingleReplayViewOptions {
@@ -27,6 +27,7 @@ export interface SingleReplayViewHandle {
   setStatus(msg: string, type?: 'info' | 'loading' | 'error' | 'success'): void;
   setPendingFiles(osr: File | null, osz: File | null): void;
   handleProgress(msg: string): void;
+  finishProgress(): Promise<void>;
   resetProgress(): void;
   destroy(): void;
 }
@@ -302,7 +303,10 @@ export function buildSingleReplayView(options: SingleReplayViewOptions): SingleR
     row: HTMLElement;
     text: HTMLElement;
     barWrap: HTMLElement;
+    barFill: HTMLElement;
     check: HTMLElement;
+    currentProgress: number;
+    animFrameId: number | null;
   }
 
   const stepElements: StepRowElement[] = [];
@@ -337,31 +341,180 @@ export function buildSingleReplayView(options: SingleReplayViewOptions): SingleR
     row.append(text, right);
     stepsCard.append(row);
 
-    stepElements.push({ row, text, barWrap, check });
+    stepElements.push({
+      row,
+      text,
+      barWrap,
+      barFill,
+      check,
+      currentProgress: 0,
+      animFrameId: null,
+    });
   }
 
-  function setStepState(index: number, state: 'pending' | 'active' | 'done' | 'error'): void {
+  let lastProgressSoundTime = 0;
+
+  function stopStepAnimation(index: number): void {
+    const el = stepElements[index];
+    if (!el) return;
+    if (el.animFrameId !== null) {
+      cancelAnimationFrame(el.animFrameId);
+      el.animFrameId = null;
+    }
+  }
+
+  function startStepActive(index: number): void {
     const el = stepElements[index];
     if (!el) return;
 
-    el.row.className = `rv-replay-step-row state-${state}`;
-    el.check.className = `rv-replay-step-check state-${state}`;
+    stopStepAnimation(index);
+    el.row.className = 'rv-replay-step-row state-active';
+    el.check.className = 'rv-replay-step-check state-active';
+    el.barWrap.style.display = 'block';
+    el.barFill.style.transition = 'none';
+    el.currentProgress = 0;
+    el.barFill.style.width = '0%';
 
-    if (state === 'active') {
-      el.barWrap.style.display = 'block';
+    // Play stage start sound (bss-stage-0, bss-stage-1, etc.)
+    const stageSoundName = `bss-stage-${Math.min(index, 3)}` as UiSampleName;
+    uiSounds.play(stageSoundName, { volume: 0.8 });
+
+    // Asymptotic non-linear organic creep towards 78%
+    const targetProgress = 0.78;
+    function frame() {
+      const activeEl = stepElements[index];
+      if (!activeEl || activeEl.row.className !== 'rv-replay-step-row state-active') return;
+      activeEl.currentProgress += (targetProgress - activeEl.currentProgress) * 0.038;
+      activeEl.barFill.style.width = `${(activeEl.currentProgress * 100).toFixed(1)}%`;
+
+      const now = performance.now();
+      if (now - lastProgressSoundTime > 340 && activeEl.currentProgress < 0.75) {
+        lastProgressSoundTime = now;
+        const pitch = 1.0 + activeEl.currentProgress * 0.45;
+        uiSounds.play('bss-progress', { pitch, volume: 0.4 });
+      }
+
+      activeEl.animFrameId = requestAnimationFrame(frame);
+    }
+    el.animFrameId = requestAnimationFrame(frame);
+  }
+
+  function completeStepInstant(index: number): void {
+    const el = stepElements[index];
+    if (!el) return;
+
+    stopStepAnimation(index);
+    el.currentProgress = 1;
+    el.barWrap.style.display = 'none';
+    el.barFill.style.width = '100%';
+    el.row.className = 'rv-replay-step-row state-done';
+    el.check.className = 'rv-replay-step-check state-done';
+    el.check.innerHTML = `
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+        <polyline points="20 6 9 17 4 12"></polyline>
+      </svg>
+    `;
+  }
+
+  function completeStepWithRush(index: number): Promise<void> {
+    const el = stepElements[index];
+    if (!el) return Promise.resolve();
+
+    stopStepAnimation(index);
+    el.barWrap.style.display = 'block';
+    el.barFill.style.transition = 'width 180ms cubic-bezier(0.16, 1, 0.3, 1)';
+    el.barFill.style.width = '100%';
+    el.currentProgress = 1;
+
+    return new Promise(resolve => {
+      setTimeout(() => {
+        el.barWrap.style.display = 'none';
+        el.row.className = 'rv-replay-step-row state-done';
+        el.check.className = 'rv-replay-step-check state-done';
+        el.check.innerHTML = `
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="20 6 9 17 4 12"></polyline>
+          </svg>
+        `;
+        resolve();
+      }, 190);
+    });
+  }
+
+  function resetSteps(): void {
+    stepsCard.hidden = true;
+    for (let i = 0; i < stepElements.length; i++) {
+      stopStepAnimation(i);
+      const el = stepElements[i];
+      if (!el) continue;
+      el.currentProgress = 0;
+      el.row.className = 'rv-replay-step-row state-pending';
+      el.check.className = 'rv-replay-step-check state-pending';
+      el.barWrap.style.display = 'none';
+      el.barFill.style.width = '0%';
       el.check.innerHTML = `
         <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">
           <polyline points="20 6 9 17 4 12"></polyline>
         </svg>
       `;
-    } else if (state === 'done') {
+    }
+  }
+
+  function startSteps(): void {
+    stepsCard.hidden = false;
+    currentStepIdx = 0;
+    startStepActive(0);
+    for (let i = 1; i < stepElements.length; i++) {
+      stopStepAnimation(i);
+      const el = stepElements[i];
+      if (!el) continue;
+      el.row.className = 'rv-replay-step-row state-pending';
+      el.check.className = 'rv-replay-step-check state-pending';
       el.barWrap.style.display = 'none';
-      el.check.innerHTML = `
-        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
-          <polyline points="20 6 9 17 4 12"></polyline>
-        </svg>
-      `;
-    } else if (state === 'error') {
+      el.barFill.style.width = '0%';
+    }
+  }
+
+  let currentStepIdx = 0;
+
+  async function advanceToStep(stepIdx: number): Promise<void> {
+    stepsCard.hidden = false;
+    if (stepIdx === currentStepIdx) return;
+
+    if (stepIdx > currentStepIdx) {
+      for (let i = currentStepIdx; i < stepIdx; i++) {
+        await completeStepWithRush(i);
+      }
+    }
+    currentStepIdx = stepIdx;
+    if (stepIdx < stepElements.length) {
+      startStepActive(stepIdx);
+    }
+  }
+
+  async function finishAllSteps(): Promise<void> {
+    stepsCard.hidden = false;
+    for (let i = currentStepIdx; i < stepElements.length; i++) {
+      await completeStepWithRush(i);
+    }
+    for (let i = 0; i < stepElements.length; i++) {
+      completeStepInstant(i);
+    }
+    uiSounds.play('bss-complete', { volume: 0.9 });
+    // Wait for the completion animation & bss-complete chime before moving on
+    await new Promise(r => setTimeout(r, 480));
+  }
+
+  function markStepError(stepIdx: number): void {
+    stepsCard.hidden = false;
+    stopStepAnimation(stepIdx);
+    for (let i = 0; i < stepIdx; i++) {
+      completeStepInstant(i);
+    }
+    const el = stepElements[stepIdx];
+    if (el) {
+      el.row.className = 'rv-replay-step-row state-error';
+      el.check.className = 'rv-replay-step-check state-error';
       el.barWrap.style.display = 'none';
       el.check.innerHTML = `
         <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
@@ -369,74 +522,22 @@ export function buildSingleReplayView(options: SingleReplayViewOptions): SingleR
           <line x1="6" y1="6" x2="18" y2="18"></line>
         </svg>
       `;
-    } else {
-      el.barWrap.style.display = 'none';
-      el.check.innerHTML = `
-        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">
-          <polyline points="20 6 9 17 4 12"></polyline>
-        </svg>
-      `;
     }
-  }
-
-  function resetSteps(): void {
-    stepsCard.hidden = true;
-    for (let i = 0; i < stepElements.length; i++) {
-      setStepState(i, 'pending');
-    }
-  }
-
-  function startSteps(): void {
-    stepsCard.hidden = false;
-    setStepState(0, 'active');
-    for (let i = 1; i < stepElements.length; i++) {
-      setStepState(i, 'pending');
-    }
-  }
-
-  let currentStepIdx = 0;
-
-  function advanceToStep(stepIdx: number): void {
-    stepsCard.hidden = false;
-    currentStepIdx = stepIdx;
-    for (let i = 0; i < stepIdx; i++) {
-      setStepState(i, 'done');
-    }
-    if (stepIdx < stepElements.length) {
-      setStepState(stepIdx, 'active');
-    }
-    for (let i = stepIdx + 1; i < stepElements.length; i++) {
-      setStepState(i, 'pending');
-    }
-  }
-
-  function finishAllSteps(): void {
-    stepsCard.hidden = false;
-    for (let i = 0; i < stepElements.length; i++) {
-      setStepState(i, 'done');
-    }
-  }
-
-  function markStepError(stepIdx: number): void {
-    stepsCard.hidden = false;
-    for (let i = 0; i < stepIdx; i++) {
-      setStepState(i, 'done');
-    }
-    setStepState(stepIdx, 'error');
+    uiSounds.play('generic-error', { volume: 0.8 });
   }
 
   function handleProgressLog(msg: string): void {
     const lower = msg.toLowerCase();
     if (lower.includes('reading replay') || lower.includes('parsing replay') || lower.includes('fetching score') || lower.includes('reading files') || lower.includes('解析') || lower.includes('读取')) {
-      advanceToStep(0);
+      void advanceToStep(0);
     } else if (lower.includes('finding beatmap') || lower.includes('downloading') || lower.includes('fetching .osu') || lower.includes('reading local beatmap') || lower.includes('谱面') || lower.includes('查找')) {
-      advanceToStep(1);
+      void advanceToStep(1);
     } else if (lower.includes('loading skin') || lower.includes('皮肤')) {
-      advanceToStep(2);
+      void advanceToStep(2);
     } else if (lower.includes('building session') || lower.includes('会话') || lower.includes('渲染') || lower.includes('构建')) {
-      advanceToStep(3);
+      void advanceToStep(3);
     } else if (lower.includes('ready') || lower.includes('完成') || lower.includes('就绪') || lower.includes('准备就绪')) {
-      finishAllSteps();
+      void finishAllSteps();
     }
   }
 
@@ -705,6 +806,9 @@ export function buildSingleReplayView(options: SingleReplayViewOptions): SingleR
     },
     handleProgress(msg: string): void {
       handleProgressLog(msg);
+    },
+    async finishProgress(): Promise<void> {
+      await finishAllSteps();
     },
     resetProgress(): void {
       resetSteps();
@@ -1092,7 +1196,7 @@ function singleReplayCss(): string {
 }
 
 .rv-replay-step-progress-bar {
-  width: 90px;
+  width: 120px;
   height: 8px;
   background: #182823;
   border-radius: 4px;
@@ -1104,16 +1208,10 @@ function singleReplayCss(): string {
   top: 0;
   bottom: 0;
   left: 0;
-  width: 100%;
+  width: 0%;
   background: linear-gradient(90deg, #2feaa8, #5cffcc);
   border-radius: 4px;
-  animation: rvReplayBarIndeterminate 1.4s infinite ease-in-out;
-}
-
-@keyframes rvReplayBarIndeterminate {
-  0% { transform: translateX(-100%); }
-  50% { transform: translateX(0%); }
-  100% { transform: translateX(100%); }
+  box-shadow: 0 0 8px rgba(47, 234, 168, 0.4);
 }
 
 .rv-replay-step-check {
@@ -1129,12 +1227,19 @@ function singleReplayCss(): string {
   background: #2feaa8;
   color: #062217;
   box-shadow: 0 0 8px rgba(47, 234, 168, 0.4);
+  animation: rvStepCheckPop 220ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 .rv-replay-step-check.state-active {
   border: 2px solid #2feaa8;
   color: #2feaa8;
   background: transparent;
   animation: rvReplayCheckPulse 1.2s infinite ease-in-out;
+}
+
+@keyframes rvStepCheckPop {
+  0% { transform: scale(0.6); opacity: 0; }
+  70% { transform: scale(1.22); }
+  100% { transform: scale(1); opacity: 1; }
 }
 .rv-replay-step-check.state-pending {
   border: 1.5px solid #3b5048;

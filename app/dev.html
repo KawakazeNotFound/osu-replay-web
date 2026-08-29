@@ -253,7 +253,10 @@
         say(t('正在加载…', 'loading…'));
         const replay = await loader(loadOptions());
         isHome = false;
-        singleReplayView.close();
+        if (singleReplayView) {
+          await singleReplayView.finishProgress();
+        }
+        singleReplayView?.close();
         subSettingsBtn.style.display = 'inline-flex';
         flow.present(replay);
         say(t('准备就绪 — 点击观看回放', 'ready — press Watch replay'));
@@ -264,7 +267,7 @@
         }
         console.error(err);
         const errMsg = err instanceof Error ? err.message : String(err);
-        singleReplayView.setStatus(errMsg, 'error');
+        singleReplayView?.setStatus(errMsg, 'error');
         say(`${t('加载失败: ', 'failed: ')}${errMsg}`);
         throw err;
       }

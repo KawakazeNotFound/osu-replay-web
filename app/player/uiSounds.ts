@@ -34,6 +34,18 @@ export type UiSampleName =
   | 'Results/score-tick'
   | 'Results/swoosh-up'
   | 'UI/overlay-pop-in'
+  | 'UI/bss-stage-0'
+  | 'UI/bss-stage-1'
+  | 'UI/bss-stage-2'
+  | 'UI/bss-stage-3'
+  | 'UI/bss-progress'
+  | 'UI/bss-complete'
+  | 'bss-stage-0'
+  | 'bss-stage-1'
+  | 'bss-stage-2'
+  | 'bss-stage-3'
+  | 'bss-progress'
+  | 'bss-complete'
   | 'button-hover'
   | 'button-select'
   | 'button-sidebar-hover'
@@ -105,7 +117,7 @@ class UiSoundManager {
   private audioContext: AudioContext | null = null;
   private gainNode: GainNode | null = null;
   private readonly bufferCache = new Map<string, AudioBuffer>();
-  private readonly loadingPromises = new Map<string, Promise<AudioBuffer>>();
+  private readonly loadingPromises = new Map<string, Promise<AudioBuffer | null>>();
   private readonly lastPlayTimes = new Map<string, number>();
   private readonly activeSources = new Set<AudioBufferSourceNode>();
   private readonly activeTickingStopFns = new Set<() => void>();

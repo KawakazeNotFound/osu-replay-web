@@ -130,6 +130,7 @@ const requiredUiSounds = [
   'badge-dink', 'badge-dink-max', 'rank-impact-pass-ss', 'rank-impact-pass',
   'rank-impact-fail', 'rank-impact-fail-d', 'applause-s', 'applause-a', 'applause-b',
   'applause-c', 'applause-d',
+  'bss-stage-0', 'bss-stage-1', 'bss-stage-2', 'bss-stage-3', 'bss-progress', 'bss-complete',
 ];
 for (const sample of requiredUiSounds) {
   const source = path.join('assets', 'ui-sounds', `${sample}.wav`);
