@@ -200,9 +200,11 @@
     let pendingOsz = null;
     let activeProgressNotification = null;
     let isHome = true;
+    let singleReplayView = null;
 
     const say = (msg, explicitType) => {
       if (!msg) return;
+      singleReplayView?.handleProgress?.(msg);
       let determinedType = explicitType;
       if (!determinedType) {
         const lower = msg.toLowerCase();

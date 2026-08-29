@@ -26,6 +26,8 @@ export interface SingleReplayViewHandle {
   close(): void;
   setStatus(msg: string, type?: 'info' | 'loading' | 'error' | 'success'): void;
   setPendingFiles(osr: File | null, osz: File | null): void;
+  handleProgress(msg: string): void;
+  resetProgress(): void;
   destroy(): void;
 }
 
@@ -277,6 +279,167 @@ export function buildSingleReplayView(options: SingleReplayViewOptions): SingleR
   const statusMsg = document.createElement('div');
   statusMsg.className = 'rv-replay-dialog-status';
 
+  // Multi-step loading checklist card (from Image 2)
+  const stepsCard = document.createElement('div');
+  stepsCard.className = 'rv-replay-steps-card';
+  stepsCard.hidden = true;
+
+  interface LoadingStepDef {
+    readonly id: string;
+    readonly textZh: string;
+    readonly textEn: string;
+  }
+
+  const STEP_DEFS: LoadingStepDef[] = [
+    { id: 'parse', textZh: '准备与解析回放数据……', textEn: 'Preparing & parsing replay data...' },
+    { id: 'beatmap', textZh: '正在获取谱面资源 (.osz)……', textEn: 'Fetching beatmap package (.osz)...' },
+    { id: 'skin', textZh: '正在载入皮肤与音效资源……', textEn: 'Loading skin & hitsound assets...' },
+    { id: 'session', textZh: '正在构建回放渲染引擎……', textEn: 'Building replay session engine...' },
+    { id: 'ready', textZh: '即将完成……', textEn: 'Almost ready...' },
+  ];
+
+  interface StepRowElement {
+    row: HTMLElement;
+    text: HTMLElement;
+    barWrap: HTMLElement;
+    check: HTMLElement;
+  }
+
+  const stepElements: StepRowElement[] = [];
+
+  for (const step of STEP_DEFS) {
+    const row = document.createElement('div');
+    row.className = 'rv-replay-step-row state-pending';
+
+    const text = document.createElement('span');
+    text.className = 'rv-replay-step-name';
+    text.textContent = t(step.textZh, step.textEn);
+
+    const right = document.createElement('div');
+    right.className = 'rv-replay-step-right';
+
+    const barWrap = document.createElement('div');
+    barWrap.className = 'rv-replay-step-progress-bar';
+    barWrap.style.display = 'none';
+    const barFill = document.createElement('div');
+    barFill.className = 'rv-replay-step-progress-fill';
+    barWrap.append(barFill);
+
+    const check = document.createElement('div');
+    check.className = 'rv-replay-step-check state-pending';
+    check.innerHTML = `
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">
+        <polyline points="20 6 9 17 4 12"></polyline>
+      </svg>
+    `;
+
+    right.append(barWrap, check);
+    row.append(text, right);
+    stepsCard.append(row);
+
+    stepElements.push({ row, text, barWrap, check });
+  }
+
+  function setStepState(index: number, state: 'pending' | 'active' | 'done' | 'error'): void {
+    const el = stepElements[index];
+    if (!el) return;
+
+    el.row.className = `rv-replay-step-row state-${state}`;
+    el.check.className = `rv-replay-step-check state-${state}`;
+
+    if (state === 'active') {
+      el.barWrap.style.display = 'block';
+      el.check.innerHTML = `
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="20 6 9 17 4 12"></polyline>
+        </svg>
+      `;
+    } else if (state === 'done') {
+      el.barWrap.style.display = 'none';
+      el.check.innerHTML = `
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="20 6 9 17 4 12"></polyline>
+        </svg>
+      `;
+    } else if (state === 'error') {
+      el.barWrap.style.display = 'none';
+      el.check.innerHTML = `
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+          <line x1="18" y1="6" x2="6" y2="18"></line>
+          <line x1="6" y1="6" x2="18" y2="18"></line>
+        </svg>
+      `;
+    } else {
+      el.barWrap.style.display = 'none';
+      el.check.innerHTML = `
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="20 6 9 17 4 12"></polyline>
+        </svg>
+      `;
+    }
+  }
+
+  function resetSteps(): void {
+    stepsCard.hidden = true;
+    for (let i = 0; i < stepElements.length; i++) {
+      setStepState(i, 'pending');
+    }
+  }
+
+  function startSteps(): void {
+    stepsCard.hidden = false;
+    setStepState(0, 'active');
+    for (let i = 1; i < stepElements.length; i++) {
+      setStepState(i, 'pending');
+    }
+  }
+
+  let currentStepIdx = 0;
+
+  function advanceToStep(stepIdx: number): void {
+    stepsCard.hidden = false;
+    currentStepIdx = stepIdx;
+    for (let i = 0; i < stepIdx; i++) {
+      setStepState(i, 'done');
+    }
+    if (stepIdx < stepElements.length) {
+      setStepState(stepIdx, 'active');
+    }
+    for (let i = stepIdx + 1; i < stepElements.length; i++) {
+      setStepState(i, 'pending');
+    }
+  }
+
+  function finishAllSteps(): void {
+    stepsCard.hidden = false;
+    for (let i = 0; i < stepElements.length; i++) {
+      setStepState(i, 'done');
+    }
+  }
+
+  function markStepError(stepIdx: number): void {
+    stepsCard.hidden = false;
+    for (let i = 0; i < stepIdx; i++) {
+      setStepState(i, 'done');
+    }
+    setStepState(stepIdx, 'error');
+  }
+
+  function handleProgressLog(msg: string): void {
+    const lower = msg.toLowerCase();
+    if (lower.includes('reading replay') || lower.includes('parsing replay') || lower.includes('fetching score') || lower.includes('reading files') || lower.includes('解析') || lower.includes('读取')) {
+      advanceToStep(0);
+    } else if (lower.includes('finding beatmap') || lower.includes('downloading') || lower.includes('fetching .osu') || lower.includes('reading local beatmap') || lower.includes('谱面') || lower.includes('查找')) {
+      advanceToStep(1);
+    } else if (lower.includes('loading skin') || lower.includes('皮肤')) {
+      advanceToStep(2);
+    } else if (lower.includes('building session') || lower.includes('会话') || lower.includes('渲染') || lower.includes('构建')) {
+      advanceToStep(3);
+    } else if (lower.includes('ready') || lower.includes('完成') || lower.includes('就绪') || lower.includes('准备就绪')) {
+      finishAllSteps();
+    }
+  }
+
   // Yellow notice block
   const notice = document.createElement('div');
   notice.className = 'rv-replay-notice';
@@ -289,7 +452,7 @@ export function buildSingleReplayView(options: SingleReplayViewOptions): SingleR
   }
   notice.append(noticeText);
 
-  setupBody.append(tabHeader, mainDropCard, oszDropCard, inputGroup, statusMsg, notice);
+  setupBody.append(tabHeader, mainDropCard, oszDropCard, inputGroup, stepsCard, statusMsg, notice);
   setupContent.append(setupHeader, setupBody);
 
   // 3. Bottom Action Footer Bar (Lazer slanted flat buttons)
@@ -404,11 +567,14 @@ export function buildSingleReplayView(options: SingleReplayViewOptions): SingleR
     if (currentMode === 'auto') {
       if (pendingOsz !== null) {
         uiSounds.playClick('dialog-ok');
+        startSteps();
         setLoadingStatus(t(`正在载入谱面 "${pendingOsz.name}"…`, `Loading beatmap "${pendingOsz.name}"…`));
         try {
           await options.onLoadAutoOsz(pendingOsz);
+          finishAllSteps();
           root.hidden = true;
         } catch (err) {
+          markStepError(currentStepIdx);
           setErrorStatus(err instanceof Error ? err.message : String(err));
         }
         return;
@@ -416,11 +582,14 @@ export function buildSingleReplayView(options: SingleReplayViewOptions): SingleR
     } else {
       if (pendingOsr !== null) {
         uiSounds.playClick('dialog-ok');
+        startSteps();
         setLoadingStatus(t(`正在解析回放 "${pendingOsr.name}" 并查找谱面…`, `Parsing replay "${pendingOsr.name}" & resolving beatmap…`));
         try {
           await options.onLoadOsr(pendingOsr, pendingOsz);
+          finishAllSteps();
           root.hidden = true;
         } catch (err) {
+          markStepError(currentStepIdx);
           setErrorStatus(err instanceof Error ? err.message : String(err));
         }
         return;
@@ -430,11 +599,14 @@ export function buildSingleReplayView(options: SingleReplayViewOptions): SingleR
     // 2. If online URL / ID is entered
     if (urlVal.length > 0) {
       uiSounds.playClick('dialog-ok');
+      startSteps();
       setLoadingStatus(t(`正在获取在线数据 "${urlVal}"…`, `Fetching online data "${urlVal}"…`));
       try {
         await options.onLoadUrl(urlVal);
+        finishAllSteps();
         root.hidden = true;
       } catch (err) {
+        markStepError(currentStepIdx);
         setErrorStatus(err instanceof Error ? err.message : String(err));
       }
       return;
@@ -486,6 +658,7 @@ export function buildSingleReplayView(options: SingleReplayViewOptions): SingleR
       playBtn.disabled = false;
       statusMsg.textContent = '';
       statusMsg.className = 'rv-replay-dialog-status';
+      resetSteps();
 
       titleIcon.replaceChildren(icon(mode === 'auto' ? 'mode-auto' : 'mode-single', { className: 'rv-icon' }));
 
@@ -530,12 +703,19 @@ export function buildSingleReplayView(options: SingleReplayViewOptions): SingleR
       pendingOsz = osz;
       updateFileDisplay();
     },
+    handleProgress(msg: string): void {
+      handleProgressLog(msg);
+    },
+    resetProgress(): void {
+      resetSteps();
+    },
     destroy(): void {
       root.hidden = true;
       pendingOsr = null;
       pendingOsz = null;
       urlInput.value = '';
       statusMsg.textContent = '';
+      resetSteps();
     },
   };
 }
@@ -862,6 +1042,114 @@ function singleReplayCss(): string {
 }
 .rv-replay-input-field::placeholder {
   color: rgba(255, 255, 255, 0.35);
+}
+
+/* Multi-step loading checklist card (Matching Image 2) */
+.rv-replay-steps-card {
+  background: #111a17;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  padding: 16px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  box-sizing: border-box;
+  animation: rvReplayFadeIn 200ms ease forwards;
+}
+.rv-replay-steps-card[hidden] {
+  display: none !important;
+}
+
+.rv-replay-step-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: #a4c2ba;
+  transition: color 150ms ease;
+}
+.rv-replay-step-row.state-active {
+  color: #ffffff;
+  font-weight: 700;
+}
+.rv-replay-step-row.state-done {
+  color: #e0ecea;
+}
+.rv-replay-step-row.state-pending {
+  color: #4a635b;
+}
+.rv-replay-step-row.state-error {
+  color: #ff6677;
+}
+
+.rv-replay-step-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-shrink: 0;
+}
+
+.rv-replay-step-progress-bar {
+  width: 90px;
+  height: 8px;
+  background: #182823;
+  border-radius: 4px;
+  overflow: hidden;
+  position: relative;
+}
+.rv-replay-step-progress-fill {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  background: linear-gradient(90deg, #2feaa8, #5cffcc);
+  border-radius: 4px;
+  animation: rvReplayBarIndeterminate 1.4s infinite ease-in-out;
+}
+
+@keyframes rvReplayBarIndeterminate {
+  0% { transform: translateX(-100%); }
+  50% { transform: translateX(0%); }
+  100% { transform: translateX(100%); }
+}
+
+.rv-replay-step-check {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 180ms ease;
+}
+.rv-replay-step-check.state-done {
+  background: #2feaa8;
+  color: #062217;
+  box-shadow: 0 0 8px rgba(47, 234, 168, 0.4);
+}
+.rv-replay-step-check.state-active {
+  border: 2px solid #2feaa8;
+  color: #2feaa8;
+  background: transparent;
+  animation: rvReplayCheckPulse 1.2s infinite ease-in-out;
+}
+.rv-replay-step-check.state-pending {
+  border: 1.5px solid #3b5048;
+  color: #3b5048;
+  background: transparent;
+}
+.rv-replay-step-check.state-error {
+  background: #ff4455;
+  color: #ffffff;
+  box-shadow: 0 0 8px rgba(255, 68, 85, 0.4);
+}
+
+@keyframes rvReplayCheckPulse {
+  0%, 100% { transform: scale(1); opacity: 0.8; }
+  50% { transform: scale(1.1); opacity: 1; }
 }
 
 .rv-replay-dialog-status {
