@@ -30,6 +30,7 @@ const ENTRIES = [
   'player/difficultyPicker.ts',
   'player/uiSounds.ts',
   'player/notifications.ts',
+  'player/i18n.ts',
   'results/panel.ts',
   'results/icons.ts',
   'results/reveal.ts',

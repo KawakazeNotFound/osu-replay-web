@@ -14,6 +14,7 @@
 import type { CoreSession } from '../../src/index.js';
 import { icon, type IconName } from '../results/icons.js';
 import { uiSounds } from './uiSounds.js';
+import { t } from './i18n.js';
 
 /** Coarse and fine jumps, in presentation ms. */
 const JUMP_COARSE_MS = 5000;
@@ -89,17 +90,17 @@ export function buildTransport(session: CoreSession): TransportHandle {
   buttons.className = 'pt-buttons';
 
   buttons.append(
-    button('skip-start', 'Restart', () => seekTo(0)),
-    button('rewind', `Back ${JUMP_COARSE_MS / 1000}s`, () => seekTo(audioSync.currentTimeMs - JUMP_COARSE_MS)),
-    button('step-back', `Back ${JUMP_FINE_MS / 1000}s`, () => seekTo(audioSync.currentTimeMs - JUMP_FINE_MS)),
+    button('skip-start', t('重新开始', 'Restart'), () => seekTo(0)),
+    button('rewind', t(`后退 ${JUMP_COARSE_MS / 1000} 秒`, `Back ${JUMP_COARSE_MS / 1000}s`), () => seekTo(audioSync.currentTimeMs - JUMP_COARSE_MS)),
+    button('step-back', t(`后退 ${JUMP_FINE_MS / 1000} 秒`, `Back ${JUMP_FINE_MS / 1000}s`), () => seekTo(audioSync.currentTimeMs - JUMP_FINE_MS)),
   );
-  const playButton = button('pause', 'Play / pause', togglePlay);
+  const playButton = button('pause', t('播放 / 暂停', 'Play / pause'), togglePlay);
   playButton.classList.add('pt-play');
   buttons.append(
     playButton,
-    button('step-forward', `Forward ${JUMP_FINE_MS / 1000}s`, () => seekTo(audioSync.currentTimeMs + JUMP_FINE_MS)),
-    button('fast-forward', `Forward ${JUMP_COARSE_MS / 1000}s`, () => seekTo(audioSync.currentTimeMs + JUMP_COARSE_MS)),
-    button('skip-end', 'Jump to end', () => seekTo(durationMs)),
+    button('step-forward', t(`快进 ${JUMP_FINE_MS / 1000} 秒`, `Forward ${JUMP_FINE_MS / 1000}s`), () => seekTo(audioSync.currentTimeMs + JUMP_FINE_MS)),
+    button('fast-forward', t(`快进 ${JUMP_COARSE_MS / 1000} 秒`, `Forward ${JUMP_COARSE_MS / 1000}s`), () => seekTo(audioSync.currentTimeMs + JUMP_COARSE_MS)),
+    button('skip-end', t('跳至结尾', 'Jump to end'), () => seekTo(durationMs)),
   );
 
   // ---- scrubber ---------------------------------------------------------------------

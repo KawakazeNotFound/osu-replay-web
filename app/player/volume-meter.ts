@@ -7,6 +7,7 @@
  */
 
 import { uiSounds } from './uiSounds.js';
+import { t } from './i18n.js';
 
 const ACCENT = '#ffcc22';
 const ARC_LENGTH = 216.77;
@@ -181,9 +182,9 @@ export function buildVolumeMeter(callbacks: VolumeMeterCallbacks = {}): VolumeMe
   volumeStack.className = 'ps-hud-stack';
 
   // Top disc: 音效 (Effects)
-  const effectsUnit = createDiscUnit('音效', callbacks.onAdjustEffects);
+  const effectsUnit = createDiscUnit(t('音效', 'Effects'), callbacks.onAdjustEffects);
   // Bottom disc: 音乐 (Music)
-  const musicUnit = createDiscUnit('音乐', callbacks.onAdjustMusic);
+  const musicUnit = createDiscUnit(t('音乐', 'Music'), callbacks.onAdjustMusic);
 
   volumeStack.append(effectsUnit.root, musicUnit.root);
 

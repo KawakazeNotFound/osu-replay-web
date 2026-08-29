@@ -58,20 +58,20 @@
       background: #1b2540;
     }
     .user-chip-logout {
-      background: transparent; border: none; color: #7a7a92;
-      font-size: 15px; line-height: 1; padding: 2px 4px; cursor: pointer;
-      display: inline-flex; align-items: center;
+      background: none; border: none; padding: 2px 6px; cursor: pointer;
+      color: #e879a0; font-size: 11px;
     }
-    .user-chip-logout:hover { color: #e879a0; }
+    .user-chip-logout:hover { text-decoration: underline; }
+
     .login-btn {
-      background: #4ed9c8; color: #121e1c; border: none;
-      border-radius: 999px; padding: 4px 12px; font: inherit; font-size: 12px; font-weight: 600;
-      cursor: pointer; transition: all 120ms ease;
+      background: #4ed9c8; color: #162220; border: none;
+      border-radius: 4px; padding: 5px 12px; font-family: inherit;
+      font-size: 12px; font-weight: 700; cursor: pointer;
+      transition: background 120ms ease, box-shadow 120ms ease;
     }
     .login-btn:hover { background: #63ecd9; box-shadow: 0 0 8px rgba(78, 217, 200, 0.4); }
-    #stage { flex: 1 1 auto; min-height: 0; position: relative; overflow: hidden; }
 
-    /* Sub-Header / Secondary Top Bar */
+    /* Mode Sub-Header (二级顶栏) */
     .rv-sub-header {
       flex: 0 0 44px;
       height: 44px;
@@ -85,11 +85,14 @@
       position: relative;
       z-index: 30;
       user-select: none;
-      font-family: inherit;
-      box-sizing: border-box;
+      animation: rvSubHeaderSlideIn 200ms cubic-bezier(0.22, 1, 0.36, 1);
     }
     .rv-sub-header[hidden] {
       display: none !important;
+    }
+    @keyframes rvSubHeaderSlideIn {
+      from { opacity: 0; transform: translateY(-8px); }
+      to { opacity: 1; transform: translateY(0); }
     }
     .rv-sub-header-left {
       display: flex;
@@ -129,31 +132,32 @@
       color: rgba(255, 255, 255, 0.85);
     }
     .rv-sub-back-btn:hover {
-      background: #4a1f28;
-      border-color: #ff5577;
-      color: #ff7799;
+      background: rgba(235, 70, 116, 0.25);
+      border-color: rgba(235, 70, 116, 0.5);
+      color: #ffffff;
     }
     .rv-sub-title-info {
       display: flex;
       flex-direction: column;
-      gap: 2px;
       min-width: 0;
     }
     .rv-sub-title {
       font-size: 13px;
       font-weight: 700;
       color: #ffffff;
-      white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
+      white-space: nowrap;
     }
     .rv-sub-desc {
       font-size: 11px;
       color: rgba(255, 255, 255, 0.6);
-      white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
+      white-space: nowrap;
     }
+
+    #stage { flex: 1 1 auto; min-height: 0; position: relative; }
   </style>
 </head>
 <body>
@@ -172,6 +176,7 @@
     import { buildMatchView, matchViewCss } from '/player/matchView.js';
     import { uiSounds } from '/player/uiSounds.js';
     import { chooseLocalDifficulty, difficultyPickerCss } from '/player/difficultyPicker.js';
+    import { t } from '/player/i18n.js';
 
     // Inject styles for menubar, matchView, notifications, and icons
     const iconStyle = document.createElement('style');
@@ -199,16 +204,16 @@
     let activeProgressNotification = null;
     let isHome = true;
 
-    const say = (t, explicitType) => {
-      if (!t) return;
+    const say = (msg, explicitType) => {
+      if (!msg) return;
       let determinedType = explicitType;
       if (!determinedType) {
-        const lower = t.toLowerCase();
-        if (lower.includes('failed') || lower.includes('error') || lower.includes('invalid') || lower.includes('could not')) {
+        const lower = msg.toLowerCase();
+        if (lower.includes('failed') || lower.includes('error') || lower.includes('invalid') || lower.includes('could not') || lower.includes('失败')) {
           determinedType = 'error';
-        } else if (lower.includes('ready') || lower.includes('success') || lower.includes('imported') || lower.includes('signed in') || lower.includes('playing')) {
+        } else if (lower.includes('ready') || lower.includes('success') || lower.includes('imported') || lower.includes('signed in') || lower.includes('playing') || lower.includes('成功') || lower.includes('就绪') || lower.includes('已登录')) {
           determinedType = 'success';
-        } else if (lower.includes('loading') || lower.includes('fetching') || lower.includes('redirecting') || lower.includes('…') || lower.includes('...')) {
+        } else if (lower.includes('loading') || lower.includes('fetching') || lower.includes('redirecting') || lower.includes('…') || lower.includes('...') || lower.includes('正在') || lower.includes('加载中')) {
           determinedType = 'progress';
         } else {
           determinedType = 'info';
@@ -217,19 +222,19 @@
 
       if (determinedType === 'progress') {
         if (activeProgressNotification) {
-          activeProgressNotification.update(t, { type: 'progress' });
+          activeProgressNotification.update(msg, { type: 'progress' });
         } else {
-          activeProgressNotification = notify.progress(t);
+          activeProgressNotification = notify.progress(msg);
         }
       } else {
         if (activeProgressNotification) {
-          activeProgressNotification.update(t, {
+          activeProgressNotification.update(msg, {
             type: determinedType,
             duration: determinedType === 'error' ? 5000 : 3800,
           });
           activeProgressNotification = null;
         } else {
-          notify(t, { type: determinedType });
+          notify(msg, { type: determinedType });
         }
       }
     };
@@ -246,32 +251,32 @@
     async function run(loader) {
       lastLoader = loader;
       try {
-        say('loading…');
+        say(t('正在加载…', 'loading…'));
         const replay = await loader(loadOptions());
         isHome = false;
         subSettingsBtn.style.display = 'inline-flex';
         flow.present(replay);
-        say('ready — press Watch replay');
+        say(t('准备就绪 — 点击观看回放', 'ready — press Watch replay'));
       } catch (err) {
         if (err instanceof DifficultyCancelled) {
-          say('已取消难度选择', 'info');
+          say(t('已取消难度选择', 'Difficulty selection cancelled'), 'info');
           return;
         }
         console.error(err);
-        say(`failed: ${err instanceof Error ? err.message : String(err)}`);
+        say(`${t('加载失败: ', 'failed: ')}${err instanceof Error ? err.message : String(err)}`);
       }
     }
 
     // Hidden file picker for Auto mode
     const autoFileInput = document.createElement('input');
     autoFileInput.type = 'file';
-    autoFileInput.accept = '.osz,.zip,.osu';
+    autoFileInput.accept = '.osz,.zip';
     autoFileInput.style.display = 'none';
     autoFileInput.addEventListener('change', () => {
       const file = autoFileInput.files?.[0];
       if (file) {
         autoFileInput.value = '';
-        say(`已选择谱面: ${file.name}，正在生成自动演示…`);
+        say(t(`已选择谱面: ${file.name}，正在生成自动演示…`, `Selected beatmap: ${file.name}, generating auto play...`));
         void run(options => loadLocalAuto(file, options));
       }
     });
@@ -288,10 +293,10 @@
         osrFileInput.value = '';
         pendingOsr = file;
         if (pendingOsz !== null) {
-          say(`Loaded ${file.name}, starting local replay...`);
+          say(t(`已载入 ${file.name}，正在启动本地回放…`, `Loaded ${file.name}, starting local replay...`));
           void run(options => loadLocalReplay(pendingOsr, pendingOsz, options));
         } else {
-          say(`已载入 .osr 回放: ${file.name} (请继续导入 .osz 谱面包)`);
+          say(t(`已载入 .osr 回放: ${file.name}，请继续导入 .osz 谱面包`, `Loaded .osr: ${file.name} (now import .osz beatmap)`));
           oszFileInput.click();
         }
       }
@@ -306,15 +311,15 @@
       if (file) {
         oszFileInput.value = '';
         if (currentMode === 'auto') {
-          say(`已选择谱面: ${file.name}，正在生成自动演示…`);
+          say(t(`已选择谱面: ${file.name}，正在生成自动演示…`, `Selected beatmap: ${file.name}, generating auto play...`));
           void run(options => loadLocalAuto(file, options));
         } else {
           pendingOsz = file;
           if (pendingOsr !== null) {
-            say(`Loaded ${file.name}, starting local replay...`);
+            say(t(`已载入 ${file.name}，正在启动本地回放…`, `Loaded ${file.name}, starting local replay...`));
             void run(options => loadLocalReplay(pendingOsr, pendingOsz, options));
           } else {
-            say(`已载入 .osz 谱面包: ${file.name} (请继续导入 .osr 回放文件)`);
+            say(t(`已载入 .osz 谱面包: ${file.name}，请继续导入 .osr 回放文件`, `Loaded .osz: ${file.name} (now import .osr replay)`));
             osrFileInput.click();
           }
         }
@@ -335,7 +340,7 @@
     subBackBtn.className = 'rv-sub-btn rv-sub-back-btn';
     subBackBtn.append(icon('rewind', { className: 'rv-icon' }));
     const subBackLabel = document.createElement('span');
-    subBackLabel.textContent = '退出 (Exit)';
+    subBackLabel.textContent = t('退出', 'Exit');
     subBackBtn.append(subBackLabel);
     uiSounds.attachHoverClick(subBackBtn, { hover: 'button', click: false });
     subBackBtn.addEventListener('click', () => {
@@ -363,7 +368,7 @@
     subImportBtn.className = 'rv-sub-btn';
     subImportBtn.append(icon('mode-std', { className: 'rv-icon' }));
     const subImportLabel = document.createElement('span');
-    subImportLabel.textContent = '从本地导入…';
+    subImportLabel.textContent = t('从本地导入…', 'Import Local…');
     subImportBtn.append(subImportLabel);
     uiSounds.attachHoverClick(subImportBtn, { hover: 'button', click: false });
     subImportBtn.addEventListener('click', () => {
@@ -380,7 +385,7 @@
     subUrlBtn.className = 'rv-sub-btn';
     subUrlBtn.append(icon('link', { className: 'rv-icon' }));
     const subUrlLabel = document.createElement('span');
-    subUrlLabel.textContent = '打开链接/ID…';
+    subUrlLabel.textContent = t('打开链接/ID…', 'Open URL/ID…');
     subUrlBtn.append(subUrlLabel);
     uiSounds.attachHoverClick(subUrlBtn, { hover: 'button', click: false });
     subUrlBtn.addEventListener('click', () => {
@@ -393,7 +398,7 @@
     subSettingsBtn.className = 'rv-sub-btn';
     subSettingsBtn.append(icon('settings', { className: 'rv-icon' }));
     const subSettingsLabel = document.createElement('span');
-    subSettingsLabel.textContent = '设置 (Settings)';
+    subSettingsLabel.textContent = t('设置', 'Settings');
     subSettingsBtn.append(subSettingsLabel);
     subSettingsBtn.style.display = 'none';
     uiSounds.attachHoverClick(subSettingsBtn, { hover: 'button', click: false });
@@ -430,52 +435,44 @@
           void run(options => loadFromInput(url, options));
         }
       },
-      onImportOsu: file => {
-        if (currentMode === 'auto') {
-          say(`已选择谱面: ${file.name}，正在生成自动演示…`);
-          void run(options => loadLocalAuto(file, options));
-        } else {
-          say(`Imported .osu: ${file.name}`);
-        }
-      },
       onImportOsz: file => {
         if (currentMode === 'auto') {
-          say(`已选择谱面: ${file.name}，正在生成自动演示…`);
+          say(t(`已选择谱面: ${file.name}，正在生成自动演示…`, `Selected beatmap: ${file.name}, generating auto play...`));
           void run(options => loadLocalAuto(file, options));
         } else {
           pendingOsz = file;
           if (pendingOsr !== null) {
-            say(`Loaded ${file.name}, starting local replay...`);
+            say(t(`已载入 ${file.name}，正在启动本地回放…`, `Loaded ${file.name}, starting local replay...`));
             void run(options => loadLocalReplay(pendingOsr, pendingOsz, options));
           } else {
-            say(`Loaded .osz: ${file.name} (now import .osr replay)`);
+            say(t(`已载入 .osz 谱面包: ${file.name}，请继续导入 .osr 回放文件`, `Loaded .osz: ${file.name} (now import .osr replay)`));
           }
         }
       },
       onImportOsr: file => {
         pendingOsr = file;
         if (pendingOsz !== null) {
-          say(`Loaded ${file.name}, starting local replay...`);
+          say(t(`已载入 ${file.name}，正在启动本地回放…`, `Loaded ${file.name}, starting local replay...`));
           void run(options => loadLocalReplay(pendingOsr, pendingOsz, options));
         } else {
-          say(`Loaded .osr: ${file.name} (now import .osz beatmap)`);
+          say(t(`已载入 .osr 回放: ${file.name}，请继续导入 .osz 谱面包`, `Loaded .osr: ${file.name} (now import .osz beatmap)`));
         }
       },
       onSelectSkin: skinName => {
         selectedSkin = skinName;
-        say(`Skin switched to: ${skinName}`);
+        say(t(`皮肤已切换为: ${skinName}`, `Skin switched to: ${skinName}`));
         if (lastLoader !== null && currentMode !== 'match') void run(lastLoader);
       },
       onImportSkin: async file => {
         try {
-          say(`Importing skin ${file.name}...`);
+          say(t(`正在导入皮肤 ${file.name}…`, `Importing skin ${file.name}...`));
           const name = await importCustomSkinFile(file, ctx());
           selectedSkin = name;
-          say(`Skin "${name}" imported successfully!`);
+          say(t(`皮肤 "${name}" 导入成功！`, `Skin "${name}" imported successfully!`));
           if (lastLoader !== null && currentMode !== 'match') void run(lastLoader);
         } catch (err) {
           console.error(err);
-          say(`Skin import failed: ${err instanceof Error ? err.message : String(err)}`);
+          say(`${t('皮肤导入失败: ', 'Skin import failed: ')}${err instanceof Error ? err.message : String(err)}`);
         }
       },
       onToggleSettings: () => {
@@ -494,7 +491,7 @@
       },
       onReload: () => {
         if (lastLoader !== null) void run(lastLoader);
-        else say('No replay loaded to reload');
+        else say(t('请先加载回放后再重新加载', 'No replay loaded to reload'));
       },
       onExit: () => {
         navigateToRoute('home');
@@ -509,16 +506,22 @@
 
     function updateSubHeaderForMode(mode) {
       if (mode === 'auto') {
-        subBackLabel.textContent = '退出演示 (Exit Auto)';
-        subTitle.textContent = '自动演示 (Auto Play)';
-        subDesc.textContent = '导入本地未发布 .osz 谱面或输入在线链接/ID，自动生成满分演示';
-        subImportLabel.textContent = '导入谱面… (.osz/.osu)';
+        subBackLabel.textContent = t('退出演示', 'Exit Auto');
+        subTitle.textContent = t('自动演示', 'Auto Play');
+        subDesc.textContent = t(
+          '导入本地未发布 .osz 谱面或输入在线链接/ID，自动生成满分演示',
+          'Import local .osz or enter online URL/ID to generate auto play',
+        );
+        subImportLabel.textContent = t('导入谱面… (.osz)', 'Import Beatmap… (.osz)');
         subHeader.hidden = false;
       } else if (mode === 'replay') {
-        subBackLabel.textContent = '退出回放 (Exit Replay)';
-        subTitle.textContent = '单人回放 (Replay Viewer)';
-        subDesc.textContent = '导入本地 .osr + .osz 或输入成绩链接/ID进行回放';
-        subImportLabel.textContent = '导入回放/谱面…';
+        subBackLabel.textContent = t('退出回放', 'Exit Replay');
+        subTitle.textContent = t('单人回放', 'Single Replay');
+        subDesc.textContent = t(
+          '导入本地 .osr + .osz 或输入成绩链接/ID进行回放',
+          'Import local .osr + .osz or enter score URL/ID for replay',
+        );
+        subImportLabel.textContent = t('从本地导入…', 'Import Local…');
         subHeader.hidden = false;
       } else {
         subHeader.hidden = true;
@@ -564,7 +567,7 @@
         lastLoader = null;
         pendingOsr = null;
         pendingOsz = null;
-        say('已返回主页面');
+        say(t('已返回主页面', 'Returned to home page'));
       }
     }
 
@@ -580,12 +583,12 @@
       const button = document.createElement('button');
       button.type = 'button';
       button.className = 'login-btn';
-      button.textContent = 'Login with osu!';
+      button.textContent = t('登录 osu! 账号', 'Login with osu!');
       uiSounds.attachHoverClick(button, { hover: 'button', click: false });
       button.addEventListener('click', () => {
         uiSounds.playClick('button');
-        say('redirecting to osu!…');
-        startLogin().catch(err => say(`login failed: ${err.message}`));
+        say(t('正在跳转至 osu!…', 'redirecting to osu!…'));
+        startLogin().catch(err => say(`${t('登录失败: ', 'login failed: ')}${err.message}`));
       });
       menuBar.userSlot.replaceChildren(button);
     }
@@ -611,14 +614,14 @@
       const out = document.createElement('button');
       out.type = 'button';
       out.className = 'user-chip-logout';
-      out.title = 'Sign out';
-      out.append(icon('power', { className: 'rv-icon', label: 'Sign out' }));
+      out.title = t('退出登录', 'Sign out');
+      out.append(icon('power', { className: 'rv-icon', label: t('退出登录', 'Sign out') }));
       uiSounds.attachHoverClick(out, { hover: 'button', click: false });
       out.addEventListener('click', () => {
         uiSounds.playClick('dialog-cancel');
         logout();
         showLoginButton();
-        say('signed out');
+        say(t('已退出登录', 'signed out'));
       });
       chip.append(out);
 
@@ -634,14 +637,14 @@
         if (user !== null) showUser(user);
         else showLoginButton();
       } catch (err) {
-        say(`signed in, but ${err.message}`);
+        say(`${t('已登录，但 ', 'signed in, but ')}${err.message}`);
         if (cached === null) showLoginButton();
       }
     }
 
     // Finish a sign-in that redirected back here before deciding what to show.
     try {
-      if (await completePendingLogin()) say('signed in');
+      if (await completePendingLogin()) say(t('已登录', 'signed in'));
     } catch (err) {
       say(err.message);
     }

@@ -1,18 +1,18 @@
 /**
- * Top menu bar for the Replay Viewer (osu!lazer Editor style).
+ * Top menu bar following lazer navigation & visual hierarchy.
  *
- * Implements nested dropdown submenus with non-linear spring expansion,
- * URL modal prompt, local file imports (.osu, .osz, .osr, .osk), and skin selector.
+ * Implements mode switcher (Replay / Auto / Match),
+ * URL modal prompt, local file imports (.osz, .osr, .osk), and skin selector.
  */
 
 import { icon, type IconName } from '../results/icons.js';
 import { uiSounds } from './uiSounds.js';
+import { t } from './i18n.js';
 
 export { notify, notificationsCss, type NotificationType, type NotificationOptions, type NotificationHandle } from './notifications.js';
 
 export interface MenuBarOptions {
   readonly onImportUrl: (url: string) => void;
-  readonly onImportOsu: (file: File) => void;
   readonly onImportOsz: (file: File) => void;
   readonly onImportOsr: (file: File) => void;
   readonly onSelectSkin: (skinName: string) => void;
@@ -99,7 +99,6 @@ export function buildMenuBar(options: MenuBarOptions): MenuBarHandle {
     return input;
   };
 
-  const osuFileInput = createFileInput('.osu', options.onImportOsu);
   const oszFileInput = createFileInput('.osz,.zip', options.onImportOsz);
   const osrFileInput = createFileInput('.osr', options.onImportOsr);
   const oskFileInput = createFileInput('.osk,.zip', options.onImportSkin);
@@ -116,11 +115,14 @@ export function buildMenuBar(options: MenuBarOptions): MenuBarHandle {
 
     const title = document.createElement('h3');
     title.className = 'rv-modal-title';
-    title.textContent = '从链接导入 / Import from URL';
+    title.textContent = t('从链接导入', 'Import from URL');
 
     const desc = document.createElement('p');
     desc.className = 'rv-modal-desc';
-    desc.textContent = '输入 osu! 成绩链接、谱面链接或 ID (Enter Score URL, Beatmap URL or ID):';
+    desc.textContent = t(
+      '输入 osu! 成绩链接、谱面链接或 ID:',
+      'Enter osu! score URL, beatmap URL or ID:',
+    );
 
     const input = document.createElement('input');
     input.type = 'text';
@@ -133,13 +135,13 @@ export function buildMenuBar(options: MenuBarOptions): MenuBarHandle {
     const cancelBtn = document.createElement('button');
     cancelBtn.type = 'button';
     cancelBtn.className = 'rv-modal-btn rv-modal-btn-cancel';
-    cancelBtn.textContent = '取消 (Cancel)';
+    cancelBtn.textContent = t('取消', 'Cancel');
     uiSounds.attachHoverClick(cancelBtn, { hover: 'button', click: false });
 
     const loadBtn = document.createElement('button');
     loadBtn.type = 'button';
     loadBtn.className = 'rv-modal-btn rv-modal-btn-primary';
-    loadBtn.textContent = '加载 (Load)';
+    loadBtn.textContent = t('加载', 'Load');
     uiSounds.attachHoverClick(loadBtn, { hover: 'button', click: false });
 
     const closeModal = (): void => {
@@ -396,19 +398,19 @@ export function buildMenuBar(options: MenuBarOptions): MenuBarHandle {
     const cur = options.getActiveMode?.() ?? 'replay';
     return [
       {
-        label: '单人回放 (Replay)',
+        label: t('单人回放', 'Single Replay'),
         icon: 'mode-single',
         isChecked: cur === 'replay',
         onClick: () => options.onSelectMode?.('replay'),
       },
       {
-        label: '自动演示 (Auto)',
+        label: t('自动演示', 'Auto Play'),
         icon: 'mode-auto',
         isChecked: cur === 'auto',
         onClick: () => options.onSelectMode?.('auto'),
       },
       {
-        label: '多人比赛 (Match)',
+        label: t('多人比赛', 'Multiplayer Match'),
         icon: 'mode-match',
         isChecked: cur === 'match',
         onClick: () => options.onSelectMode?.('match'),
@@ -420,30 +422,26 @@ export function buildMenuBar(options: MenuBarOptions): MenuBarHandle {
     const isHome = options.isHomePage !== undefined ? options.isHomePage() : false;
     return [
       {
-        label: '导入 (Import)',
+        label: t('导入', 'Import'),
         children: [
           {
-            label: '从链接导入… (From URL)',
+            label: t('从链接导入…', 'Import from URL…'),
             onClick: openUrlModal,
           },
           {
-            label: '从比赛房间导入… (Match Room)',
+            label: t('从比赛房间导入…', 'Import from Match Room…'),
             icon: 'mode-match',
             onClick: () => options.onOpenMatchRoom?.(),
           },
           {
-            label: '从本地导入 (Local Files)',
+            label: t('从本地导入', 'Import Local Files'),
             children: [
               {
-                label: '导入 .osu 谱面…',
-                onClick: () => osuFileInput.click(),
-              },
-              {
-                label: '导入 .osz 谱面包…',
+                label: t('导入 .osz 谱面包…', 'Import .osz Beatmap…'),
                 onClick: () => oszFileInput.click(),
               },
               {
-                label: '导入 .osr 回放…',
+                label: t('导入 .osr 回放…', 'Import .osr Replay…'),
                 onClick: () => osrFileInput.click(),
               },
             ],
@@ -452,11 +450,11 @@ export function buildMenuBar(options: MenuBarOptions): MenuBarHandle {
       },
       { isDivider: true, label: '' },
       {
-        label: '重新加载 (Reload)',
+        label: t('重新加载', 'Reload'),
         onClick: () => options.onReload?.(),
       },
       {
-        label: '主页面',
+        label: t('主页面', 'Home'),
         isDanger: true,
         isDisabled: isHome,
         onClick: isHome ? undefined : () => options.onExit?.(),
@@ -466,31 +464,31 @@ export function buildMenuBar(options: MenuBarOptions): MenuBarHandle {
 
   const getViewMenuItems = (): readonly MenuItemSpec[] => [
     {
-      label: '模式 (Mode)',
+      label: t('模式', 'Mode'),
       children: getModeItems,
     },
     {
-      label: '皮肤 (Skins)',
+      label: t('皮肤', 'Skins'),
       children: [
         {
-          label: '预设皮肤 (Presets)',
+          label: t('预设皮肤', 'Presets'),
           children: getPresetSkinItems,
         },
         {
-          label: '导入皮肤 (.osk / .zip)…',
+          label: t('导入皮肤 (.osk / .zip)…', 'Import Skin (.osk / .zip)…'),
           onClick: () => oskFileInput.click(),
         },
       ],
     },
     { isDivider: true, label: '' },
     {
-      label: '旧版播放器 (Legacy Viewer)',
+      label: t('旧版播放器', 'Legacy Viewer'),
       onClick: () => {
         window.location.href = '/legacy/';
       },
     },
     {
-      label: '全屏模式 (Toggle Fullscreen)',
+      label: t('全屏模式', 'Toggle Fullscreen'),
       badge: 'F11',
       onClick: () => options.onToggleFullscreen?.(),
     },
@@ -513,8 +511,8 @@ export function buildMenuBar(options: MenuBarOptions): MenuBarHandle {
     menuBarItems.append(btn);
   };
 
-  addTopButton('文件', getFileMenuItems);
-  addTopButton('查看', getViewMenuItems);
+  addTopButton(t('文件', 'File'), getFileMenuItems);
+  addTopButton(t('查看', 'View'), getViewMenuItems);
 
   return {
     root,

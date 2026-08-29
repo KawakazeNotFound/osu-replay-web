@@ -21,6 +21,7 @@ import {
   buildSettingsOverlay, type SettingsOverlayHandle, type SettingsSection, type SliderHandle,
 } from './settings.js';
 import { uiSounds, VOL_KEYS, readStoredVolume, writeStoredVolume } from './uiSounds.js';
+import { t } from './i18n.js';
 
 export interface MatchViewOptions {
   readonly host: HTMLElement;
@@ -54,7 +55,7 @@ export function buildMatchView(options: MatchViewOptions): MatchViewHandle {
   backBtn.type = 'button';
   backBtn.className = 'rv-match-btn rv-match-back-btn';
   backBtn.append(icon('rewind', { className: 'rv-icon' }));
-  backBtn.append(document.createTextNode('退出比赛 (Exit Match)'));
+  backBtn.append(document.createTextNode(t('退出比赛', 'Exit Match')));
   uiSounds.attachHoverClick(backBtn, { hover: 'button', click: false });
   backBtn.addEventListener('click', () => {
     uiSounds.playClick('button');
@@ -87,15 +88,15 @@ export function buildMatchView(options: MatchViewOptions): MatchViewHandle {
   mapSelectBtn.className = 'rv-match-btn rv-match-map-select-btn';
   const mapSelectLabel = document.createElement('span');
   mapSelectLabel.className = 'rv-match-map-select-label';
-  mapSelectLabel.textContent = '对局列表 (Maps)';
+  mapSelectLabel.textContent = t('对局列表', 'Match Maps');
   mapSelectBtn.append(icon('mode-match', { className: 'rv-icon' }), mapSelectLabel, icon('chevron-right', { className: 'rv-icon rv-rotate-90' }));
   uiSounds.attachHoverClick(mapSelectBtn, { hover: 'button', click: false });
 
   const settingsBtn = document.createElement('button');
   settingsBtn.type = 'button';
   settingsBtn.className = 'rv-match-btn rv-match-settings-btn';
-  settingsBtn.title = '回放设置面板 (Settings)';
-  settingsBtn.append(icon('settings', { className: 'rv-icon' }), document.createTextNode('设置 (Settings)'));
+  settingsBtn.title = t('回放设置面板', 'Replay Settings');
+  settingsBtn.append(icon('settings', { className: 'rv-icon' }), document.createTextNode(t('设置', 'Settings')));
   settingsBtn.style.display = 'none';
   uiSounds.attachHoverClick(settingsBtn, { hover: 'button', click: false });
   settingsBtn.addEventListener('click', () => {
@@ -120,7 +121,7 @@ export function buildMatchView(options: MatchViewOptions): MatchViewHandle {
 
   const standingsHeader = document.createElement('div');
   standingsHeader.className = 'rv-match-standings-header';
-  standingsHeader.textContent = '实时排名 (Leaderboard)';
+  standingsHeader.textContent = t('实时排名', 'Live Leaderboard');
 
   const standingsList = document.createElement('div');
   standingsList.className = 'rv-match-standings-list';
@@ -208,7 +209,7 @@ export function buildMatchView(options: MatchViewOptions): MatchViewHandle {
       row.className = 'rv-menu-row';
       if (avail === 0) {
         row.classList.add('rv-row-disabled');
-        row.title = '该谱面无可用回放 (No replays available)';
+        row.title = t('该谱面无可用回放', 'No replays available');
       }
 
       row.addEventListener('pointerenter', () => uiSounds.playHover('default'));
@@ -264,7 +265,7 @@ export function buildMatchView(options: MatchViewOptions): MatchViewHandle {
     switchRow.addEventListener('pointerenter', () => uiSounds.playHover('default'));
     const switchLabel = document.createElement('span');
     switchLabel.className = 'rv-menu-row-label';
-    switchLabel.append(icon('mode-match', { className: 'rv-icon rv-menu-item-icon' }), document.createTextNode('输入其他比赛房间… (Switch Room)'));
+    switchLabel.append(icon('mode-match', { className: 'rv-icon rv-menu-item-icon' }), document.createTextNode(t('输入其他比赛房间…', 'Switch Match Room…')));
     switchRow.append(switchLabel);
     switchRow.addEventListener('click', (e: MouseEvent) => {
       e.stopPropagation();
@@ -472,11 +473,11 @@ export function buildMatchView(options: MatchViewOptions): MatchViewHandle {
     let isLinked = false;
 
     const playbackSec: SettingsSection = {
-      title: 'Playback',
+      title: t('播放', 'Playback'),
       controls: [
         {
           kind: 'slider',
-          label: 'Playback speed',
+          label: t('播放速度', 'Playback speed'),
           min: 0.25, max: 2, step: 0.01, value: 1,
           format: v => `${v.toFixed(2)}x`,
           resetTo: 1,
@@ -495,11 +496,11 @@ export function buildMatchView(options: MatchViewOptions): MatchViewHandle {
 
     const firstOpts = match.slots[0]!.session.renderer.options;
     const displaySec: SettingsSection = {
-      title: 'Display',
+      title: t('画面', 'Display'),
       controls: [
         {
           kind: 'slider',
-          label: 'Background dim',
+          label: t('背景暗化', 'Background dim'),
           min: 0, max: 1, step: 0.01, value: firstOpts.backgroundDim,
           format: v => `${Math.round(v * 100)}%`,
           resetTo: 0.8,
@@ -510,38 +511,38 @@ export function buildMatchView(options: MatchViewOptions): MatchViewHandle {
           },
         },
         {
-          kind: 'toggle', label: 'Storyboard', value: firstOpts.showStoryboard, resetTo: true,
+          kind: 'toggle', label: t('故事版', 'Storyboard'), value: firstOpts.showStoryboard, resetTo: true,
           onChange: v => { for (const s of match.slots) s.session.renderer.options.showStoryboard = v; },
         },
         {
-          kind: 'toggle', label: 'Key overlay', value: firstOpts.showKeyOverlay, resetTo: true,
+          kind: 'toggle', label: t('按键显示', 'Key overlay'), value: firstOpts.showKeyOverlay, resetTo: true,
           onChange: v => { for (const s of match.slots) s.session.renderer.options.showKeyOverlay = v; },
         },
         {
-          kind: 'toggle', label: 'Judgements', value: firstOpts.showJudgement, resetTo: true,
+          kind: 'toggle', label: t('判定显示', 'Judgements'), value: firstOpts.showJudgement, resetTo: true,
           onChange: v => { for (const s of match.slots) s.session.renderer.options.showJudgement = v; },
         },
         {
-          kind: 'toggle', label: 'Unstable rate bar', value: firstOpts.showURBar, resetTo: true,
+          kind: 'toggle', label: t('UR 误差条', 'Unstable rate bar'), value: firstOpts.showURBar, resetTo: true,
           onChange: v => { for (const s of match.slots) s.session.renderer.options.showURBar = v; },
         },
         {
-          kind: 'toggle', label: 'Follow points', value: firstOpts.showFollowpoints, resetTo: true,
+          kind: 'toggle', label: t('跟随时条', 'Follow points'), value: firstOpts.showFollowpoints, resetTo: true,
           onChange: v => { for (const s of match.slots) s.session.renderer.options.showFollowpoints = v; },
         },
         {
-          kind: 'toggle', label: 'Mod icons', value: firstOpts.showModIcons, resetTo: true,
+          kind: 'toggle', label: t('Mod 图标', 'Mod icons'), value: firstOpts.showModIcons, resetTo: true,
           onChange: v => { for (const s of match.slots) s.session.renderer.options.showModIcons = v; },
         },
       ],
     };
 
     const audioSec: SettingsSection = {
-      title: 'Audio',
+      title: t('音频', 'Audio'),
       controls: [
         {
           kind: 'slider',
-          label: 'Music volume',
+          label: t('音乐音量', 'Music volume'),
           min: 0, max: 1, step: 0.01, value: songVol,
           format: v => `${Math.round(v * 100)}%`,
           resetTo: 0.25,
@@ -585,7 +586,7 @@ export function buildMatchView(options: MatchViewOptions): MatchViewHandle {
         },
         {
           kind: 'slider',
-          label: 'Effects volume',
+          label: t('音效音量', 'Effects volume'),
           min: 0, max: 1, step: 0.01, value: fxVol,
           format: v => `${Math.round(v * 100)}%`,
           resetTo: 0.25,
@@ -605,7 +606,7 @@ export function buildMatchView(options: MatchViewOptions): MatchViewHandle {
         },
         {
           kind: 'slider',
-          label: 'Audio offset',
+          label: t('音频偏移', 'Audio offset'),
           min: -200, max: 200, step: 1, value: firstOpts.audioOffsetMs,
           format: v => `${v > 0 ? '+' : ''}${v} ms`,
           resetTo: 0,
@@ -620,7 +621,7 @@ export function buildMatchView(options: MatchViewOptions): MatchViewHandle {
         },
         {
           kind: 'slider',
-          label: 'UI sound volume',
+          label: t('界面音效音量', 'UI sound volume'),
           min: 0, max: 1, step: 0.01, value: uiSounds.getVolume(),
           format: v => `${Math.round(v * 100)}%`,
           resetTo: 0.25,
@@ -758,11 +759,11 @@ export function buildMatchView(options: MatchViewOptions): MatchViewHandle {
 
     const title = document.createElement('h3');
     title.className = 'rv-modal-title';
-    title.textContent = '多人房间回放 / Multiplayer Match Room';
+    title.textContent = t('多人房间回放', 'Multiplayer Match Room');
 
     const desc = document.createElement('p');
     desc.className = 'rv-modal-desc';
-    desc.textContent = '输入 osu! 比赛链接或房间 ID (Enter Match URL or Room ID):';
+    desc.textContent = t('输入 osu! 比赛链接或房间 ID:', 'Enter Match URL or Room ID:');
 
     const inputRow = document.createElement('div');
     inputRow.className = 'rv-match-input-row';
@@ -775,7 +776,7 @@ export function buildMatchView(options: MatchViewOptions): MatchViewHandle {
     const fetchBtn = document.createElement('button');
     fetchBtn.type = 'button';
     fetchBtn.className = 'rv-modal-btn rv-modal-btn-primary';
-    fetchBtn.textContent = '获取房间 (Fetch)';
+    fetchBtn.textContent = t('获取房间', 'Fetch Room');
     uiSounds.attachHoverClick(fetchBtn, { hover: 'button', click: false });
 
     inputRow.append(input, fetchBtn);
@@ -789,7 +790,7 @@ export function buildMatchView(options: MatchViewOptions): MatchViewHandle {
     const cancelBtn = document.createElement('button');
     cancelBtn.type = 'button';
     cancelBtn.className = 'rv-modal-btn rv-modal-btn-cancel';
-    cancelBtn.textContent = '关闭 (Close)';
+    cancelBtn.textContent = t('关闭', 'Close');
     uiSounds.attachHoverClick(cancelBtn, { hover: 'button', click: false });
 
     const closeDialog = (): void => {
@@ -812,13 +813,13 @@ export function buildMatchView(options: MatchViewOptions): MatchViewHandle {
       const roomId = parseRoomRef(val);
       if (roomId === null) {
         uiSounds.playError();
-        statusMsg.textContent = '请输入有效的比赛链接或纯数字房间 ID (Invalid Room ID)';
+        statusMsg.textContent = t('请输入有效的比赛链接或纯数字房间 ID', 'Please enter a valid match URL or numeric room ID');
         statusMsg.className = 'rv-match-modal-status rv-status-error';
         return;
       }
 
       uiSounds.playClick('dialog-ok');
-      statusMsg.textContent = '正在获取比赛房间信息 (Fetching room data)…';
+      statusMsg.textContent = t('正在获取比赛房间信息…', 'Fetching match room data…');
       statusMsg.className = 'rv-match-modal-status';
 
       try {
@@ -837,7 +838,7 @@ export function buildMatchView(options: MatchViewOptions): MatchViewHandle {
         }
       } catch (err) {
         uiSounds.playError();
-        statusMsg.textContent = `获取失败: ${err instanceof Error ? err.message : String(err)}`;
+        statusMsg.textContent = `${t('获取失败: ', 'Failed to fetch: ')}${err instanceof Error ? err.message : String(err)}`;
         statusMsg.className = 'rv-match-modal-status rv-status-error';
       }
     };

@@ -12,6 +12,7 @@
 import type { CoreSession } from '../../src/index.js';
 import type { ResultsPanelData } from '../results/panel.js';
 import { uiSounds } from './uiSounds.js';
+import { t } from './i18n.js';
 
 export interface PlayerLoaderOptions {
   readonly host: HTMLElement;
@@ -589,9 +590,9 @@ export function buildPlayerLoader(options: PlayerLoaderOptions): PlayerLoaderHan
   const metaInfoRow = document.createElement('div');
   metaInfoRow.className = 'pl-meta-info-row';
   const sourceText = document.createElement('div');
-  sourceText.textContent = `来源 ${panel.source ? panel.source : '-'}`;
+  sourceText.textContent = `${t('来源', 'Source')} ${panel.source ? panel.source : '-'}`;
   const mapperText = document.createElement('div');
-  mapperText.textContent = `谱面作者 ${panel.mapper || panel.playerName || '-'}`;
+  mapperText.textContent = `${t('谱面作者', 'Mapped by')} ${panel.mapper || panel.playerName || '-'}`;
   metaInfoRow.append(sourceText, mapperText);
 
   metadata.append(metaTitle, metaArtist, metaBanner, metaDiff, metaBadgeRow, metaInfoRow);
@@ -606,10 +607,10 @@ export function buildPlayerLoader(options: PlayerLoaderOptions): PlayerLoaderHan
   disclaimerContent.className = 'pl-disclaimer-content';
   const discTitle = document.createElement('div');
   discTitle.className = 'pl-disclaimer-title';
-  discTitle.textContent = '这张谱面包含颜色快速切换闪烁的场景';
+  discTitle.textContent = t('这张谱面包含颜色快速切换闪烁的场景', 'This beatmap contains rapid visual strobe/flashes');
   const discDesc = document.createElement('div');
   discDesc.className = 'pl-disclaimer-desc';
-  discDesc.textContent = '如果你患有光敏性癫痫症，请务必注意。';
+  discDesc.textContent = t('如果你患有光敏性癫痫症，请务必注意。', 'Please take caution if you are susceptible to photosensitive epilepsy.');
   disclaimerContent.append(discTitle, discDesc);
   disclaimer.append(disclaimerBar, disclaimerContent);
 
@@ -734,23 +735,23 @@ export function buildPlayerLoader(options: PlayerLoaderOptions): PlayerLoaderHan
   displayGroup.className = 'pl-settings-group';
   const displayTitle = document.createElement('div');
   displayTitle.className = 'pl-group-title';
-  displayTitle.textContent = '显示设置';
+  displayTitle.textContent = t('显示设置', 'Display Settings');
 
   let currentBlur = 0;
   displayGroup.append(
     displayTitle,
-    buildSliderRow('背景暗化', 0, 1, 0.01, session.renderer.options.backgroundDim, v => `${Math.round(v * 100)}%`, v => {
+    buildSliderRow(t('背景暗化', 'Background dim'), 0, 1, 0.01, session.renderer.options.backgroundDim, v => `${Math.round(v * 100)}%`, v => {
       session.renderer.options.backgroundDim = v;
     }),
-    buildSliderRow('背景模糊', 0, 1, 0.01, currentBlur, v => `${Math.round(v * 100)}%`, v => {
+    buildSliderRow(t('背景模糊', 'Background blur'), 0, 1, 0.01, currentBlur, v => `${Math.round(v * 100)}%`, v => {
       currentBlur = v;
     }),
-    buildToggleRow('故事板 / 视频', session.renderer.options.showStoryboard, v => {
+    buildToggleRow(t('故事版 / 视频', 'Storyboard / Video'), session.renderer.options.showStoryboard, v => {
       session.renderer.options.showStoryboard = v;
     }),
-    buildToggleRow('谱面皮肤', true, () => {}),
-    buildToggleRow('谱面连击颜色', true, () => {}),
-    buildSliderRow('连击颜色标准化程度', 0, 1, 0.01, 1, v => `${Math.round(v * 100)}%`, () => {}),
+    buildToggleRow(t('谱面皮肤', 'Beatmap skins'), true, () => {}),
+    buildToggleRow(t('谱面连击颜色', 'Beatmap combo colours'), true, () => {}),
+    buildSliderRow(t('连击颜色标准化程度', 'Combo colour normalisation'), 0, 1, 0.01, 1, v => `${Math.round(v * 100)}%`, () => {}),
   );
 
   // Group 2: 音频设置 (Audio Settings)
@@ -758,14 +759,14 @@ export function buildPlayerLoader(options: PlayerLoaderOptions): PlayerLoaderHan
   audioGroup.className = 'pl-settings-group';
   const audioTitle = document.createElement('div');
   audioTitle.className = 'pl-group-title';
-  audioTitle.textContent = '音频设置';
+  audioTitle.textContent = t('音频设置', 'Audio Settings');
 
   audioGroup.append(
     audioTitle,
-    buildToggleRow('谱面打击音效', true, v => {
+    buildToggleRow(t('谱面打击音效', 'Beatmap hitsounds'), true, v => {
       session.audioSync.setBeatmapHitsounds(v);
     }),
-    buildSliderRow('音频偏移（此谱面）', -200, 200, 1, session.renderer.options.audioOffsetMs, v => `${v > 0 ? '+' : ''}${v} ms`, v => {
+    buildSliderRow(t('音频偏移（此谱面）', 'Audio offset (this map)'), -200, 200, 1, session.renderer.options.audioOffsetMs, v => `${v > 0 ? '+' : ''}${v} ms`, v => {
       session.renderer.options.audioOffsetMs = v;
     }),
   );
@@ -775,11 +776,11 @@ export function buildPlayerLoader(options: PlayerLoaderOptions): PlayerLoaderHan
   inputGroup.className = 'pl-settings-group';
   const inputTitle = document.createElement('div');
   inputTitle.className = 'pl-group-title';
-  inputTitle.textContent = '输入设置';
+  inputTitle.textContent = t('输入设置', 'Input Settings');
 
   inputGroup.append(
     inputTitle,
-    buildToggleRow('在游戏中禁用鼠标点击', true, () => {}),
+    buildToggleRow(t('在游戏中禁用鼠标点击', 'Disable mouse buttons during gameplay'), true, () => {}),
   );
 
   drawer.append(displayGroup, audioGroup, inputGroup);
@@ -792,7 +793,7 @@ export function buildPlayerLoader(options: PlayerLoaderOptions): PlayerLoaderHan
   backIcon.className = 'pl-back-icon-circle';
   backIcon.textContent = '❮';
   const backLabel = document.createElement('span');
-  backLabel.textContent = '返回';
+  backLabel.textContent = t('返回', 'Back');
   backBtn.append(backIcon, backLabel);
   uiSounds.attachHoverClick(backBtn, { hover: 'button', click: false });
 

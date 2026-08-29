@@ -3,6 +3,7 @@
 import type { LocalDifficulty } from './localBeatmap.js';
 import { icon } from '../results/icons.js';
 import { uiSounds } from './uiSounds.js';
+import { t } from './i18n.js';
 
 const MODE_NAMES = ['osu!standard', 'osu!taiko', 'osu!catch', 'osu!mania'] as const;
 
@@ -89,10 +90,13 @@ export function chooseLocalDifficulty(
     const title = document.createElement('h2');
     title.id = 'rv-difficulty-title';
     title.className = 'rv-difficulty-title';
-    title.textContent = '选择难度 (Select difficulty)';
+    title.textContent = t('选择难度', 'Select Difficulty');
     const help = document.createElement('p');
     help.className = 'rv-difficulty-help';
-    help.textContent = '此谱面包包含多个难度。请选择要生成自动演示的一个。';
+    help.textContent = t(
+      '此谱面包包含多个难度。请选择要生成自动演示的一个。',
+      'This beatmap set contains multiple difficulties. Please select one for auto play.',
+    );
     heading.append(title, help);
 
     const list = document.createElement('ol');
@@ -131,7 +135,7 @@ export function chooseLocalDifficulty(
       meta.className = 'rv-difficulty-meta';
       for (const value of [
         MODE_NAMES[choice.mode] ?? `mode ${choice.mode}`,
-        `${choice.objectCount} objects`,
+        `${choice.objectCount} ${t('个物件', 'objects')}`,
         `AR ${formatNumber(choice.approachRate)}`,
         `OD ${formatNumber(choice.overallDifficulty)}`,
         `CS ${formatNumber(choice.circleSize)}`,
@@ -156,7 +160,7 @@ export function chooseLocalDifficulty(
     const cancel = document.createElement('button');
     cancel.type = 'button';
     cancel.className = 'rv-difficulty-cancel';
-    cancel.textContent = '取消 (Cancel)';
+    cancel.textContent = t('取消', 'Cancel');
     uiSounds.attachHoverClick(cancel, { hover: 'button', click: false });
     cancel.addEventListener('click', () => {
       uiSounds.playClick('dialog-cancel');

@@ -24,6 +24,7 @@ import {
 } from './volume-meter.js';
 import { uiSounds, VOL_KEYS, readStoredVolume, writeStoredVolume } from './uiSounds.js';
 import { buildPlayerLoader, playerLoaderCss, type PlayerLoaderHandle } from './playerLoader.js';
+import { t } from './i18n.js';
 
 export interface FlowOptions {
   /** Where both screens mount. */
@@ -143,11 +144,11 @@ export function sessionSettings(
   };
 
   const playback: SettingsSection = {
-    title: 'Playback',
+    title: t('播放', 'Playback'),
     controls: [
       {
         kind: 'slider',
-        label: 'Playback speed',
+        label: t('播放速度', 'Playback speed'),
         min: 0.25, max: 2, step: 0.01, value: 1,
         format: v => `${v.toFixed(2)}x`,
         resetTo: 1,
@@ -166,11 +167,11 @@ export function sessionSettings(
   };
 
   const display: SettingsSection = {
-    title: 'Display',
+    title: t('画面', 'Display'),
     controls: [
       {
         kind: 'slider',
-        label: 'Background dim',
+        label: t('背景暗化', 'Background dim'),
         min: 0, max: 1, step: 0.01, value: options.backgroundDim,
         format: v => `${Math.round(v * 100)}%`,
         resetTo: 0.8,
@@ -179,27 +180,27 @@ export function sessionSettings(
         onChange: v => { options.backgroundDim = v; },
       },
       {
-        kind: 'toggle', label: 'Storyboard', value: options.showStoryboard, resetTo: true,
+        kind: 'toggle', label: t('故事版', 'Storyboard'), value: options.showStoryboard, resetTo: true,
         onChange: v => { options.showStoryboard = v; },
       },
       {
-        kind: 'toggle', label: 'Key overlay', value: options.showKeyOverlay, resetTo: true,
+        kind: 'toggle', label: t('按键显示', 'Key overlay'), value: options.showKeyOverlay, resetTo: true,
         onChange: v => { options.showKeyOverlay = v; },
       },
       {
-        kind: 'toggle', label: 'Judgements', value: options.showJudgement, resetTo: true,
+        kind: 'toggle', label: t('判定显示', 'Judgements'), value: options.showJudgement, resetTo: true,
         onChange: v => { options.showJudgement = v; },
       },
       {
-        kind: 'toggle', label: 'Unstable rate bar', value: options.showURBar, resetTo: true,
+        kind: 'toggle', label: t('UR 误差条', 'Unstable rate bar'), value: options.showURBar, resetTo: true,
         onChange: v => { options.showURBar = v; },
       },
       {
-        kind: 'toggle', label: 'Follow points', value: options.showFollowpoints, resetTo: true,
+        kind: 'toggle', label: t('跟随时条', 'Follow points'), value: options.showFollowpoints, resetTo: true,
         onChange: v => { options.showFollowpoints = v; },
       },
       {
-        kind: 'toggle', label: 'Mod icons', value: options.showModIcons, resetTo: true,
+        kind: 'toggle', label: t('Mod 图标', 'Mod icons'), value: options.showModIcons, resetTo: true,
         onChange: v => { options.showModIcons = v; },
       },
     ],
@@ -220,8 +221,8 @@ export function sessionSettings(
       linkBtn.classList.toggle('ps-linked', isVolumeLinked);
       linkBtn.setAttribute('aria-pressed', String(isVolumeLinked));
       linkBtn.title = isVolumeLinked
-        ? 'Volumes are linked (synced). Click to unlink.'
-        : 'Link Music and Effects volumes (sync adjustments)';
+        ? t('音量已联动同步。点击取消联动。', 'Volumes are linked. Click to unlink.')
+        : t('联动音乐与音效音量', 'Link Music and Effects volumes');
     }
   };
 
@@ -345,12 +346,12 @@ export function sessionSettings(
     linkBtn = document.createElement('button');
     linkBtn.type = 'button';
     linkBtn.className = 'ps-volume-link-btn';
-    linkBtn.setAttribute('aria-label', 'Link Music and Effects volumes');
+    linkBtn.setAttribute('aria-label', t('联动音乐与音效音量', 'Link Music and Effects volumes'));
     uiSounds.attachHoverClick(linkBtn, { hover: 'button', click: false });
 
     const linkText = document.createElement('span');
     linkText.className = 'ps-volume-link-text';
-    linkText.textContent = 'Link';
+    linkText.textContent = t('同步', 'Link');
 
     linkBtn.append(
       icon('link', { className: 'rv-icon' }),
@@ -367,10 +368,10 @@ export function sessionSettings(
   };
 
   const audio: SettingsSection = {
-    title: 'Audio',
+    title: t('音频', 'Audio'),
     controls: [
       {
-        kind: 'slider', label: 'Music volume',
+        kind: 'slider', label: t('音乐音量', 'Music volume'),
         min: 0, max: 1, step: 0.01, value: currentSongVolume,
         format: v => `${Math.round(v * 100)}%`,
         resetTo: 0.25,
@@ -384,7 +385,7 @@ export function sessionSettings(
         render: buildVolumeLinkDivider,
       },
       {
-        kind: 'slider', label: 'Effects volume',
+        kind: 'slider', label: t('音效音量', 'Effects volume'),
         min: 0, max: 1, step: 0.01, value: currentEffectsVolume,
         format: v => `${Math.round(v * 100)}%`,
         resetTo: 0.25,
@@ -394,11 +395,11 @@ export function sessionSettings(
         onChange: onEffectsChange,
       },
       {
-        kind: 'toggle', label: 'Beatmap hitsounds', value: true, resetTo: true,
+        kind: 'toggle', label: t('谱面打击音效', 'Beatmap hitsounds'), value: true, resetTo: true,
         onChange: v => audioSync.setBeatmapHitsounds(v),
       },
       {
-        kind: 'slider', label: 'Audio offset',
+        kind: 'slider', label: t('音频偏移', 'Audio offset'),
         min: -200, max: 200, step: 1, value: options.audioOffsetMs,
         format: v => `${v > 0 ? '+' : ''}${v} ms`,
         resetTo: 0,
@@ -410,7 +411,7 @@ export function sessionSettings(
         onChange: v => { options.audioOffsetMs = v; },
       },
       {
-        kind: 'slider', label: 'UI sound volume',
+        kind: 'slider', label: t('界面音效音量', 'UI sound volume'),
         min: 0, max: 1, step: 0.01, value: uiSounds.getVolume(),
         format: v => `${Math.round(v * 100)}%`,
         resetTo: 0.25,

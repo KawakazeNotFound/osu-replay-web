@@ -14,6 +14,7 @@ import { buildAccuracyCircle } from './accuracyCircle.js';
 import { icon, iconCss } from './icons.js';
 import type { RankCutoffs } from './accuracyGauge.js';
 import { uiSounds } from '../player/uiSounds.js';
+import { t } from '../player/i18n.js';
 import {
   FONT, HIT_RESULT_COLOUR, LAYOUT, PANEL, PANEL_COLOUR, PERFECT_GRADIENT, RANK_COLOUR,
   formatAccuracy, formatPP, formatScore,
@@ -244,11 +245,11 @@ export function buildResultsPanel(
     replayButton = document.createElement('button');
     replayButton.className = 'rs-watch';
     replayButton.type = 'button';
-    replayButton.title = 'Watch replay';
+    replayButton.title = t('观看回放', 'Watch replay');
     // The download-with-tick, as osu! marks an available replay — not a cursor glyph.
     replayButton.append(
       icon('download-check', { className: 'rv-icon rv-icon-wide rs-watch-icon' }),
-      text('span', 'rs-watch-label', 'Watch replay'),
+      text('span', 'rs-watch-label', t('观看回放', 'Watch replay')),
     );
     uiSounds.attachHoverClick(replayButton, { hover: 'button', click: false });
     replayButton.addEventListener('click', () => {
