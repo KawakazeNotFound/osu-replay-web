@@ -436,10 +436,10 @@ export function settingsOverlayCss(): string {
   return `
 .ps-overlay {
   position: absolute;
-  top: 0; right: 0; bottom: 0;
+  top: 0; right: 0; bottom: 42px;
   width: 330px;
   box-sizing: border-box;
-  padding: 14px;
+  padding: 14px 14px 8px;
   display: flex; flex-direction: column; gap: 12px;
   overflow-y: auto;
   /* Transparent container so the playfield and artwork behind remain clearly visible */

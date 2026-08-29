@@ -140,6 +140,7 @@ export function buildTransport(session: CoreSession): TransportHandle {
 
   const onPointerDown = (event: PointerEvent): void => {
     dragging = true;
+    track.classList.add('pt-dragging');
     dragMs = msFromPointer(event.clientX);
     track.setPointerCapture(event.pointerId);
     uiSounds.playOsd('change');
@@ -154,6 +155,7 @@ export function buildTransport(session: CoreSession): TransportHandle {
   const onPointerUp = (event: PointerEvent): void => {
     if (!dragging) return;
     dragging = false;
+    track.classList.remove('pt-dragging');
     if (track.hasPointerCapture(event.pointerId)) track.releasePointerCapture(event.pointerId);
   };
 
@@ -229,48 +231,81 @@ export function transportCss(): string {
   margin: 0 6px;
 }
 
-/* Scrub bar: sits on the playback surface, so it is glass rather than a solid strip.
-   The engine draws its own HUD along the bottom — the combo counter bottom-left and the
-   unstable-rate bar bottom-centre — so this row is pushed clear of both rather than laid over
-   them, which made all three unreadable. */
+/* Scrub bar: sits along the bottom of the playback screen */
 .pt-scrubber {
   position: absolute; left: 0; right: 0; bottom: 0;
-  display: flex; align-items: center; gap: 10px;
-  padding: 8px 20px 8px;
-  /* Own background rather than a gradient over gameplay: the engine's HUD is directly above, so
-     a soft fade would leave the bar sitting in a muddy overlap. */
-  background: rgba(0, 0, 0, 0.55);
+  height: 42px;
+  box-sizing: border-box;
+  display: flex; align-items: center; gap: 14px;
+  padding: 0 20px;
+  background: rgba(0, 0, 0, 0.7);
   backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);
-  z-index: 15;
+  z-index: 30;
+  user-select: none;
 }
 .pt-time {
-  color: #ffffff; font-size: 12px; font-variant-numeric: tabular-nums;
-  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.7);
-  min-width: 34px; text-align: center;
+  color: #ffffff;
+  font-size: 13px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.85);
+  min-width: 38px;
+  text-align: center;
+  user-select: none;
 }
 .pt-track {
-  position: relative; flex: 1; height: 16px;
-  display: flex; align-items: center;
+  position: relative;
+  flex: 1;
+  height: 20px;
+  display: flex;
+  align-items: center;
   cursor: pointer;
   touch-action: none;
+  user-select: none;
+  outline: none;
 }
-/* The visible line is thinner than the hit area: a 4px bar is hard to grab, but a 16px one
-   looks heavy. */
+/* Thin slider track with smooth pill nub (matching Image 2 osu!lazer style) */
 .pt-track::before {
-  content: ""; position: absolute; left: 0; right: 0; height: 4px;
-  border-radius: 2px; background: rgba(255, 255, 255, 0.28);
+  content: "";
+  position: absolute;
+  left: 0; right: 0;
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.16);
+  transition: background 150ms ease;
+}
+.pt-track:hover::before {
+  background: rgba(255, 255, 255, 0.28);
 }
 .pt-fill {
-  position: absolute; left: 0; height: 4px; width: 0;
-  border-radius: 2px; background: ${accent};
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  height: 4px;
+  width: 0%;
+  border-radius: 2px;
+  background: ${accent};
+  pointer-events: none;
 }
 .pt-knob {
-  position: absolute; top: 50%; left: 0;
-  width: 12px; height: 12px; border-radius: 50%;
+  position: absolute;
+  top: 50%;
+  left: 0%;
+  width: 34px;
+  height: 14px;
+  border-radius: 7px;
   background: ${accent};
   transform: translate(-50%, -50%);
   pointer-events: none;
+  transition: transform 80ms ease;
+}
+.pt-track:hover .pt-knob {
+  transform: translate(-50%, -50%) scale(1.05);
+}
+.pt-track.pt-dragging .pt-knob {
+  transform: translate(-50%, -50%) scale(1.1);
 }
 `;
 }
