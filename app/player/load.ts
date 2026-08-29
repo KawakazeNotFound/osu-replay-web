@@ -21,6 +21,7 @@ import {
 } from '../../src/index.js';
 import { JUDGEMENT_COLOUR, type ResultsPanelData, type StatisticEntry } from '../results/panel.js';
 import type { LoadedReplay } from './flow.js';
+import type { LocalPerformance } from './performance.js';
 import {
   downloadReplay, fetchBeatmapOsu, fetchScoreMeta, parseScoreRef, scoreRefFromReplay,
   type ScoreMeta,
@@ -112,6 +113,8 @@ export function resultsDataFromSession(
     readonly fromHeader: boolean;
     readonly avatarUrl?: string | null;
     readonly pp?: number | null;
+    /** Set when `pp` came from rosu-pp here rather than from osu!'s own score record. */
+    readonly ppComputed?: boolean;
     readonly starRating?: number | null;
     readonly playedOn?: string | null;
   },
@@ -195,6 +198,7 @@ export function resultsDataFromSession(
     // which is what PERFECT actually means — so use that, and leave the denominator out.
     beatmapMaxCombo: meta.fromHeader && replay.perfect ? maxCombo : null,
     pp: meta.pp ?? null,
+    ...(meta.ppComputed === true ? { ppComputed: true } : {}),
     starRating: (meta.starRating !== undefined && meta.starRating !== null)
       ? meta.starRating
       : estimateStarRating(beatmap),
@@ -345,6 +349,23 @@ async function starRatingForHash(hash: string): Promise<number | null> {
   }
 }
 
+/**
+ * Difficulty and pp computed from the beatmap that was actually played, or null when rosu-pp could
+ * not answer (no `.osu` bytes, a map it declines, a `.wasm` that would not load).
+ *
+ * The calculator is imported here rather than at module scope so its ~900 KB is fetched only by a
+ * session that needs a figure osu! cannot supply.
+ */
+async function localPerformance(
+  session: CoreSession,
+  replay: ReplayData,
+): Promise<LocalPerformance | null> {
+  const rawOsu = session.beatmap.rawOsu;
+  if (rawOsu === undefined) return null;
+  const { computeLocalPerformance } = await import('./performance.js');
+  return await computeLocalPerformance(rawOsu, replay);
+}
+
 /** Shared session construction, so every entry point agrees on skin and defaults. */
 async function buildSession(
   replay: ReplayData,
@@ -412,16 +433,21 @@ export async function loadLocalReplay(
   const session = await buildSession(replay, oszBuffer, options);
   const meta = await metaPromise;
 
+  // Only when osu! had nothing to give: its own figure is the authoritative one, and asking
+  // rosu-pp as well would download the calculator to second-guess it.
+  const local = meta?.pp == null ? await localPerformance(session, replay) : null;
+
   return {
     session,
     startAtMs: 0,
     panel: resultsDataFromSession(session, {
       fromHeader: true,
       avatarUrl: meta?.avatarUrl ?? null,
-      pp: meta?.pp ?? null,
-      // Both sources report the same nomod figure (see fetchScoreMeta), so either will do —
-      // prefer whichever answered.
-      starRating: meta?.starRating ?? mirrorStarRating,
+      pp: meta?.pp ?? local?.pp ?? null,
+      ...(meta?.pp == null && local !== null ? { ppComputed: true } : {}),
+      // rosu-pp's rating has the play's mods applied; the API and the mirrors both report the
+      // nomod figure (see fetchScoreMeta), so the computed one is preferred when there is one.
+      starRating: local?.stars ?? meta?.starRating ?? mirrorStarRating,
       playedOn: formatPlayedOn(meta?.endedAt ?? null),
     }),
   };
@@ -529,13 +555,17 @@ export async function loadLocalAuto(
   const replay = generateAutoReplayForBeatmap(beatmap, hash);
   const session = await buildSession(replay, oszBuffer, options);
 
+  // An Auto replay has no online score behind it, so rosu-pp is the only source of a figure —
+  // what a perfect play on this map with these mods is worth.
+  const local = await localPerformance(session, replay);
+
   return {
     session,
     startAtMs: 0,
-    // No online score behind an Auto replay, so pp stays unknown however the map was obtained.
     panel: resultsDataFromSession(session, {
       fromHeader: false,
-      starRating: await starRatingPromise,
+      ...(local !== null ? { pp: local.pp, ppComputed: true } : {}),
+      starRating: local?.stars ?? await starRatingPromise,
     }),
   };
 }
@@ -565,13 +595,18 @@ export async function loadAutoFromBeatmap(
 
   const replay = generateAutoReplayForBeatmap(beatmap, hash);
   const session = await buildSession(replay, oszBuffer, options);
+  const local = await localPerformance(session, replay);
 
   return {
     session,
     startAtMs: 0,
-    // Synthesised: no header totals to trust, so counts come from the analysis. There is no
-    // online score behind an Auto replay, so pp stays unknown.
-    panel: resultsDataFromSession(session, { fromHeader: false, starRating: info.starRating }),
+    // Synthesised: no header totals to trust, so counts come from the analysis. No online score
+    // either, so any pp here is rosu-pp's — what a perfect play on this map is worth.
+    panel: resultsDataFromSession(session, {
+      fromHeader: false,
+      ...(local !== null ? { pp: local.pp, ppComputed: true } : {}),
+      starRating: local?.stars ?? info.starRating,
+    }),
   };
 }
 

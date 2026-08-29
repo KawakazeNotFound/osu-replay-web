@@ -52,6 +52,12 @@ export interface ResultsPanelData {
   readonly beatmapMaxCombo: number | null;
   /** null when we cannot know it — see the pp note in SELF_HOSTING.md. */
   readonly pp: number | null;
+  /**
+   * True when `pp` was computed here by rosu-pp rather than taken from the score osu! recorded.
+   * Both are real figures, but rosu-pp tracks osu!'s algorithms rather than being them, so a
+   * computed value can differ from the site's — the panel says which one it is showing.
+   */
+  readonly ppComputed?: boolean;
   /** null when the star rating is unavailable. */
   readonly starRating: number | null;
 
@@ -221,7 +227,14 @@ export function buildResultsPanel(
       : {}),
   };
   const ppEntry: StatisticEntry = data.pp !== null
-    ? { label: 'pp', value: formatPP(data.pp) }
+    ? {
+        label: 'pp',
+        value: formatPP(data.pp),
+        // Says where the number came from, the way the combo cell hangs "PERFECT" off itself.
+        // A computed figure is real but not osu!'s own, and that difference matters to anyone
+        // comparing it against their profile.
+        ...(data.ppComputed === true ? { badge: 'CALCULATED' } : {}),
+      }
     // Half alpha is lazer's own treatment for a pp value that does not apply; here it marks
     // one we cannot compute, rather than printing a number we made up.
     : { label: 'pp', value: '-', dimmed: true };

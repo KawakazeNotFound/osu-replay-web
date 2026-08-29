@@ -151,7 +151,14 @@ neither `index.html` nor `DEFAULT_SKINS`, so capture never saw them and every lo
   - There is **no UI toggle** in the captured page — upstream's options panel has no storyboard
     checkbox, so `RenderOptions.showStoryboard` defaults to on there. The modern UI (at `/` and `/replay`)
     does expose one.
-- **The pp counter is inert** — see the engine swap above.
+- **The live pp counter is inert** — see the engine swap above. The *results panel* does show pp:
+  from the score osu! recorded when there is one, and otherwise computed locally by rosu-pp
+  (`vendor/rosu-pp-js/`, wired up in `app/player/performance.ts`), which is the only source for an
+  Auto replay or an unsubmitted play. A computed figure is labelled `CALCULATED`, because rosu-pp
+  tracks osu!'s algorithms rather than being them and osu! reworks them. rosu-pp also gives a
+  **mod-adjusted** star rating, which neither the API's `difficulty_rating` nor the mirrors do —
+  both report the nomod figure. Turning the live counter back on is now a matter of wiring
+  rosu-pp's `GradualPerformance` into an overlay, not of writing a calculator.
 
 ## Rate limits
 

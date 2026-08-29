@@ -146,4 +146,22 @@ for (const [from, to] of assetPairs) {
   await fs.cp(from, to, { recursive: true });
 }
 
+// rosu-pp's WebAssembly binary, served as a plain asset rather than bundled: app/player/
+// performance.ts hands its URL to the wasm-bindgen init, and esbuild only ever sees the JS glue.
+// One copy at the origin root, because the loader uses an absolute path and the app answers on
+// both `/` and `/app/dev`.
+const WASM_NAME = 'rosu_pp_js_bg.wasm';
+const wasmFrom = path.join('vendor', 'rosu-pp-js', WASM_NAME);
+try {
+  await fs.access(wasmFrom);
+} catch {
+  throw new Error(
+    `missing ${wasmFrom} — the browser build of rosu-pp is vendored, not installed from npm `
+    + '(the npm package is the Node build and cannot run in a browser). See vendor/rosu-pp-js/.',
+  );
+}
+await fs.rm(path.join(SITE_DIR, 'rosu-pp'), { recursive: true, force: true });
+await fs.mkdir(path.join(SITE_DIR, 'rosu-pp'), { recursive: true });
+await fs.copyFile(wasmFrom, path.join(SITE_DIR, 'rosu-pp', WASM_NAME));
+
 console.log('built modern replay viewer into site/ (default /, /replay, /preview, and /app/dev)');
