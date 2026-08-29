@@ -70,12 +70,11 @@ function flowCss(): string {
 }
 .rv-screen[hidden] { display: none; }
 .rv-results {
-  overflow-y: auto;
-  padding: 24px 0;
-  align-items: flex-start;
-}
-.rv-results > * {
-  margin: auto 0;
+  position: absolute; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  overflow: hidden;
+  padding: 12px;
+  box-sizing: border-box;
 }
 .rv-playback { background: #000; }
 .rv-playback canvas {

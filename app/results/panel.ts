@@ -139,6 +139,7 @@ export interface ResultsPanelHandle {
   readonly statisticCells: readonly HTMLElement[];
   /** The green "watch replay" button, or null when no handler was supplied. */
   readonly replayButton: HTMLButtonElement | null;
+  destroy?(): void;
 }
 
 /**
@@ -283,6 +284,43 @@ export function buildResultsPanel(
   const cells = [...root.querySelectorAll<HTMLElement>('.rs-stat')];
   const accuracyElement = cells[0]?.querySelector<HTMLElement>('.rs-stat-number') ?? null;
 
+  function updateScale(): void {
+    const parent = root.parentElement;
+    if (!parent) return;
+    const parentRect = parent.getBoundingClientRect();
+    const availableWidth = parentRect.width - 24;
+    const availableHeight = parentRect.height - 24;
+    if (availableWidth <= 0 || availableHeight <= 0) return;
+
+    const baseWidth = PANEL.expandedWidth; // 454
+    const baseHeight = root.offsetHeight || 800;
+
+    const scaleX = availableWidth / baseWidth;
+    const scaleY = availableHeight / baseHeight;
+    const scale = Math.min(1, Math.min(scaleX, scaleY));
+
+    root.style.transform = scale < 0.999 ? `scale(${scale.toFixed(4)})` : '';
+  }
+
+  let resizeObserver: ResizeObserver | null = null;
+  if (typeof ResizeObserver !== 'undefined') {
+    resizeObserver = new ResizeObserver(() => {
+      updateScale();
+    });
+  }
+
+  const onWindowResize = (): void => {
+    updateScale();
+  };
+  window.addEventListener('resize', onWindowResize);
+
+  requestAnimationFrame(() => {
+    if (root.parentElement && resizeObserver) {
+      resizeObserver.observe(root.parentElement);
+    }
+    updateScale();
+  });
+
   return {
     root,
     panel,
@@ -300,6 +338,10 @@ export function buildResultsPanel(
     rank: data.rank,
     statisticCells: cells,
     replayButton,
+    destroy(): void {
+      window.removeEventListener('resize', onWindowResize);
+      resizeObserver?.disconnect();
+    },
   };
 }
 
@@ -451,7 +493,15 @@ ${iconCss()}
   opacity: 0.65;
   margin-top: 4px;
 }
-.rs-root { display: flex; flex-direction: column; align-items: center; gap: 12px; }
+.rs-root {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  transform-origin: center center;
+  transition: transform 120ms ease;
+  user-select: none;
+}
 .rs-buttons {
   width: ${PANEL.expandedWidth}px;
   display: flex; gap: 8px;

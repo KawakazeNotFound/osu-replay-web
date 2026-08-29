@@ -473,6 +473,22 @@ export function playerLoaderCss(): string {
   font-size: 11px;
   font-weight: 900;
 }
+
+/* Responsive Player Loader */
+@media (max-width: 600px) {
+  .pl-meta-title { font-size: 20px; max-width: 85vw; }
+  .pl-meta-artist { font-size: 13px; max-width: 85vw; }
+  .pl-meta-banner { width: min(320px, 85vw); height: 80px; }
+  .pl-meta-difficulty { font-size: 16px; }
+  .pl-logo { width: 64px; height: 64px; }
+  .pl-logo svg { width: 32px; height: 32px; }
+  .pl-drawer-content { width: min(340px, 92vw); }
+}
+@media (max-height: 700px) {
+  .pl-logo-wrapper { margin-bottom: 8px; }
+  .pl-meta-banner { height: 76px; margin: 8px 0; }
+  .pl-meta-title { font-size: 20px; }
+}
 `;
 }
 

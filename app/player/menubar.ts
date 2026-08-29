@@ -1170,6 +1170,31 @@ export function menuBarCss(): string {
   background: #63ecd9;
   box-shadow: none;
 }
+
+/* Responsive Top Bar */
+@media (max-width: 768px) {
+  .rv-top-mode-tab {
+    padding: 0 10px;
+  }
+  .rv-top-clock-widget {
+    display: none;
+  }
+  .rv-top-divider {
+    display: none;
+  }
+}
+@media (max-width: 520px) {
+  .rv-menu-brand-text {
+    display: none;
+  }
+  .rv-top-bar {
+    padding: 0 4px;
+  }
+  .rv-menu-right {
+    gap: 6px;
+    padding: 0 4px;
+  }
+}
 `;
 }
 

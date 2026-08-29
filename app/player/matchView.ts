@@ -1593,5 +1593,54 @@ export function matchViewCss(): string {
   opacity: 0.45;
   cursor: not-allowed;
 }
+
+/* Responsive Media Queries */
+@media (max-width: 900px) {
+  .rv-match-dialog-header,
+  .rv-match-dialog-body {
+    width: 100%;
+    max-width: 95vw;
+  }
+  .rv-match-dialog-body {
+    padding: 20px 18px;
+    gap: 12px;
+  }
+}
+@media (max-width: 600px) {
+  .rv-match-setup-content {
+    padding: 0 8px 12px;
+  }
+  .rv-match-dialog-header {
+    padding: 10px 14px;
+    margin-bottom: 10px;
+  }
+  .rv-match-dialog-subtitle {
+    display: none;
+  }
+  .rv-match-dialog-footer-bar {
+    padding: 0 10px;
+    height: 48px;
+  }
+  .rv-match-btn-back-lazer {
+    width: 90px;
+    font-size: 13px;
+    height: 38px;
+  }
+  .rv-match-btn-submit-lazer {
+    font-size: 13px;
+    height: 38px;
+  }
+}
+@media (max-height: 720px) {
+  .rv-match-dialog-header {
+    padding: 8px 16px;
+    margin-bottom: 8px;
+  }
+  .rv-match-dialog-body {
+    padding: 16px 20px;
+    gap: 10px;
+    min-height: auto;
+  }
+}
 `;
 }

@@ -1468,5 +1468,60 @@ function singleReplayCss(): string {
   from { transform: translateY(30px); opacity: 0; }
   to { transform: translateY(0); opacity: 1; }
 }
-  `;
+
+/* Responsive Media Queries */
+@media (max-width: 900px) {
+  .rv-replay-dialog-header,
+  .rv-replay-dialog-body {
+    width: 100%;
+    max-width: 95vw;
+  }
+  .rv-replay-dialog-body {
+    padding: 20px 18px;
+    gap: 12px;
+  }
+}
+@media (max-width: 600px) {
+  .rv-replay-setup-content {
+    padding: 0 8px 12px;
+  }
+  .rv-replay-dialog-header {
+    padding: 10px 14px;
+    margin-bottom: 10px;
+  }
+  .rv-replay-dialog-subtitle {
+    display: none;
+  }
+  .rv-replay-dialog-footer-bar {
+    padding: 0 10px;
+    height: 48px;
+  }
+  .rv-replay-btn-back-lazer {
+    width: 90px;
+    font-size: 13px;
+    height: 38px;
+  }
+  .rv-replay-btn-submit-lazer {
+    font-size: 13px;
+    height: 38px;
+  }
+  .rv-replay-step-progress-bar {
+    width: 80px;
+  }
+}
+@media (max-height: 720px) {
+  .rv-replay-dialog-header {
+    padding: 8px 16px;
+    margin-bottom: 8px;
+  }
+  .rv-replay-dialog-body {
+    padding: 16px 20px;
+    gap: 10px;
+    min-height: auto;
+  }
+  .rv-replay-drop-card {
+    padding: 16px 14px;
+  }
+}
+`;
 }
