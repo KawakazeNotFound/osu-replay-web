@@ -50,8 +50,11 @@ await esbuild.build({
   // not understand `node:` prefixes and strips them, so `node:test` becomes a bare `test`
   // import that fails to resolve.
   target: 'node20',
-  // node:test and friends must stay external or esbuild tries to inline builtins.
-  packages: 'external',
+  // npm deps are bundled rather than left external. `platform: 'node'` already keeps the
+  // builtins out, which is all that ever needed to stay external; leaving *everything* external
+  // meant a test could not import anything that reached a CommonJS dependency — importing
+  // app/player/match.ts died on `Named export 'LZMA' not found` from lzma, two layers down
+  // through the engine, which has nothing to do with the test.
   sourcemap: 'inline',
 });
 

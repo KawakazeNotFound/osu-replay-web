@@ -59,7 +59,10 @@ export interface MatchHandle {
   readonly slots: readonly MatchSlot[];
   /** The slot driving audio and the clock. */
   readonly audible: MatchSlot;
-  /** Presentation duration, taken from the audible slot. */
+  /**
+   * How long the match runs: the longest replay in it. See {@link matchDurationMs} for why it is
+   * not the audible slot's own length.
+   */
   readonly durationMs: number;
   /** Starts every renderer and the shared audio at `presMs`. */
   play(presMs: number): Promise<void>;
@@ -82,6 +85,21 @@ export interface MatchStanding {
   readonly accuracy: number;
   /** Rank within the standings as returned, 1-based. */
   readonly position: number;
+}
+
+/**
+ * How long a match runs: the longest replay in it.
+ *
+ * Not the audible slot's own length, which is what this used to take. That slot only owns the
+ * audio; its replay is no more authoritative than anyone else's, and a player who quit early has a
+ * short one. Reading the duration off it ended the match while the others were still playing —
+ * and because the audio is the song rather than the replay, it kept going while every renderer sat
+ * clamped at its last frame, which reads as a hang rather than as an ending.
+ *
+ * A match is over when its last replay is.
+ */
+export function matchDurationMs(presentationDurations: readonly number[]): number {
+  return presentationDurations.reduce((longest, ms) => Math.max(longest, ms), 0);
 }
 
 /**
@@ -159,7 +177,9 @@ export async function createMatch(inputs: MatchInputs): Promise<MatchHandle> {
     slot.session.audioSync.setEffectsVolume(0);
   }
 
-  const durationMs = audible.session.timeMapper.presentationDurationMs;
+  const durationMs = matchDurationMs(
+    slots.map(slot => slot.session.timeMapper.presentationDurationMs),
+  );
 
   return {
     slots,

@@ -402,7 +402,11 @@ export function buildMatchView(options: MatchViewOptions): MatchViewHandle {
       isPlaying = false;
       playBtn.replaceChildren(icon('play', { className: 'rv-icon' }));
     } else {
-      void activeMatch.play(activeMatch.audible.session.audioSync.currentTimeMs).then(() => {
+      // Play at the end restarts, rather than resuming into the end and stopping again — the same
+      // thing Player.play() does for a single replay.
+      const atMs = activeMatch.audible.session.audioSync.currentTimeMs;
+      const fromMs = activeMatch.durationMs > 0 && atMs >= activeMatch.durationMs - 50 ? 0 : atMs;
+      void activeMatch.play(fromMs).then(() => {
         isPlaying = true;
         playBtn.replaceChildren(icon('pause', { className: 'rv-icon' }));
       });
@@ -743,14 +747,29 @@ export function buildMatchView(options: MatchViewOptions): MatchViewHandle {
 
     await match.play(0);
 
-    // Live standing update loop (~4 times/sec)
+    // Live standing update loop (~4 times/sec), which also ends the match.
     standingsTimer = window.setInterval(() => {
       if (activeMatch === null) return;
       const curMs = activeMatch.audible.session.audioSync.currentTimeMs;
       const durMs = activeMatch.durationMs;
-      timeDisplay.textContent = `${formatMinSec(curMs)} / ${formatMinSec(durMs)}`;
+
+      // The audible slot supplies the *song*, which outlasts the replays on any map with an outro.
+      // Every Player clamps to its own replay's end, so past that point the playfields hold their
+      // last frame while the music plays on — reported as the picture freezing mid-match, because
+      // that is exactly what it looks like. Nothing else stopped playback: the single-replay flow
+      // has this poll (it returns to the results panel), match mode never had one.
+      if (isPlaying && durMs > 0 && curMs >= durMs - 50) {
+        activeMatch.pause();
+        isPlaying = false;
+        playBtn.replaceChildren(icon('play', { className: 'rv-icon' }));
+      }
+
+      // Clamped for display: the audio clock can be past the end, and a transport reading
+      // "1:36 / 1:24" with a full bar is how this bug announced itself.
+      const shownMs = durMs > 0 ? Math.min(curMs, durMs) : curMs;
+      timeDisplay.textContent = `${formatMinSec(shownMs)} / ${formatMinSec(durMs)}`;
       if (durMs > 0) {
-        scrubber.value = String((curMs / durMs) * 100);
+        scrubber.value = String((shownMs / durMs) * 100);
       }
       updateStandingsUi(activeMatch.standings());
     }, 250);

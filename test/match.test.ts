@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { parseRoomRef } from '../app/player/matchRoom.js';
+import { matchDurationMs } from '../app/player/match.js';
 
 test('parseRoomRef accepts every shape osu! uses for a match', () => {
   assert.equal(parseRoomRef('3255235'), 3255235);
@@ -55,4 +56,21 @@ test('tied scores keep the order they came in', () => {
     { name: 'second', score: 500 },
   ]);
   assert.deepEqual(ranked.map(r => r.name), ['first', 'second']);
+});
+
+test('a match runs as long as its longest replay', () => {
+  // The audible slot is index 0 and owns the audio, but its replay length is not the match's:
+  // taking the duration from it cut the match off while the other player was still going.
+  assert.equal(matchDurationMs([84_000, 96_000]), 96_000);
+  assert.equal(matchDurationMs([96_000, 84_000]), 96_000, 'order must not matter');
+});
+
+test('one replay, or none, still yields a sane duration', () => {
+  assert.equal(matchDurationMs([84_000]), 84_000);
+  assert.equal(matchDurationMs([]), 0, 'zero rather than -Infinity, which would break the scrubber');
+});
+
+test('an early quit does not shorten the match', () => {
+  // The case the audibleIndex docs warn about: a slot that quit after 20s alongside a full play.
+  assert.equal(matchDurationMs([20_000, 174_000, 174_000]), 174_000);
 });
