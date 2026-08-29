@@ -151,7 +151,17 @@ export function buildMatchView(options: MatchViewOptions): MatchViewHandle {
 
   transport.append(playBtn, timeDisplay, scrubber);
 
-  root.append(header, gridStage, edgeHint, standingsEl, transport);
+  // Container for active match playback (grid, standings, transport, header)
+  const playbackScreen = document.createElement('div');
+  playbackScreen.className = 'rv-match-playback-screen';
+  playbackScreen.hidden = true;
+  playbackScreen.append(header, gridStage, edgeHint, standingsEl, transport);
+
+  // In-page setup wizard screen (renders directly in page replacing sub-header & playback area)
+  const setupScreen = document.createElement('div');
+  setupScreen.className = 'rv-match-setup-screen';
+
+  root.append(playbackScreen, setupScreen);
 
   let activeMatch: MatchHandle | null = null;
   let activeMap: MatchMap | null = null;
@@ -646,6 +656,8 @@ export function buildMatchView(options: MatchViewOptions): MatchViewHandle {
   const loadAndPlayMap = async (map: MatchMap): Promise<void> => {
     root.hidden = false;
     if (!options.host.contains(root)) options.host.append(root);
+    setupScreen.hidden = true;
+    playbackScreen.hidden = false;
     stopCurrentMatch();
     activeMap = map;
     options.log(`Loading match map: ${map.title} [${map.version}]…`);
@@ -746,189 +758,171 @@ export function buildMatchView(options: MatchViewOptions): MatchViewHandle {
     options.log('Match playing!');
   };
 
-  // ---- Room Picker Modal Dialog (osu!lazer Screen / Wizard Dialog style) ----
-  const openRoomDialog = (): void => {
-    root.hidden = false;
-    if (!options.host.contains(root)) options.host.append(root);
-    uiSounds.playDialog('pop-in');
+  // ---- 1. Setup Wizard Screen Elements (osu!lazer Screen / Wizard style) ----
+  const setupHeader = document.createElement('header');
+  setupHeader.className = 'rv-match-dialog-header';
 
-    const backdrop = document.createElement('div');
-    backdrop.className = 'rv-match-dialog-backdrop';
+  const headerText = document.createElement('div');
+  headerText.className = 'rv-match-dialog-header-text';
 
-    // 1. Top Floating Header Banner
-    const header = document.createElement('header');
-    header.className = 'rv-match-dialog-header';
+  const setupTitle = document.createElement('h2');
+  setupTitle.className = 'rv-match-dialog-title';
+  setupTitle.textContent = t('多人房间回放', 'Multiplayer Match Room');
 
-    const headerText = document.createElement('div');
-    headerText.className = 'rv-match-dialog-header-text';
+  const setupSubtitle = document.createElement('p');
+  setupSubtitle.className = 'rv-match-dialog-subtitle';
+  setupSubtitle.textContent = t('和全世界的玩家一起重温精彩对决！', 'Relive multiplayer match showdowns with players worldwide!');
 
-    const title = document.createElement('h2');
-    title.className = 'rv-match-dialog-title';
-    title.textContent = t('多人房间回放', 'Multiplayer Match Room');
+  headerText.append(setupTitle, setupSubtitle);
 
-    const subtitle = document.createElement('p');
-    subtitle.className = 'rv-match-dialog-subtitle';
-    subtitle.textContent = t('和全世界的玩家一起重温精彩对决！', 'Relive multiplayer match showdowns with players worldwide!');
+  const closeBtn = document.createElement('button');
+  closeBtn.type = 'button';
+  closeBtn.className = 'rv-match-dialog-close-btn';
+  closeBtn.setAttribute('aria-label', t('关闭', 'Close'));
+  closeBtn.append(icon('close', { className: 'rv-icon' }));
+  uiSounds.attachHoverClick(closeBtn, { hover: 'button', click: false });
+  closeBtn.addEventListener('click', () => {
+    uiSounds.playClick('dialog-cancel');
+    options.onExit();
+  });
 
-    headerText.append(title, subtitle);
+  setupHeader.append(headerText, closeBtn);
 
-    const closeBtn = document.createElement('button');
-    closeBtn.type = 'button';
-    closeBtn.className = 'rv-match-dialog-close-btn';
-    closeBtn.setAttribute('aria-label', t('关闭', 'Close'));
-    closeBtn.append(icon('close', { className: 'rv-icon' }));
-    uiSounds.attachHoverClick(closeBtn, { hover: 'button', click: false });
+  // Center Card Body (Settings / Form)
+  const setupBody = document.createElement('div');
+  setupBody.className = 'rv-match-dialog-body';
 
-    header.append(headerText, closeBtn);
+  const sectionHeading = document.createElement('div');
+  sectionHeading.className = 'rv-match-section-heading';
+  const sectionTitle = document.createElement('h3');
+  sectionTitle.className = 'rv-match-section-title';
+  sectionTitle.textContent = t('房间设定', 'Match Setup');
+  sectionHeading.append(sectionTitle);
 
-    // 2. Center Card Body (Settings / Form)
-    const body = document.createElement('div');
-    body.className = 'rv-match-dialog-body';
+  const inputGroup = document.createElement('div');
+  inputGroup.className = 'rv-match-input-group';
 
-    const sectionHeading = document.createElement('div');
-    sectionHeading.className = 'rv-match-section-heading';
-    const sectionTitle = document.createElement('h3');
-    sectionTitle.className = 'rv-match-section-title';
-    sectionTitle.textContent = t('房间设定', 'Match Setup');
-    sectionHeading.append(sectionTitle);
+  const inputLabel = document.createElement('label');
+  inputLabel.className = 'rv-match-input-label';
+  inputLabel.htmlFor = 'rv-match-room-input';
+  inputLabel.textContent = t('比赛链接或房间 ID', 'Match URL or Room ID');
 
-    const inputGroup = document.createElement('div');
-    inputGroup.className = 'rv-match-input-group';
+  const inputWrap = document.createElement('div');
+  inputWrap.className = 'rv-match-input-wrap';
 
-    const inputLabel = document.createElement('label');
-    inputLabel.className = 'rv-match-input-label';
-    inputLabel.htmlFor = 'rv-match-room-input';
-    inputLabel.textContent = t('比赛链接或房间 ID', 'Match URL or Room ID');
+  const inputIcon = icon('link', { className: 'rv-icon rv-match-input-icon' });
+  const roomInput = document.createElement('input');
+  roomInput.id = 'rv-match-room-input';
+  roomInput.type = 'text';
+  roomInput.className = 'rv-match-input-field';
+  roomInput.placeholder = t('输入比赛链接（如 https://osu.ppy.sh/community/matches/114979109）或纯数字房间 ID', 'https://osu.ppy.sh/community/matches/114979109 or 114979109');
+  uiSounds.attachHoverClick(roomInput, { hover: 'default', click: false });
 
-    const inputWrap = document.createElement('div');
-    inputWrap.className = 'rv-match-input-wrap';
+  inputWrap.append(inputIcon, roomInput);
+  inputGroup.append(inputLabel, inputWrap);
 
-    const inputIcon = icon('link', { className: 'rv-icon rv-match-input-icon' });
-    const input = document.createElement('input');
-    input.id = 'rv-match-room-input';
-    input.type = 'text';
-    input.className = 'rv-match-input-field';
-    input.placeholder = t('输入比赛链接（如 https://osu.ppy.sh/community/matches/114979109）或纯数字房间 ID', 'https://osu.ppy.sh/community/matches/114979109 or 114979109');
-    uiSounds.attachHoverClick(input, { hover: 'default', click: false });
+  const statusMsg = document.createElement('div');
+  statusMsg.className = 'rv-match-dialog-status';
 
-    inputWrap.append(inputIcon, input);
-    inputGroup.append(inputLabel, inputWrap);
+  const notice = document.createElement('div');
+  notice.className = 'rv-match-notice';
+  if (isZh()) {
+    notice.innerHTML = `<span class="rv-match-notice-accent">注意：</span>多人房间回放依赖 <strong class="rv-match-highlight">osu! API</strong> 获取公开对战记录。未登录状态下可解析房间并浏览谱面列表，<strong class="rv-match-highlight">登录 osu! 账号</strong>后可自动下载并播放所有玩家的回放。`;
+  } else {
+    notice.innerHTML = `<span class="rv-match-notice-accent">Note:</span> Multiplayer match replay relies on <strong class="rv-match-highlight">osu! API</strong> for public records. You can browse map lists without login, and <strong class="rv-match-highlight">sign in to osu!</strong> to download and play all participant replays.`;
+  }
 
-    const statusMsg = document.createElement('div');
-    statusMsg.className = 'rv-match-dialog-status';
+  setupBody.append(sectionHeading, inputGroup, statusMsg, notice);
 
-    const notice = document.createElement('div');
-    notice.className = 'rv-match-notice';
-    if (isZh()) {
-      notice.innerHTML = `<span class="rv-match-notice-accent">注意：</span>多人房间回放依赖 <strong class="rv-match-highlight">osu! API</strong> 获取公开对战记录。未登录状态下可解析房间并浏览谱面列表，<strong class="rv-match-highlight">登录 osu! 账号</strong>后可自动下载并播放所有玩家的回放。`;
-    } else {
-      notice.innerHTML = `<span class="rv-match-notice-accent">Note:</span> Multiplayer match replay relies on <strong class="rv-match-highlight">osu! API</strong> for public records. You can browse map lists without login, and <strong class="rv-match-highlight">sign in to osu!</strong> to download and play all participant replays.`;
+  // Bottom Action Footer Bar
+  const setupFooter = document.createElement('footer');
+  setupFooter.className = 'rv-match-dialog-footer';
+
+  const backSetupBtn = document.createElement('button');
+  backSetupBtn.type = 'button';
+  backSetupBtn.className = 'rv-match-btn-back';
+  const backIcon = icon('arrow-left', { className: 'rv-icon' });
+  const backText = document.createElement('span');
+  backText.textContent = t('返回', 'Back');
+  backSetupBtn.append(backIcon, backText);
+  uiSounds.attachHoverClick(backSetupBtn, { hover: 'button', click: false });
+  backSetupBtn.addEventListener('click', () => {
+    uiSounds.playClick('dialog-cancel');
+    options.onExit();
+  });
+
+  const fetchBtn = document.createElement('button');
+  fetchBtn.type = 'button';
+  fetchBtn.className = 'rv-match-btn-submit';
+  const fetchText = document.createElement('span');
+  fetchText.textContent = t('获取比赛房间！', 'Fetch Match Room!');
+  fetchBtn.append(fetchText);
+  uiSounds.attachHoverClick(fetchBtn, { hover: 'button', click: false });
+
+  setupFooter.append(backSetupBtn, fetchBtn);
+  setupScreen.append(setupHeader, setupBody, setupFooter);
+
+  const onFetch = async (): Promise<void> => {
+    const val = roomInput.value.trim();
+    const roomId = parseRoomRef(val);
+    if (roomId === null) {
+      uiSounds.playError();
+      statusMsg.textContent = t('请输入有效的比赛链接或纯数字房间 ID', 'Please enter a valid match URL or numeric room ID');
+      statusMsg.className = 'rv-match-dialog-status rv-status-error';
+      roomInput.focus();
+      return;
     }
 
-    body.append(sectionHeading, inputGroup, statusMsg, notice);
+    uiSounds.playClick('dialog-ok');
+    statusMsg.textContent = t('正在获取比赛房间信息…', 'Fetching match room data…');
+    statusMsg.className = 'rv-match-dialog-status rv-status-loading';
+    fetchBtn.disabled = true;
 
-    // 3. Bottom Action Footer Bar
-    const footer = document.createElement('footer');
-    footer.className = 'rv-match-dialog-footer';
+    try {
+      const room = await fetchMatchRoom(roomId);
+      currentRoom = room;
 
-    const backBtn = document.createElement('button');
-    backBtn.type = 'button';
-    backBtn.className = 'rv-match-btn-back';
-    const backIcon = icon('arrow-left', { className: 'rv-icon' });
-    const backText = document.createElement('span');
-    backText.textContent = t('返回', 'Back');
-    backBtn.append(backIcon, backText);
-    uiSounds.attachHoverClick(backBtn, { hover: 'button', click: false });
+      // Find first playable map and play it immediately, while setting up the top sub-bar dropdown
+      const firstPlayable = room.maps.find(m => playableCount(m) > 0);
+      if (firstPlayable) {
+        void loadAndPlayMap(firstPlayable);
+      } else if (room.maps.length > 0) {
+        void loadAndPlayMap(room.maps[0]!);
+      } else {
+        options.log(`Room "${room.name}" has no maps.`);
+      }
+    } catch (err) {
+      fetchBtn.disabled = false;
+      uiSounds.playError();
+      statusMsg.textContent = `${t('获取失败: ', 'Failed to fetch: ')}${err instanceof Error ? err.message : String(err)}`;
+      statusMsg.className = 'rv-match-dialog-status rv-status-error';
+    }
+  };
 
-    const fetchBtn = document.createElement('button');
-    fetchBtn.type = 'button';
-    fetchBtn.className = 'rv-match-btn-submit';
-    const fetchText = document.createElement('span');
-    fetchText.textContent = t('获取比赛房间！', 'Fetch Match Room!');
-    fetchBtn.append(fetchText);
-    uiSounds.attachHoverClick(fetchBtn, { hover: 'button', click: false });
-
-    footer.append(backBtn, fetchBtn);
-
-    backdrop.append(header, body, footer);
-    document.body.append(backdrop);
-
-    let isClosing = false;
-    const closeDialog = (): void => {
-      if (isClosing) return;
-      isClosing = true;
-      uiSounds.playDialog('pop-out');
-      backdrop.classList.add('rv-dialog-closing');
-      setTimeout(() => {
-        backdrop.remove();
-      }, 160);
-    };
-
-    closeBtn.addEventListener('click', () => {
+  fetchBtn.addEventListener('click', () => void onFetch());
+  roomInput.addEventListener('keydown', (e: KeyboardEvent) => {
+    if (e.key === 'Enter') void onFetch();
+    if (e.key === 'Escape') {
       uiSounds.playClick('dialog-cancel');
-      closeDialog();
-    });
+      options.onExit();
+    }
+  });
 
-    backBtn.addEventListener('click', () => {
-      uiSounds.playClick('dialog-cancel');
-      closeDialog();
-    });
+  const showSetupScreen = (): void => {
+    root.hidden = false;
+    if (!options.host.contains(root)) options.host.append(root);
+    stopCurrentMatch();
+    playbackScreen.hidden = true;
+    setupScreen.hidden = false;
+    statusMsg.textContent = '';
+    statusMsg.className = 'rv-match-dialog-status';
+    fetchBtn.disabled = false;
+    uiSounds.playDialog('pop-in');
+    setTimeout(() => roomInput.focus(), 60);
+  };
 
-    backdrop.addEventListener('pointerdown', e => {
-      if (e.target === backdrop) {
-        uiSounds.playClick('dialog-cancel');
-        closeDialog();
-      }
-    });
-
-    const onFetch = async (): Promise<void> => {
-      const val = input.value.trim();
-      const roomId = parseRoomRef(val);
-      if (roomId === null) {
-        uiSounds.playError();
-        statusMsg.textContent = t('请输入有效的比赛链接或纯数字房间 ID', 'Please enter a valid match URL or numeric room ID');
-        statusMsg.className = 'rv-match-dialog-status rv-status-error';
-        input.focus();
-        return;
-      }
-
-      uiSounds.playClick('dialog-ok');
-      statusMsg.textContent = t('正在获取比赛房间信息…', 'Fetching match room data…');
-      statusMsg.className = 'rv-match-dialog-status rv-status-loading';
-      fetchBtn.disabled = true;
-
-      try {
-        const room = await fetchMatchRoom(roomId);
-        currentRoom = room;
-        closeDialog();
-
-        // Find first playable map and play it immediately, while setting up the top sub-bar dropdown
-        const firstPlayable = room.maps.find(m => playableCount(m) > 0);
-        if (firstPlayable) {
-          void loadAndPlayMap(firstPlayable);
-        } else if (room.maps.length > 0) {
-          void loadAndPlayMap(room.maps[0]!);
-        } else {
-          options.log(`Room "${room.name}" has no maps.`);
-        }
-      } catch (err) {
-        fetchBtn.disabled = false;
-        uiSounds.playError();
-        statusMsg.textContent = `${t('获取失败: ', 'Failed to fetch: ')}${err instanceof Error ? err.message : String(err)}`;
-        statusMsg.className = 'rv-match-dialog-status rv-status-error';
-      }
-    };
-
-    fetchBtn.addEventListener('click', () => void onFetch());
-    input.addEventListener('keydown', (e: KeyboardEvent) => {
-      if (e.key === 'Enter') void onFetch();
-      if (e.key === 'Escape') {
-        uiSounds.playClick('dialog-cancel');
-        closeDialog();
-      }
-    });
-
-    setTimeout(() => input.focus(), 60);
+  const openRoomDialog = (): void => {
+    showSetupScreen();
   };
 
   return {
@@ -1195,25 +1189,36 @@ export function matchViewCss(): string {
   cursor: pointer;
 }
 
-/* Match Room Modal (osu!lazer Screen / Dialog Style) */
-.rv-match-dialog-backdrop {
-  position: fixed;
+/* Playback screen container */
+.rv-match-playback-screen {
+  position: absolute;
   inset: 0;
-  z-index: 9999;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.rv-match-playback-screen[hidden] {
+  display: none !important;
+}
+
+/* In-page Setup Wizard Screen (osu!lazer Screen / Wizard Style) */
+.rv-match-setup-screen {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
   display: flex;
   flex-direction: column;
   justify-content: space-between;
   align-items: center;
-  background: rgba(8, 14, 12, 0.76);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
+  background: radial-gradient(circle at 50% 32%, #182824 0%, #0c1312 100%);
   padding: 24px 20px;
   box-sizing: border-box;
+  overflow-y: auto;
+  user-select: none;
   animation: rvMatchBackdropFadeIn 240ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
-.rv-match-dialog-backdrop.rv-dialog-closing {
-  animation: rvMatchBackdropFadeOut 180ms cubic-bezier(0.7, 0, 0.84, 0) forwards;
-  pointer-events: none;
+.rv-match-setup-screen[hidden] {
+  display: none !important;
 }
 
 /* Top Floating Header Banner */
